@@ -1,4 +1,4 @@
-# moved-store
+# prefetchable-store
 
 Run mixture-of-experts language models that are larger than your memory, from the SSD, on a 16 GB MacBook and on an
 iPhone. That includes a 180B-parameter model whose weights are eight times the laptop's memory.
@@ -27,7 +27,7 @@ It is one C++ engine with a command-line tool, an OpenAI-compatible server for a
 Apple Silicon with 16 GB or more and about 25 GB of free disk per model:
 
 ```bash
-git clone https://github.com/jalenluorion/moved-store && cd moved-store
+git clone https://github.com/jalenluorion/prefetchable-store && cd prefetchable-store
 cmake -S . -B build && cmake --build build -j
 pip install tokenizers jinja2
 

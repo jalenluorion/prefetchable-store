@@ -1,4 +1,4 @@
-# Moved Store for iPhone
+# Prefetchable Store for iPhone
 
 A chat app that runs Qwen3.6-35B-A3B or Inkling 2 Mini on the iPhone itself, with the engine in this repository. The
 experts stay on the phone's storage and are read as they are needed; the app holds about 2.9 GB in memory. Once a model
@@ -46,7 +46,7 @@ in our use.
 1. Clone the repository and open the project:
 
    ```bash
-   git clone https://github.com/jalenluorion/moved-store && cd moved-store
+   git clone https://github.com/jalenluorion/prefetchable-store && cd prefetchable-store
    open apps/ios/MovedStore.xcodeproj
    ```
 
