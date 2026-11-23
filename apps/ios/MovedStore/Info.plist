@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged with the generated keys (GENERATE_INFOPLIST_FILE = YES). Xcode's generator has no
+	     INFOPLIST_KEY_ for UIFileSharingEnabled, so it lives here: Documents/ shows in Finder's Files tab. -->
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<!-- Launch screen and iOS icon from loose files (Icons/), which build without an iOS Simulator runtime;
+	     Mac Catalyst uses Assets.xcassets. -->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+	</dict>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array>
+				<string>AppIcon60x60</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

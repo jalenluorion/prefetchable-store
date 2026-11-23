@@ -40,6 +40,11 @@ For Inkling 2 Mini, download `jalenluorion/Inkling-2-Mini-moved-store` instead; 
 downloaded from the Hub runs as it is. Each weight repo's card lists the files one device needs, so a Mac does not
 download the phone's files.
 
+**On an iPhone.** [apps/ios](apps/ios/README.md) is a chat app that runs either model on the phone: open
+`apps/ios/MovedStore.xcodeproj` in Xcode, set your own signing team and bundle identifier, and run it on an iPhone with
+an A16 chip or newer. The app downloads the model from the Hub in the profile that fits the phone (15.5 to 21.3 GB)
+and checks every file.
+
 `dmeng --help` lists the everyday options (`--mode exact|fast`, `--cache-gb`, `--n`, `--temp`); `dmeng --help-advanced`
 lists the rest ([docs/ADVANCED.md](docs/ADVANCED.md)). On a 16 GB machine close other large apps first: the expert cache
 is sized from the memory that is free at start.
@@ -182,7 +187,7 @@ text with the true previous tokens:
 
 | model, machine | prose | code or agent text |
 |---|---|---|
-| Qwen3.6-35B-A3B, Mac (5 to 8 GB cache) | 0.96 | 0.98 |
+| Qwen3.6-35B-A3B, Mac (3.3 to 5 GB cache) | 0.96 | 0.98 |
 | Inkling 2 Mini, Mac (6 to 7.8 GB cache) | 0.965-0.973 | 0.966-0.967 |
 
 On the iPhone the in-memory weights are 4-bit as well. Against the Mac's 8-bit `exact` engine, the phone's weights
@@ -197,7 +202,7 @@ compared with each release on the weight repos' model cards.
 | model | weights | notes |
 |---|---|---|
 | Qwen3.6-35B-A3B | [jalenluorion/Qwen3.6-35B-A3B-moved-store](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-moved-store) | Mac and iPhone |
-| Inkling 2 Mini | [jalenluorion/Inkling-2-Mini-moved-store](https://huggingface.co/jalenluorion/Inkling-2-Mini-moved-store) | Mac; iPhone set included |
+| Inkling 2 Mini | [jalenluorion/Inkling-2-Mini-moved-store](https://huggingface.co/jalenluorion/Inkling-2-Mini-moved-store) | Mac and iPhone |
 | Qwen3.8-Flash-Next (180B) | [jalenluorion/Qwen3.8-Flash-Next-moved-store](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-moved-store) | Mac, through the Python runner in [reference/flash](reference/flash) |
 
 A model family is a short description of its layers, state and expert block in `src/models/<family>/`; the store, the
@@ -213,7 +218,7 @@ step, the routers and the serving are shared. The weight repos share one layout 
 | `src/serving/` | prefix cache, idle-time prefill, memory watcher |
 | `tools/` | `dmeng` (command line), `dmserve` (model worker), `ms_derive` (engine-ready files from a weight repo) |
 | `python/` | text in and out, the OpenAI-compatible front end, conversion from released weights |
-| `bindings/c/`, `apps/ios/` | the C API and the iPhone app's Swift package |
+| `bindings/c/`, `apps/ios/` | the C API and the iPhone chat app ([apps/ios/README.md](apps/ios/README.md)) |
 | `tests/` | small random models checked against independent references; exactness checks for prefill |
 | `results/` | the run records behind the tables above |
 

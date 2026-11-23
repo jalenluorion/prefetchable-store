@@ -1,0 +1,386 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B10000000000000000000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* App.swift */; };
+		B10000000000000000000002 /* ChatEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* ChatEngine.swift */; };
+		B10000000000000000000003 /* ChatModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* ChatModel.swift */; };
+		B10000000000000000000004 /* ChatTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000004 /* ChatTemplate.swift */; };
+		B10000000000000000000005 /* ChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* ChatView.swift */; };
+		B10000000000000000000006 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* Conversation.swift */; };
+		B10000000000000000000007 /* ConversationListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* ConversationListView.swift */; };
+		B10000000000000000000008 /* DmengChatEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* DmengChatEngine.swift */; };
+		B10000000000000000000009 /* DownloadConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* DownloadConfig.swift */; };
+		B1000000000000000000000A /* Extras.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000A /* Extras.swift */; };
+		B1000000000000000000000B /* InklingChatTemplate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000B /* InklingChatTemplate.swift */; };
+		B1000000000000000000000C /* MarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000C /* MarkdownView.swift */; };
+		B1000000000000000000000D /* ModelDownloader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000D /* ModelDownloader.swift */; };
+		B1000000000000000000000E /* ModelKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000E /* ModelKind.swift */; };
+		B1000000000000000000000F /* SamplingParams.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2000000000000000000000F /* SamplingParams.swift */; };
+		B10000000000000000000010 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* SettingsView.swift */; };
+		B10000000000000000000011 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* SetupView.swift */; };
+		B10000000000000000000012 /* StatusViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000012 /* StatusViews.swift */; };
+		B10000000000000000000013 /* Support.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* Support.swift */; };
+		B10000000000000000000014 /* TextCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000014 /* TextCodec.swift */; };
+		B10000000000000000000015 /* Tools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000015 /* Tools.swift */; };
+		B10000000000000000000030 /* SelfCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000030 /* SelfCheck.swift */; };
+		B10000000000000000000065 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000065 /* AppIcon60x60@2x.png */; };
+		B10000000000000000000066 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000066 /* AppIcon60x60@3x.png */; };
+		B10000000000000000000067 /* LaunchLogo@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000067 /* LaunchLogo@2x.png */; };
+		B10000000000000000000068 /* LaunchLogo@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000068 /* LaunchLogo@3x.png */; };
+		B10000000000000000000F01 /* DmengKit in Frameworks */ = {isa = PBXBuildFile; productRef = BC0000000000000000000001 /* DmengKit */; };
+		B10000000000000000000F02 /* Tokenizers in Frameworks */ = {isa = PBXBuildFile; productRef = BC0000000000000000000002 /* Tokenizers */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		B20000000000000000000001 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		B20000000000000000000002 /* ChatEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatEngine.swift; sourceTree = "<group>"; };
+		B20000000000000000000003 /* ChatModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModel.swift; sourceTree = "<group>"; };
+		B20000000000000000000004 /* ChatTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTemplate.swift; sourceTree = "<group>"; };
+		B20000000000000000000005 /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
+		B20000000000000000000006 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
+		B20000000000000000000007 /* ConversationListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationListView.swift; sourceTree = "<group>"; };
+		B20000000000000000000008 /* DmengChatEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DmengChatEngine.swift; sourceTree = "<group>"; };
+		B20000000000000000000009 /* DownloadConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadConfig.swift; sourceTree = "<group>"; };
+		B2000000000000000000000A /* Extras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Extras.swift; sourceTree = "<group>"; };
+		B2000000000000000000000B /* InklingChatTemplate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InklingChatTemplate.swift; sourceTree = "<group>"; };
+		B2000000000000000000000C /* MarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownView.swift; sourceTree = "<group>"; };
+		B2000000000000000000000D /* ModelDownloader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloader.swift; sourceTree = "<group>"; };
+		B2000000000000000000000E /* ModelKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelKind.swift; sourceTree = "<group>"; };
+		B2000000000000000000000F /* SamplingParams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SamplingParams.swift; sourceTree = "<group>"; };
+		B20000000000000000000010 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B20000000000000000000011 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		B20000000000000000000012 /* StatusViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusViews.swift; sourceTree = "<group>"; };
+		B20000000000000000000013 /* Support.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support.swift; sourceTree = "<group>"; };
+		B20000000000000000000014 /* TextCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextCodec.swift; sourceTree = "<group>"; };
+		B20000000000000000000015 /* Tools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tools.swift; sourceTree = "<group>"; };
+		B20000000000000000000030 /* SelfCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfCheck.swift; sourceTree = "<group>"; };
+		B20000000000000000000065 /* AppIcon60x60@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "AppIcon60x60@2x.png"; path = "Icons/AppIcon60x60@2x.png"; sourceTree = "<group>"; };
+		B20000000000000000000066 /* AppIcon60x60@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "AppIcon60x60@3x.png"; path = "Icons/AppIcon60x60@3x.png"; sourceTree = "<group>"; };
+		B20000000000000000000067 /* LaunchLogo@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "LaunchLogo@2x.png"; path = "Icons/LaunchLogo@2x.png"; sourceTree = "<group>"; };
+		B20000000000000000000068 /* LaunchLogo@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "LaunchLogo@3x.png"; path = "Icons/LaunchLogo@3x.png"; sourceTree = "<group>"; };
+		B200000000000000000000C9 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B200000000000000000000CA /* MovedStore.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MovedStore.entitlements; sourceTree = "<group>"; };
+		B200000000000000000000FF /* MovedStore.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MovedStore.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B30000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000F01 /* DmengKit in Frameworks */,
+				B10000000000000000000F02 /* Tokenizers in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		B40000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				B40000000000000000000002 /* MovedStore */,
+				B40000000000000000000003 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		B40000000000000000000002 /* MovedStore */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000001 /* App.swift */,
+				B20000000000000000000002 /* ChatEngine.swift */,
+				B20000000000000000000003 /* ChatModel.swift */,
+				B20000000000000000000004 /* ChatTemplate.swift */,
+				B20000000000000000000005 /* ChatView.swift */,
+				B20000000000000000000006 /* Conversation.swift */,
+				B20000000000000000000007 /* ConversationListView.swift */,
+				B20000000000000000000008 /* DmengChatEngine.swift */,
+				B20000000000000000000009 /* DownloadConfig.swift */,
+				B2000000000000000000000A /* Extras.swift */,
+				B2000000000000000000000B /* InklingChatTemplate.swift */,
+				B2000000000000000000000C /* MarkdownView.swift */,
+				B2000000000000000000000D /* ModelDownloader.swift */,
+				B2000000000000000000000E /* ModelKind.swift */,
+				B2000000000000000000000F /* SamplingParams.swift */,
+				B20000000000000000000010 /* SettingsView.swift */,
+				B20000000000000000000011 /* SetupView.swift */,
+				B20000000000000000000012 /* StatusViews.swift */,
+				B20000000000000000000013 /* Support.swift */,
+				B20000000000000000000014 /* TextCodec.swift */,
+				B20000000000000000000015 /* Tools.swift */,
+				B20000000000000000000030 /* SelfCheck.swift */,
+				B20000000000000000000065 /* AppIcon60x60@2x.png */,
+				B20000000000000000000066 /* AppIcon60x60@3x.png */,
+				B20000000000000000000067 /* LaunchLogo@2x.png */,
+				B20000000000000000000068 /* LaunchLogo@3x.png */,
+				B200000000000000000000C9 /* Info.plist */,
+				B200000000000000000000CA /* MovedStore.entitlements */,
+			);
+			path = MovedStore;
+			sourceTree = "<group>";
+		};
+		B40000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B200000000000000000000FF /* MovedStore.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		B50000000000000000000001 /* MovedStore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B80000000000000000000002 /* Build configuration list for PBXNativeTarget "MovedStore" */;
+			buildPhases = (
+				B60000000000000000000001 /* Sources */,
+				B30000000000000000000001 /* Frameworks */,
+				B60000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MovedStore;
+			packageProductDependencies = (
+				BC0000000000000000000001 /* DmengKit */,
+				BC0000000000000000000002 /* Tokenizers */,
+			);
+			productName = MovedStore;
+			productReference = B200000000000000000000FF /* MovedStore.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B70000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					B50000000000000000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = B80000000000000000000001 /* Build configuration list for PBXProject "MovedStore" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = B40000000000000000000001;
+			packageReferences = (
+				BB0000000000000000000001 /* XCLocalSwiftPackageReference "../.." */,
+				BB0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-transformers" */,
+			);
+			productRefGroup = B40000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				B50000000000000000000001 /* MovedStore */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		B60000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000065 /* AppIcon60x60@2x.png in Resources */,
+				B10000000000000000000066 /* AppIcon60x60@3x.png in Resources */,
+				B10000000000000000000067 /* LaunchLogo@2x.png in Resources */,
+				B10000000000000000000068 /* LaunchLogo@3x.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B60000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* App.swift in Sources */,
+				B10000000000000000000002 /* ChatEngine.swift in Sources */,
+				B10000000000000000000003 /* ChatModel.swift in Sources */,
+				B10000000000000000000004 /* ChatTemplate.swift in Sources */,
+				B10000000000000000000005 /* ChatView.swift in Sources */,
+				B10000000000000000000006 /* Conversation.swift in Sources */,
+				B10000000000000000000007 /* ConversationListView.swift in Sources */,
+				B10000000000000000000008 /* DmengChatEngine.swift in Sources */,
+				B10000000000000000000009 /* DownloadConfig.swift in Sources */,
+				B1000000000000000000000A /* Extras.swift in Sources */,
+				B1000000000000000000000B /* InklingChatTemplate.swift in Sources */,
+				B1000000000000000000000C /* MarkdownView.swift in Sources */,
+				B1000000000000000000000D /* ModelDownloader.swift in Sources */,
+				B1000000000000000000000E /* ModelKind.swift in Sources */,
+				B1000000000000000000000F /* SamplingParams.swift in Sources */,
+				B10000000000000000000010 /* SettingsView.swift in Sources */,
+				B10000000000000000000011 /* SetupView.swift in Sources */,
+				B10000000000000000000012 /* StatusViews.swift in Sources */,
+				B10000000000000000000013 /* Support.swift in Sources */,
+				B10000000000000000000014 /* TextCodec.swift in Sources */,
+				B10000000000000000000015 /* Tools.swift in Sources */,
+				B10000000000000000000030 /* SelfCheck.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		B90000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		B90000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		B90000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = MovedStore/MovedStore.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MovedStore/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Moved Store";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.movedstore;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		B90000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = MovedStore/MovedStore.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = MovedStore/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "Moved Store";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.example.movedstore;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		B80000000000000000000001 /* Build configuration list for PBXProject "MovedStore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B90000000000000000000001 /* Debug */,
+				B90000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B80000000000000000000002 /* Build configuration list for PBXNativeTarget "MovedStore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B90000000000000000000003 /* Debug */,
+				B90000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		BB0000000000000000000001 /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		BB0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-transformers" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/huggingface/swift-transformers";
+			requirement = {
+				kind = exactVersion;
+				version = 1.4.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BC0000000000000000000001 /* DmengKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DmengKit;
+		};
+		BC0000000000000000000002 /* Tokenizers */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = BB0000000000000000000002 /* XCRemoteSwiftPackageReference "swift-transformers" */;
+			productName = Tokenizers;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = B70000000000000000000001 /* Project object */;
+}
