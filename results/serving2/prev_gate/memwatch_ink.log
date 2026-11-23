@@ -1,0 +1,22 @@
+CMD: ../../.venv/bin/python bench/serving/memwatch_check.py results/serving2/memwatch_ink.jsonl bench/prompts/inkling2_loop/code.ids 48 -- build/dmserve --model ../../../inkling/model --cache-gb auto --mem mlock --chunk 512 --span 8192 --routers ../../../inkling/model/routers/ink_r_best/ink_router_full_k2_h512_b8.dmr --rt-tau 0.5 --xtok ../../../inkling/model/routers/ink_x_main/ink_router_xtok_s47_t0-5_b8.dmr --rd-prio 1
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9231, "mem_free_pct": 66, "disk_free_gb": 37.2, "avail_gb": 10.27, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+identical True 48
+      214.20 real       376.12 user        13.52 sys
+          7962558464  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1264018  page reclaims
+                  75  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+              205270  voluntary context switches
+              953342  involuntary context switches
+           239704088  instructions retired
+           212628823  cycles elapsed
+             9863600  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 214.7, "waited_s": 58, "swap_start_mb": 9231, "peak_swap_growth_mb": 49, "swap_growth_end_mb": -351, "peak_footprint_gb_guard": 8.31, "peak_footprint_gb_time": 0.01, "others_cpu_pct_mean": 111.7, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9231, "mem_free_pct": 66, "disk_free_gb": 37.2, "avail_gb": 10.27, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8880, "mem_free_pct": 71, "disk_free_gb": 37.2, "avail_gb": 11.2, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

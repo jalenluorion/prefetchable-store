@@ -1,0 +1,37 @@
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7270, "mem_free_pct": 76, "disk_free_gb": 45.8, "avail_gb": 9.82, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+{"mode":"prefill_bench","rep":0,"positions":8365,"chunk":256,"stream":3,"cache_gb":6.00,"ms":243278.4,"tok_s":34.38,"mb_read":24931.3,"decode_steps":0,"decode_tok_s":0,"gpu_frac":0.00,"keep_scratch":false,"footprint_mb_after_prefill":8435.5,"footprint_peak_mb":8435.5,"prefill":{"chunk":256,"span":8192,"spans":1,"hold_releases":0,"mb_read":24931.3,"expert_mb_touched":758764,"resident_mb_touched":48481.2,"read_mb_per_pos":2.98043,"expert_touched_mb_per_pos":90.707,"resident_touched_mb_per_pos":5.79572,"wait_ms":693.639}}
+DMCOUNTS {"work_ins": 21650812429434, "work_cyc": 4832480087822, "main_work_ins": 2858870199350, "main_serial_ins": 654355865252, "main_serial_cyc": 143906774133, "spin_ins": 101435305242, "spin_cyc": 23366156954, "runs": 62939}
+DMSTAGE embed 244252025 122660569 0 0
+DMSTAGE depth_attn 120319073301 24589976634 0 0
+DMSTAGE msg_gates 14529786869 10815475805 710570039033 169892842442
+DMSTAGE norms_quant 97453634145 23923487050 0 0
+DMSTAGE attn_proj 48641836 76217975 1425435904235 490536643079
+DMSTAGE kv_prep 59853908918 13233144523 0 0
+DMSTAGE attn_core 181837629 166148870 7641750028159 1409282610938
+DMSTAGE attn_out 3958178260 1985531172 499979684717 177481459021
+DMSTAGE convs 117429887529 15554375075 0 0
+DMSTAGE moe_router 40499818024 7371235557 112766056412 30452874629
+DMSTAGE moe_cache 61750188152 15183671857 0 0
+DMSTAGE moe_experts 85266956306 20173646772 11260132474007 2554710738067
+DMSTAGE moe_combine 52768811620 10644812240 0 0
+DMSTAGE head 9666754 1859863 178242871 122919646
+DMSTAGE span_copies 343963202 209592644 0 0
+      244.34 real      1755.72 user         6.44 sys
+          8796667904  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              595209  page reclaims
+                   2  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+               36161  voluntary context switches
+              988046  involuntary context switches
+      25703716016775  instructions retired
+       5579624923534  cycles elapsed
+          8845269664  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 244.6, "waited_s": 328, "swap_start_mb": 7270, "peak_swap_growth_mb": 0, "swap_growth_end_mb": 0, "peak_footprint_gb_guard": 8.845, "peak_footprint_gb_time": 8.845, "others_cpu_pct_mean": 32.2, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7270, "mem_free_pct": 76, "disk_free_gb": 45.8, "avail_gb": 9.82, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7270, "mem_free_pct": 76, "disk_free_gb": 45.8, "avail_gb": 12.63, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

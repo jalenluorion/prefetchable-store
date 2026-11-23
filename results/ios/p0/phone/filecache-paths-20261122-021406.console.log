@@ -1,0 +1,98 @@
+LAUNCH fresh process (args: -- -autotest -fileCacheTest paths -p0spec cput=2,readers=4,window=8); previous process pid 10005: last scene phase active, 45 s ago
+ENGINE PhoneStore (native: -autotest always runs the native engine) mode=prefetch
+DIAG memWarn=log historyMode=strict mappedWeightsInUse=0 mode=prefetch prefixCache=on
+MEM launch: footprint=0.009 peak=0.009 avail=4.286 limit~4.295 GB | mlx active=n/a peak=n/a cache=n/a GB | resident=0.032 file-backed=0.023 compressed=0.000 GB | faults=3266 pageins=525 | thermal=fair
+FILECACHE launch paths spec 'cput=2,readers=4,window=8': 40 store files in <app documents>/model/store4
+SCENE active: same process, up 0.2 s; engine idle, slabs allocated
+FILECACHE paths: mapped 40 of 40 files, 15.67 GB, 8838 records; resident now 0.00 GB
+FILECACHE phase paths-single
+FILECACHE path a_pread_nocache: cold 3.11 ms (sys 0.10) then 2.45 ms (sys 0.10), resident after 0.00
+FILECACHE path b_pread_buffered: cold 2.18 ms (sys 0.38) then 0.13 ms (sys 0.15), resident after 1.00
+FILECACHE path c_mmap_touch: cold 4.02 ms (sys 0.36) then 0.07 ms (sys 0.00), resident after 1.00
+FILECACHE path d_madvise_willneed_touch: cold 3.09 ms (sys 0.16) then 0.07 ms (sys 0.01), resident after 1.00
+FILECACHE phase paths-willneed
+FILECACHE willneed k=1: advise+touch 0.64 GB/s, advise+wait 0.66 GB/s (frac 1.00)
+FILECACHE willneed k=4: advise+touch 0.60 GB/s, advise+wait 0.57 GB/s (frac 1.00)
+FILECACHE willneed k=8: advise+touch 0.64 GB/s, advise+wait 0.61 GB/s (frac 1.00)
+FILECACHE willneed k=16: advise+touch 0.50 GB/s, advise+wait 0.43 GB/s (frac 1.00)
+FILECACHE phase paths-throughput
+FILECACHE t=1 paths-throughput resident 0.28 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=2 paths-throughput resident 0.28 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=4 paths-throughput resident 0.28 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=5 paths-throughput resident 0.29 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=6 paths-throughput resident 0.29 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE throughput a_pread_nocache x8: 0.76 GB/s, cpu user 0.00 sys 0.41 s/GB
+FILECACHE t=7 paths-throughput resident 0.88 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=9 paths-throughput resident 1.48 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=10 paths-throughput resident 1.54 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=11 paths-throughput resident 1.56 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE throughput b_pread_buffered x8: 0.69 GB/s, cpu user 0.00 sys 0.65 s/GB
+FILECACHE t=13 paths-throughput resident 1.57 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.25 GB warn 0/0 fair
+FILECACHE t=14 paths-throughput resident 1.30 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE t=15 paths-throughput resident 1.43 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE t=17 paths-throughput resident 1.92 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE t=18 paths-throughput resident 1.94 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE throughput c_mmap_touch x8: 0.42 GB/s, cpu user 0.10 sys 1.03 s/GB
+FILECACHE t=20 paths-throughput resident 2.12 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE t=21 paths-throughput resident 2.41 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE t=23 paths-throughput resident 2.41 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE t=24 paths-throughput resident 2.45 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.05 avail 4.25 GB warn 0/0 fair
+FILECACHE throughput d_madvise_willneed_touch x8: 0.65 GB/s, cpu user 0.09 sys 0.78 s/GB
+FILECACHE phase paths-interference
+FILECACHE t=26 paths-interference resident 1.92 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 fair
+FILECACHE t=27 paths-interference resident 1.53 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.99 GB warn 0/0 fair
+FILECACHE t=29 paths-interference resident 1.60 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.99 GB warn 0/0 fair
+FILECACHE t=32 paths-interference resident 1.50 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.99 GB warn 0/0 fair
+FILECACHE t=34 paths-interference resident 1.32 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.99 GB warn 0/0 fair
+FILECACHE interference baseline                           compute 14.45 GB/s, reads 0.00 GB/s, sys 2.87 s, hot resident 0.80 GB [fair]
+FILECACHE t=36 paths-interference resident 1.27 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 fair
+FILECACHE t=39 paths-interference resident 1.23 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 fair
+FILECACHE t=40 paths-interference resident 1.20 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 fair
+FILECACHE t=42 paths-interference resident 1.15 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=44 paths-interference resident 1.11 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference a_pread_nocache cold               compute 13.23 GB/s, reads 0.73 GB/s, sys 5.59 s, hot resident 0.80 GB [serious]
+FILECACHE t=46 paths-interference resident 1.47 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=48 paths-interference resident 1.63 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=50 paths-interference resident 1.64 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=52 paths-interference resident 1.60 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference b_pread_buffered cold              compute 13.63 GB/s, reads 0.70 GB/s, sys 6.97 s, hot resident 0.35 GB [serious]
+FILECACHE t=54 paths-interference resident 1.49 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=56 paths-interference resident 1.58 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=58 paths-interference resident 1.96 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=60 paths-interference resident 1.87 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference c_mmap_touch cold                  compute 11.83 GB/s, reads 0.42 GB/s, sys 7.20 s, hot resident 0.10 GB [serious]
+FILECACHE t=62 paths-interference resident 1.91 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=64 paths-interference resident 1.94 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=66 paths-interference resident 2.03 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=68 paths-interference resident 2.02 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference d_madvise_touch cold               compute 12.46 GB/s, reads 0.63 GB/s, sys 6.69 s, hot resident 0.10 GB [serious]
+FILECACHE t=70 paths-interference resident 1.95 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=72 paths-interference resident 1.80 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=74 paths-interference resident 1.65 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=76 paths-interference resident 1.60 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=78 paths-interference resident 1.60 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference b_pread_buffered resident paced    compute 13.90 GB/s, reads 1.00 GB/s, sys 7.18 s, hot resident 0.80 GB [serious]
+FILECACHE t=80 paths-interference resident 1.53 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=82 paths-interference resident 1.42 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=84 paths-interference resident 1.37 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=86 paths-interference resident 1.37 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference c_mmap_touch resident paced        compute 13.75 GB/s, reads 1.00 GB/s, sys 2.85 s, hot resident 0.80 GB [serious]
+FILECACHE t=88 paths-interference resident 1.37 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference b_pread_buffered resident unpaced  compute 9.08 GB/s, reads 7.78 GB/s, sys 30.92 s, hot resident 0.80 GB [serious]
+FILECACHE t=91 paths-interference resident 1.41 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=98 paths-interference resident 1.39 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE interference c_mmap_touch resident unpaced      compute 6.67 GB/s, reads 21.83 GB/s, sys 1.10 s, hot resident 0.80 GB [serious]
+FILECACHE t=106 paths-interference resident 1.37 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.31 avail 3.98 GB warn 0/0 serious
+FILECACHE t=108 paths-interference resident 1.35 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.30 avail 3.99 GB warn 0/0 serious
+FILECACHE t=110 paths-interference resident 1.35 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.30 avail 3.99 GB warn 0/0 serious
+FILECACHE t=112 paths-interference resident 1.35 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.30 avail 3.99 GB warn 0/0 serious
+FILECACHE interference baseline again                     compute 14.79 GB/s, reads 0.00 GB/s, sys 2.70 s, hot resident 0.80 GB [serious]
+FILECACHE t=113 paths-interference resident 1.35 GB (early set 0.00) touched 0.00 GB cold 0.00 warm 0.00 GB/s/thread fp 0.30 avail 3.99 GB warn 0/0 serious
+P0 wrote filecache.json
+DONE
+02:14:06  Acquired tunnel connection to device.
+02:14:06  Enabling developer disk image services.
+02:14:06  Acquired usage assertion.
+Launched application with com.example.phonestore bundle identifier.
+Waiting for the application to terminate...
+The app terminated with the exit code 0.

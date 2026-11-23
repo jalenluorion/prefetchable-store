@@ -1,0 +1,22 @@
+CMD: env LIVE_REPO_BASE=SCRATCH bench/serving/live_opencode.sh ../../../inkling/model inkling-2-mini bench/serving/opencode_inkling.json results/serving/inkling/live1 --cache-gb 6 --mem mlock --chunk 512 --span 8192 --disk ../../../inkling/model/.dmeng/prefix --disk-every 1024
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t94%; charging; 0:22 remaining present: true", "swap_used_mb": 8761, "mem_free_pct": 78, "disk_free_gb": 48.0, "avail_gb": 12.77, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+{"turn1_s": 466, "turn2_s": 100, "gap_s": 0, "repo": "SCRATCH/oc_live_103333"}
+      570.21 real        16.22 user         3.18 sys
+           830111744  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              625837  page reclaims
+               10935  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                1836  messages sent
+                 751  messages received
+                  28  signals received
+                2887  voluntary context switches
+              155972  involuntary context switches
+            79279176  instructions retired
+            55216145  cycles elapsed
+             1737064  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 570.5, "waited_s": 180, "swap_start_mb": 8761, "peak_swap_growth_mb": 0, "swap_growth_end_mb": -24, "peak_footprint_gb_guard": 9.694, "peak_footprint_gb_time": 0.002, "others_cpu_pct_mean": 42.7, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t94%; charging; 0:22 remaining present: true", "swap_used_mb": 8761, "mem_free_pct": 78, "disk_free_gb": 48.0, "avail_gb": 12.77, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t98%; charging; 0:15 remaining present: true", "swap_used_mb": 8737, "mem_free_pct": 75, "disk_free_gb": 46.2, "avail_gb": 12.42, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

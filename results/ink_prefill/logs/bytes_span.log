@@ -1,0 +1,21 @@
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7286, "mem_free_pct": 73, "disk_free_gb": 46.1, "avail_gb": 12.09, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+{"mode":"prefill_bench","rep":0,"positions":8365,"chunk":256,"stream":3,"cache_gb":6.00,"ms":237933.7,"tok_s":35.16,"mb_read":24931.3,"decode_steps":4,"decode_tok_s":4.82,"gpu_frac":0.00,"keep_scratch":false,"footprint_mb_after_prefill":8425.9,"footprint_peak_mb":8425.9,"prefill":{"chunk":256,"span":8192,"spans":1,"hold_releases":0,"mb_read":24931.3,"expert_mb_touched":758764,"resident_mb_touched":48481.2,"read_mb_per_pos":2.98043,"expert_touched_mb_per_pos":90.707,"resident_touched_mb_per_pos":5.79572,"wait_ms":693.177}}
+      239.50 real      1733.81 user         5.99 sys
+          8689762304  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              579693  page reclaims
+                  49  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+               38635  voluntary context switches
+              972101  involuntary context switches
+      25499584036697  instructions retired
+       5498330869392  cycles elapsed
+          8835603104  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 240.1, "waited_s": 68, "swap_start_mb": 7286, "peak_swap_growth_mb": 0, "swap_growth_end_mb": -8, "peak_footprint_gb_guard": 8.836, "peak_footprint_gb_time": 8.836, "others_cpu_pct_mean": 18.6, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7286, "mem_free_pct": 73, "disk_free_gb": 46.1, "avail_gb": 12.09, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7278, "mem_free_pct": 75, "disk_free_gb": 46.1, "avail_gb": 12.47, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

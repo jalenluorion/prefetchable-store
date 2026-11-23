@@ -1,0 +1,24 @@
+CMD: bench/serving/live_profile.sh ../../../inkling/model inkling-2-mini bench/serving/opencode_inkling.json results/serving2/live_ink
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8752, "mem_free_pct": 71, "disk_free_gb": 37.2, "avail_gb": 11.51, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+{"turn1_s": 797, "turn2_s": 305, "gap_s": 0, "repo": "SCRATCH/oc_live_200804"}
+{"ttft_s": 4.333, "total_s": 10.217}
+done
+     1119.75 real        36.67 user        10.66 sys
+           757088256  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             1848706  page reclaims
+               21802  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                4507  messages sent
+                1869  messages received
+                  52  signals received
+                8496  voluntary context switches
+              484679  involuntary context switches
+            62524731  instructions retired
+            44074904  cycles elapsed
+             1671528  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 1120.2, "waited_s": 70, "swap_start_mb": 8752, "peak_swap_growth_mb": 1726, "swap_growth_end_mb": 1430, "peak_footprint_gb_guard": 10.188, "peak_footprint_gb_time": 0.002, "others_cpu_pct_mean": 182.9, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8752, "mem_free_pct": 71, "disk_free_gb": 37.2, "avail_gb": 11.51, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 10182, "mem_free_pct": 68, "disk_free_gb": 33.3, "avail_gb": 10.76, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

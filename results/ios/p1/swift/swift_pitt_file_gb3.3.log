@@ -1,0 +1,44 @@
+CMD: build/dd-catalyst/Build/Products/Release-maccatalyst/PhoneStoreApp.app/Contents/MacOS/PhoneStoreApp -docs <projects>/phone-store/ios/PhoneStoreApp/runs/mac-dmeng/Documents -engine dmeng -dmengModel <work>/local/q36/model -dmengMem file -dmengCacheGB 3.3 -dmengRouters mlp_k2_h512 -dmengDisk <projects>/phone-store/ios/PhoneStoreApp/runs/mac-dmeng/Documents/dmeng-prefix -dmengGate <work>/engine/results/stage2/pitt_ids.txt -dmengGateOut results/ios/p1/swift/swift_pitt_file_gb3.3.ids -dmengGateN 400
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 6502, "mem_free_pct": 78, "disk_free_gb": 40.3, "avail_gb": 12.57, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+LAUNCH fresh process (args: -docs <projects>/phone-store/ios/PhoneStoreApp/runs/mac-dmeng/Documents -engine d); no earlier process recorded
+ENGINE dmeng (dmeng: -engine dmeng launch argument (model <work>/local/q36/model)) mode=prefetch
+DIAG memWarn=log historyMode=live mappedWeightsInUse=0 mode=prefetch prefixCache=on
+MEM launch: footprint=0.017 peak=0.017 avail=0.000 limit~n/a GB | mlx active=n/a peak=n/a cache=n/a GB | resident=0.066 file-backed=0.049 compressed=0.000 GB | faults=9439 pageins=7208 | thermal=nominal
+PROBE avail=0.00GB phys=17.18GB disk_free=41.57GB thermal=nominal cap=0 (budget) layer_caps=uniform slots=0 layout=slim store=incomplete (51 problems) codec_layers=0
+STORE incomplete: config.json: missing; tokenizer.json: missing; tokenizer_config.json: missing; vocab.json: missing; merges.txt: missing; chat_template.jinja: missing; generation_config.json: missing; store4/meta.json: missing; ... (51 total)
+LOAD dmeng: tokenizer + chat template from model/
+LOAD dmeng: opening <work>/local/q36/model (resident weights, routers mlp_k2_h512, cache 3.3 GB)
+LOAD dmeng: ready: dmeng (lossless), 8 threads, file cache 3.30 GB, routers router.mlp_k2_h512.q8.dmr1.6881073b383c.bin; opened in 1.9 s
+LOAD ready: dmeng (lossless), 8 threads, file cache 3.30 GB, routers router.mlp_k2_h512.q8.dmr1.6881073b383c.bin; opened in 1.9 s
+SETTING engine = dmeng (unified C++ engine, lossless)
+SETTING model dir = <work>/local/q36/model
+SETTING threads = 8 compute, 4 readers
+SETTING expert cache = file, 3.30 GB budget
+SETTING routers = router.mlp_k2_h512.q8.dmr1.6881073b383c.bin, 8 named per step
+SETTING context = 16384 positions
+SETTING sampling = temperature 1, top_k 20, top_p 0.95, min_p 0, seed random per reply
+SETTING history = live: thinking-off turns keep their empty think block; thinking turns cached at the assistant header
+SETTING prefix cache = engine prefix cache (in memory + system prompt on disk: 0 file(s) in dmeng-prefix/)
+MEM after load: footprint=2.485 peak=2.485 avail=0.000 limit~n/a GB | mlx active=n/a peak=n/a cache=n/a GB | resident=2.330 file-backed=0.012 compressed=0.165 GB | faults=172169 pageins=12073 | thermal=nominal
+DMENG GATE {"engine":"PhoneStoreApp -engine dmeng (Swift path)","prompt_tokens":9,"prefill_s":1.553,"prefill_source":"cold","tokens":400,"decode_s":97.521,"tok_s":4.091,"wait_ms_per_token":146.42,"compute_ms_per_token":97.99,"hit_rate":0.5109,"mb_preads_per_token":380.64,"stats":{"model":{"steps":399,"ms_per_step":{"embed":0.31,"attn_proj":15.64,"attn_core":39.27,"attn_out":5.98,"depth":0.00,"msg":0.00,"router":2.83,"experts":19.79,"wait":146.42,"cache":1.92,"prefetch":4.15,"head":6.36},"hit":0.51,"late":0.43,"mb_read_per_step":155.69,"routers":true,"pf_issued_per_step":73.64,"model":{}},"prefix_cache":{"requests":1,"reused_positions":0,"computed_positions":9,"live":408,"checkpoints":[9],"checkpoint_mb":65.8637,"parked":0,"parked_mb":0,"parks":0,"unparks":0,"disk_loads":0,"disk_writes":0},"memory":{"footprint_gb":2.673,"footprint_peak_gb":2.694,"held_gb":3.298,"mode":3,"reader_gb_read":154.795,"file_cache_resident_gb":0.682,"file_refaults":50088,"file_resident_skips":1067,"file_gb_skipped":1.888}}}
+DMENG GATE RAN -> results/ios/p1/swift/swift_pitt_file_gb3.3.ids
+DONE
+      106.11 real       446.77 user       125.16 sys
+          3439099904  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+            13371220  page reclaims
+               39674  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+              103586  voluntary context switches
+             2743728  involuntary context switches
+       6826809946080  instructions retired
+       1850010964701  cycles elapsed
+          2693725880  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 107.3, "waited_s": 52, "swap_start_mb": 6502, "peak_swap_growth_mb": 864, "swap_growth_end_mb": 499, "peak_footprint_gb_guard": 2.694, "peak_footprint_gb_time": 2.694, "others_cpu_pct_mean": 319.2, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 6502, "mem_free_pct": 78, "disk_free_gb": 40.3, "avail_gb": 12.57, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7001, "mem_free_pct": 26, "disk_free_gb": 40.3, "avail_gb": 2.3, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

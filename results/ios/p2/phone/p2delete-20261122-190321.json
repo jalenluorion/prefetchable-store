@@ -1,0 +1,419 @@
+{
+  "bytes_freed" : 16030854560,
+  "free_after" : 4341760000,
+  "free_before" : 4341760000,
+  "removed" : [
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_00.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 319923600,
+      "path" : "model\/store4\/layer_00.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_01.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 394067344,
+      "path" : "model\/store4\/layer_01.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_02.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 394283456,
+      "path" : "model\/store4\/layer_02.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_03.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 394148672,
+      "path" : "model\/store4\/layer_03.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_04.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 394019600,
+      "path" : "model\/store4\/layer_04.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_05.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393865248,
+      "path" : "model\/store4\/layer_05.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_06.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393813584,
+      "path" : "model\/store4\/layer_06.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_07.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393880704,
+      "path" : "model\/store4\/layer_07.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_08.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393967184,
+      "path" : "model\/store4\/layer_08.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_09.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393773344,
+      "path" : "model\/store4\/layer_09.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_10.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393575984,
+      "path" : "model\/store4\/layer_10.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_11.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393718912,
+      "path" : "model\/store4\/layer_11.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_12.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393615920,
+      "path" : "model\/store4\/layer_12.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_13.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393692752,
+      "path" : "model\/store4\/layer_13.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_14.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393697664,
+      "path" : "model\/store4\/layer_14.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_15.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393650032,
+      "path" : "model\/store4\/layer_15.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_16.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393476368,
+      "path" : "model\/store4\/layer_16.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_17.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393454752,
+      "path" : "model\/store4\/layer_17.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_18.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393514624,
+      "path" : "model\/store4\/layer_18.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_19.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393536512,
+      "path" : "model\/store4\/layer_19.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_20.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393832256,
+      "path" : "model\/store4\/layer_20.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_21.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393566096,
+      "path" : "model\/store4\/layer_21.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_22.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393359856,
+      "path" : "model\/store4\/layer_22.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_23.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393502384,
+      "path" : "model\/store4\/layer_23.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_24.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393461680,
+      "path" : "model\/store4\/layer_24.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_25.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393458208,
+      "path" : "model\/store4\/layer_25.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_26.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393590736,
+      "path" : "model\/store4\/layer_26.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_27.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393571152,
+      "path" : "model\/store4\/layer_27.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_28.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393535984,
+      "path" : "model\/store4\/layer_28.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_29.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393489312,
+      "path" : "model\/store4\/layer_29.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_30.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393567696,
+      "path" : "model\/store4\/layer_30.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_31.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393558480,
+      "path" : "model\/store4\/layer_31.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_32.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393024512,
+      "path" : "model\/store4\/layer_32.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_33.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 392863024,
+      "path" : "model\/store4\/layer_33.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_34.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393046800,
+      "path" : "model\/store4\/layer_34.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_35.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393598464,
+      "path" : "model\/store4\/layer_35.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_36.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393515392,
+      "path" : "model\/store4\/layer_36.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_37.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393585712,
+      "path" : "model\/store4\/layer_37.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_38.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393402000,
+      "path" : "model\/store4\/layer_38.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 44072,
+      "path" : "model\/store4\/layer_39.idx",
+      "removed" : true
+    },
+    {
+      "bytes" : 393564544,
+      "path" : "model\/store4\/layer_39.psc",
+      "removed" : true
+    },
+    {
+      "bytes" : 358321136,
+      "path" : "prefix",
+      "removed" : true
+    },
+    {
+      "bytes" : 1438049975,
+      "error" : "Error Domain=NSCocoaErrorDomain Code=513 \"“cache” couldn’t be removed because you don’t have permission to access it.\" UserInfo={NSUserStringVariant=(\n    Remove\n), NSFilePath=<app documents>\/model\/cache, NSURL=file:\/\/<app documents>\/model\/cache, NSUnderlyingError=0x10d195920 {Error Domain=NSPOSIXErrorDomain Code=13 \"Permission denied\"}}",
+      "path" : "<app documents>\/model\/cache",
+      "removed" : false
+    }
+  ],
+  "time" : "2026-11-23T00:03:25Z"
+}

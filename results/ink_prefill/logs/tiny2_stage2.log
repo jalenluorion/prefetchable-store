@@ -1,0 +1,22 @@
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7987, "mem_free_pct": 80, "disk_free_gb": 44.3, "avail_gb": 13.04, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+chunk 16 span 256: PASSED b_reused 600 b_source live cancelled True computed 0 req_path reused 480
+chunk 64 span 512: PASSED b_reused 600 b_source live cancelled True computed 0 req_path reused 480
+        1.27 real         2.45 user         0.02 sys
+            32833536  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                7598  page reclaims
+                  46  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   4  signals received
+                 410  voluntary context switches
+                1115  involuntary context switches
+            23761756  instructions retired
+            12437115  cycles elapsed
+             1638760  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 1.6, "waited_s": 142, "swap_start_mb": 7987, "peak_swap_growth_mb": 0, "swap_growth_end_mb": 0, "peak_footprint_gb_guard": 0.028, "peak_footprint_gb_time": 0.002, "others_cpu_pct_mean": null, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7987, "mem_free_pct": 80, "disk_free_gb": 44.3, "avail_gb": 13.04, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7987, "mem_free_pct": 80, "disk_free_gb": 44.3, "avail_gb": 13.04, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

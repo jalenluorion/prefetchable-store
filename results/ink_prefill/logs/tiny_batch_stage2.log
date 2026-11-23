@@ -1,0 +1,34 @@
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7987, "mem_free_pct": 80, "disk_free_gb": 44.3, "avail_gb": 13.04, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+pf_b0_c256_s8192 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 256, 'span': 8192, 'spans': 1, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 22.8516, 'resident_mb_touched': 15.375, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0207741, 'resident_touched_mb_per_pos': 0.0139773, 'wait_ms': 0}
+pf_b0_c64_s8192 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 64, 'span': 8192, 'spans': 1, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 81.8767, 'resident_mb_touched': 55.1875, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0744334, 'resident_touched_mb_per_pos': 0.0501705, 'wait_ms': 0}
+pf_b0_c5_s8192 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 5, 'span': 8192, 'spans': 1, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 742.045, 'resident_mb_touched': 673.812, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.674587, 'resident_touched_mb_per_pos': 0.612557, 'wait_ms': 0}
+pf_b0_c64_s300 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 64, 'span': 300, 'spans': 4, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 86.1724, 'resident_mb_touched': 58.25, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0783385, 'resident_touched_mb_per_pos': 0.0529545, 'wait_ms': 0}
+pf_b0_c256_s100 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 256, 'span': 256, 'spans': 5, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 22.8516, 'resident_mb_touched': 15.375, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0207741, 'resident_touched_mb_per_pos': 0.0139773, 'wait_ms': 0}
+pf_b8_c256_s8192 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 256, 'span': 8192, 'spans': 1, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 22.8516, 'resident_mb_touched': 9.12012, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0207741, 'resident_touched_mb_per_pos': 0.00829102, 'wait_ms': 0}
+pf_b8_c64_s8192 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 64, 'span': 8192, 'spans': 1, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 82.0042, 'resident_mb_touched': 32.7461, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0745492, 'resident_touched_mb_per_pos': 0.0297692, 'wait_ms': 0}
+pf_b8_c5_s8192 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 5, 'span': 8192, 'spans': 1, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 741.23, 'resident_mb_touched': 399.857, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.673845, 'resident_touched_mb_per_pos': 0.363507, 'wait_ms': 0}
+pf_b8_c64_s300 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 64, 'span': 300, 'spans': 4, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 86.1482, 'resident_mb_touched': 34.5635, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0783165, 'resident_touched_mb_per_pos': 0.0314213, 'wait_ms': 0}
+pf_b8_c256_s100 PASS {'logit_bits_differ': 0, 'fixed_state_bytes_differ': 0, 'kv_bytes_differ': 0, 'greedy_identical': True} {'chunk': 256, 'span': 256, 'spans': 5, 'hold_releases': 0, 'mb_read': 0, 'expert_mb_touched': 22.8516, 'resident_mb_touched': 9.12012, 'read_mb_per_pos': 0, 'expert_touched_mb_per_pos': 0.0207741, 'resident_touched_mb_per_pos': 0.00829102, 'wait_ms': 0}
+DRAFT CHECK PASSED
+ahead check (tiny ink) PASSED
+ahead check (tiny q36) PASSED
+tiny_ip done
+       10.13 real        19.07 user         0.30 sys
+            42663936  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              101753  page reclaims
+                 152  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                  79  signals received
+                9783  voluntary context switches
+               16549  involuntary context switches
+            76136019  instructions retired
+            46245162  cycles elapsed
+             1737064  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 10.5, "waited_s": 112, "swap_start_mb": 7987, "peak_swap_growth_mb": 0, "swap_growth_end_mb": 0, "peak_footprint_gb_guard": 0.036, "peak_footprint_gb_time": 0.002, "others_cpu_pct_mean": 145.9, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7987, "mem_free_pct": 80, "disk_free_gb": 44.3, "avail_gb": 13.04, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7987, "mem_free_pct": 80, "disk_free_gb": 44.3, "avail_gb": 12.65, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

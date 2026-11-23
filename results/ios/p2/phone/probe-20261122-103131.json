@@ -1,0 +1,923 @@
+{
+  "active_processors" : 6,
+  "app" : "0.2 (1)",
+  "budget" : {
+    "enough_for_min_cap" : true,
+    "formula" : "cap = floor((os_proc_available_memory - resident - routers - state - margin) \/ ((40 + 3) x record_bytes)); margin 1.2 GB with the increased-memory-limit entitlement, 0.8 GB without (15 Plus warning points, 2026-11-04); resident + routers 1.10 + 0.34 GB of RAM (also when memory-mapped: the GPU keeps them resident)",
+    "g4_floor_cap" : 16,
+    "mapped_weights" : "read into memory",
+    "margin_bytes" : 1200000000,
+    "meets_g4_floor" : true,
+    "min_cap" : 8,
+    "plan_bytes" : 2999571328,
+    "prefill_auto_bytes" : 259130624,
+    "prefill_auto_formula" : "auto prefill chunk: the largest whose activations fit limit - iOS warning distance (0.85 GB entitled, 0.58 without) - plan - 0.20 GB overshoot (native PrefillMemory, measured on the Mac: 30 MB + 189 KB per position + 65 B per position x key)",
+    "record_bytes" : 1769472,
+    "resident_bytes" : 1100000000,
+    "router_bytes" : 340000000,
+    "slab_bytes_per_cap" : 70778880,
+    "staging_bytes_per_cap" : 5308416,
+    "state_bytes" : 150000000
+  },
+  "cap" : 18,
+  "cap_from_budget" : 18,
+  "cap_source" : "budget",
+  "diagnostics" : {
+    "historyMode" : "strict",
+    "mappedWeightsInUse" : "0",
+    "memWarn" : "log",
+    "mode" : "prefetch",
+    "prefixCache" : "on"
+  },
+  "disk_available_bytes" : 2076672000,
+  "disk_available_important_bytes" : 2188131636,
+  "disk_total_bytes" : 126784655360,
+  "docs_dir" : "<app documents>",
+  "engine" : {
+    "choice" : "native: store complete in model\/",
+    "detail" : "native runtime (mlx-swift 0.32.3, MLX core 0.32.3); prefetch, int8 lag-4 routers, cap 18 (auto:720, 720 slots); layout slim; codec: 40 layers .psc; kernels: mlx.metallib (-fno-fast-math): \/var\/containers\/Bundle\/Application\/47798510-A488-4A79-9A4E-82EC5370437D\/PhoneStoreApp.app\/mlx.metallib",
+    "is_stub" : false,
+    "load_log" : [
+      "tokenizer + chat template from model\/",
+      "kernels: mlx.metallib (-fno-fast-math): \/var\/containers\/Bundle\/Application\/47798510-A488-4A79-9A4E-82EC5370437D\/PhoneStoreApp.app\/mlx.metallib",
+      "weights loaded: resident 1.10 GB + routers 0.33 GB; phys_footprint 0.176 -> 1.596 GB (+1.420), resident pages +1.322 GB (file-backed +0.001)",
+      "loaded in 2.1s",
+      "warm-up marker: <app caches>\/phone-store-kernel-warmup.txt (absent)",
+      "warm-up: compiling the batched prefill kernels",
+      "warm-up: batched kernels compiled in 8.04 s (dry chunks 128\/37\/64\/27\/5\/1 = 262 positions + 1 dry decode step 1.81 s on a throwaway state; no reads, store and prefix cache untouched)",
+      "ready in 10.5s: prefetch, cap 18, 2.75 GB planned, layout slim",
+      "layout slim: embeddings <app documents>\/model\/embeddings.safetensors; resident <app documents>\/model\/cache\/resident_q4.safetensors; routers <app documents>\/model\/cache\/routers_k4_r8.safetensors"
+    ],
+    "name" : "PhoneStore",
+    "requires_store" : true,
+    "settings" : {
+      "MLX cache limit" : "64 MB, wired limit on",
+      "MLX core" : "0.32.3",
+      "cap (slots \/ layer)" : "per layer (auto:720), mean 18",
+      "drop" : "no drop",
+      "embeddings" : "bf16 rows read per token from <app documents>\/model\/embeddings.safetensors",
+      "evict" : "hazard",
+      "history" : "strict template: transformers' bytes; follow-ups re-prefill the previous answer",
+      "keep" : "31",
+      "kernel warm-up" : "batched prefill kernels compiled at load in 8.04 s (dry chunks 128\/37\/64\/27\/5\/1, state discarded)",
+      "kernels" : "mlx.metallib (-fno-fast-math): \/var\/containers\/Bundle\/Application\/47798510-A488-4A79-9A4E-82EC5370437D\/PhoneStoreApp.app\/mlx.metallib",
+      "layout" : "slim",
+      "memory plan" : "2.75 GB (resident 1.10 + routers 0.33 + slabs 1.27 + codec staging 0.04)",
+      "mode" : "prefetch",
+      "model dir" : "<app documents>\/model",
+      "native cache" : "<app documents>\/model\/cache",
+      "page cache" : "F_NOCACHE + no readahead",
+      "prefill" : "batched, chunks of auto: the largest whose activations fit 285 MB (up to 1003 positions on an empty context, 521 after 4096 tokens), 8 readers in a chunk",
+      "prefill read-ahead" : "lag-4 names of later layers, up to the cap records per layer into empty slots, low priority (h_prev shift)",
+      "prefix cache" : "on: 4 states, 282 MB in prefix\/, LRU cap 1.5 GB",
+      "prefix re-land" : "lazy: the next chunk reads what it uses or keeps",
+      "read overlap" : "late wait on, head start on",
+      "readers" : "8, 4 chunks \/ record",
+      "resident" : "int4, 1.10 GB (<app documents>\/model\/cache\/resident_q4.safetensors)",
+      "routers" : "lag-4, 8 named, int8 matrices (<app documents>\/model\/cache\/routers_k4_r8.safetensors)",
+      "sampling" : "temperature 1, top_k 20, top_p 0.95, min_p 0, seed random per reply",
+      "slabs" : "720 slots (sum over layers) x 1.77 MB = 1.27 GB",
+      "slots per layer" : "14 13 13 16 16 17 16 19 18 19 17 18 19 19 19 19 19 19 17 20 18 17 19 17 20 19 19 18 17 18 17 18 19 18 20 19 18 20 19 23",
+      "store codec" : "auto: 40 layers compressed (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39), 0 raw; staging 24 x 1.65 MB",
+      "thinking budget" : "none"
+    },
+    "state" : "ready",
+    "thinking" : false
+  },
+  "launch_arguments" : [
+    "--",
+    "-probe"
+  ],
+  "layer_caps" : [
+    14,
+    13,
+    13,
+    16,
+    16,
+    17,
+    16,
+    19,
+    18,
+    19,
+    17,
+    18,
+    19,
+    19,
+    19,
+    19,
+    19,
+    19,
+    17,
+    20,
+    18,
+    17,
+    19,
+    17,
+    20,
+    19,
+    19,
+    18,
+    17,
+    18,
+    17,
+    18,
+    19,
+    18,
+    20,
+    19,
+    18,
+    20,
+    19,
+    23
+  ],
+  "layer_caps_spec" : "auto:720",
+  "layout" : "slim",
+  "low_power_mode" : false,
+  "machine" : "iPhone15,5",
+  "memory" : [
+    {
+      "compressed" : 0,
+      "external" : 23494656,
+      "faults" : 3993,
+      "label" : "launch",
+      "limit_estimate" : 4294967296,
+      "os_proc_available" : 4285806968,
+      "pageins" : 1696,
+      "phys_footprint" : 9160328,
+      "phys_footprint_peak" : 9160328,
+      "resident_size" : 32276480,
+      "t" : 0.0054160356521606445,
+      "thermal" : "serious",
+      "time" : "2026-11-22T15:31:32.240Z"
+    },
+    {
+      "compressed" : 111493120,
+      "external" : 19054592,
+      "faults" : 112116,
+      "label" : "after load",
+      "limit_estimate" : 4294967296,
+      "mlx_active" : 2712035538,
+      "mlx_cache" : 67541330,
+      "mlx_peak" : 2816333092,
+      "os_proc_available" : 1355510720,
+      "pageins" : 3328,
+      "phys_footprint" : 2939456576,
+      "phys_footprint_peak" : 3036269656,
+      "resident_size" : 1494974464,
+      "t" : 10.878682017326355,
+      "thermal" : "serious",
+      "time" : "2026-11-22T15:31:43.113Z"
+    }
+  ],
+  "model_dir_excluded_from_backup" : true,
+  "model_dir_is_link" : false,
+  "native_cache_dir" : "<app documents>\/model\/cache",
+  "os" : "Version 27.2 (Build 24B119)",
+  "os_proc_available_memory_bytes" : 4268701952,
+  "physical_memory_bytes" : 5936922624,
+  "slots_total" : 720,
+  "store" : {
+    "cache_dir" : "<app documents>\/model\/cache",
+    "codec_layers" : [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39
+    ],
+    "complete" : true,
+    "expected_bytes" : 18150615408,
+    "experts" : 256,
+    "files" : [
+      {
+        "actual_bytes" : 3686,
+        "exact" : false,
+        "expected_bytes" : 3686,
+        "ok" : true,
+        "path" : "config.json"
+      },
+      {
+        "actual_bytes" : 12807982,
+        "exact" : false,
+        "expected_bytes" : 12807982,
+        "ok" : true,
+        "path" : "tokenizer.json"
+      },
+      {
+        "actual_bytes" : 16718,
+        "exact" : false,
+        "expected_bytes" : 16718,
+        "ok" : true,
+        "path" : "tokenizer_config.json"
+      },
+      {
+        "actual_bytes" : 6722759,
+        "exact" : false,
+        "expected_bytes" : 6722759,
+        "ok" : true,
+        "path" : "vocab.json"
+      },
+      {
+        "actual_bytes" : 3353259,
+        "exact" : false,
+        "expected_bytes" : 3353259,
+        "ok" : true,
+        "path" : "merges.txt"
+      },
+      {
+        "actual_bytes" : 7764,
+        "exact" : false,
+        "expected_bytes" : 7764,
+        "ok" : true,
+        "path" : "chat_template.jinja"
+      },
+      {
+        "actual_bytes" : 202,
+        "exact" : false,
+        "expected_bytes" : 202,
+        "ok" : true,
+        "path" : "generation_config.json"
+      },
+      {
+        "actual_bytes" : 639,
+        "exact" : false,
+        "expected_bytes" : 639,
+        "ok" : true,
+        "path" : "store4\/meta.json"
+      },
+      {
+        "actual_bytes" : 1017119000,
+        "exact" : true,
+        "expected_bytes" : 1017119000,
+        "ok" : true,
+        "path" : "embeddings.safetensors"
+      },
+      {
+        "actual_bytes" : 1103484684,
+        "exact" : true,
+        "expected_bytes" : 1103484684,
+        "ok" : true,
+        "path" : "cache\/resident_q4.safetensors"
+      },
+      {
+        "actual_bytes" : 334565291,
+        "exact" : true,
+        "expected_bytes" : 334565291,
+        "ok" : true,
+        "path" : "cache\/routers_k4_r8.safetensors"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_00.idx"
+      },
+      {
+        "actual_bytes" : 319923600,
+        "exact" : true,
+        "expected_bytes" : 319923600,
+        "ok" : true,
+        "path" : "store4\/layer_00.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_01.idx"
+      },
+      {
+        "actual_bytes" : 394067344,
+        "exact" : true,
+        "expected_bytes" : 394067344,
+        "ok" : true,
+        "path" : "store4\/layer_01.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_02.idx"
+      },
+      {
+        "actual_bytes" : 394283456,
+        "exact" : true,
+        "expected_bytes" : 394283456,
+        "ok" : true,
+        "path" : "store4\/layer_02.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_03.idx"
+      },
+      {
+        "actual_bytes" : 394148672,
+        "exact" : true,
+        "expected_bytes" : 394148672,
+        "ok" : true,
+        "path" : "store4\/layer_03.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_04.idx"
+      },
+      {
+        "actual_bytes" : 394019600,
+        "exact" : true,
+        "expected_bytes" : 394019600,
+        "ok" : true,
+        "path" : "store4\/layer_04.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_05.idx"
+      },
+      {
+        "actual_bytes" : 393865248,
+        "exact" : true,
+        "expected_bytes" : 393865248,
+        "ok" : true,
+        "path" : "store4\/layer_05.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_06.idx"
+      },
+      {
+        "actual_bytes" : 393813584,
+        "exact" : true,
+        "expected_bytes" : 393813584,
+        "ok" : true,
+        "path" : "store4\/layer_06.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_07.idx"
+      },
+      {
+        "actual_bytes" : 393880704,
+        "exact" : true,
+        "expected_bytes" : 393880704,
+        "ok" : true,
+        "path" : "store4\/layer_07.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_08.idx"
+      },
+      {
+        "actual_bytes" : 393967184,
+        "exact" : true,
+        "expected_bytes" : 393967184,
+        "ok" : true,
+        "path" : "store4\/layer_08.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_09.idx"
+      },
+      {
+        "actual_bytes" : 393773344,
+        "exact" : true,
+        "expected_bytes" : 393773344,
+        "ok" : true,
+        "path" : "store4\/layer_09.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_10.idx"
+      },
+      {
+        "actual_bytes" : 393575984,
+        "exact" : true,
+        "expected_bytes" : 393575984,
+        "ok" : true,
+        "path" : "store4\/layer_10.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_11.idx"
+      },
+      {
+        "actual_bytes" : 393718912,
+        "exact" : true,
+        "expected_bytes" : 393718912,
+        "ok" : true,
+        "path" : "store4\/layer_11.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_12.idx"
+      },
+      {
+        "actual_bytes" : 393615920,
+        "exact" : true,
+        "expected_bytes" : 393615920,
+        "ok" : true,
+        "path" : "store4\/layer_12.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_13.idx"
+      },
+      {
+        "actual_bytes" : 393692752,
+        "exact" : true,
+        "expected_bytes" : 393692752,
+        "ok" : true,
+        "path" : "store4\/layer_13.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_14.idx"
+      },
+      {
+        "actual_bytes" : 393697664,
+        "exact" : true,
+        "expected_bytes" : 393697664,
+        "ok" : true,
+        "path" : "store4\/layer_14.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_15.idx"
+      },
+      {
+        "actual_bytes" : 393650032,
+        "exact" : true,
+        "expected_bytes" : 393650032,
+        "ok" : true,
+        "path" : "store4\/layer_15.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_16.idx"
+      },
+      {
+        "actual_bytes" : 393476368,
+        "exact" : true,
+        "expected_bytes" : 393476368,
+        "ok" : true,
+        "path" : "store4\/layer_16.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_17.idx"
+      },
+      {
+        "actual_bytes" : 393454752,
+        "exact" : true,
+        "expected_bytes" : 393454752,
+        "ok" : true,
+        "path" : "store4\/layer_17.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_18.idx"
+      },
+      {
+        "actual_bytes" : 393514624,
+        "exact" : true,
+        "expected_bytes" : 393514624,
+        "ok" : true,
+        "path" : "store4\/layer_18.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_19.idx"
+      },
+      {
+        "actual_bytes" : 393536512,
+        "exact" : true,
+        "expected_bytes" : 393536512,
+        "ok" : true,
+        "path" : "store4\/layer_19.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_20.idx"
+      },
+      {
+        "actual_bytes" : 393832256,
+        "exact" : true,
+        "expected_bytes" : 393832256,
+        "ok" : true,
+        "path" : "store4\/layer_20.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_21.idx"
+      },
+      {
+        "actual_bytes" : 393566096,
+        "exact" : true,
+        "expected_bytes" : 393566096,
+        "ok" : true,
+        "path" : "store4\/layer_21.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_22.idx"
+      },
+      {
+        "actual_bytes" : 393359856,
+        "exact" : true,
+        "expected_bytes" : 393359856,
+        "ok" : true,
+        "path" : "store4\/layer_22.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_23.idx"
+      },
+      {
+        "actual_bytes" : 393502384,
+        "exact" : true,
+        "expected_bytes" : 393502384,
+        "ok" : true,
+        "path" : "store4\/layer_23.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_24.idx"
+      },
+      {
+        "actual_bytes" : 393461680,
+        "exact" : true,
+        "expected_bytes" : 393461680,
+        "ok" : true,
+        "path" : "store4\/layer_24.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_25.idx"
+      },
+      {
+        "actual_bytes" : 393458208,
+        "exact" : true,
+        "expected_bytes" : 393458208,
+        "ok" : true,
+        "path" : "store4\/layer_25.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_26.idx"
+      },
+      {
+        "actual_bytes" : 393590736,
+        "exact" : true,
+        "expected_bytes" : 393590736,
+        "ok" : true,
+        "path" : "store4\/layer_26.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_27.idx"
+      },
+      {
+        "actual_bytes" : 393571152,
+        "exact" : true,
+        "expected_bytes" : 393571152,
+        "ok" : true,
+        "path" : "store4\/layer_27.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_28.idx"
+      },
+      {
+        "actual_bytes" : 393535984,
+        "exact" : true,
+        "expected_bytes" : 393535984,
+        "ok" : true,
+        "path" : "store4\/layer_28.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_29.idx"
+      },
+      {
+        "actual_bytes" : 393489312,
+        "exact" : true,
+        "expected_bytes" : 393489312,
+        "ok" : true,
+        "path" : "store4\/layer_29.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_30.idx"
+      },
+      {
+        "actual_bytes" : 393567696,
+        "exact" : true,
+        "expected_bytes" : 393567696,
+        "ok" : true,
+        "path" : "store4\/layer_30.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_31.idx"
+      },
+      {
+        "actual_bytes" : 393558480,
+        "exact" : true,
+        "expected_bytes" : 393558480,
+        "ok" : true,
+        "path" : "store4\/layer_31.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_32.idx"
+      },
+      {
+        "actual_bytes" : 393024512,
+        "exact" : true,
+        "expected_bytes" : 393024512,
+        "ok" : true,
+        "path" : "store4\/layer_32.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_33.idx"
+      },
+      {
+        "actual_bytes" : 392863024,
+        "exact" : true,
+        "expected_bytes" : 392863024,
+        "ok" : true,
+        "path" : "store4\/layer_33.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_34.idx"
+      },
+      {
+        "actual_bytes" : 393046800,
+        "exact" : true,
+        "expected_bytes" : 393046800,
+        "ok" : true,
+        "path" : "store4\/layer_34.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_35.idx"
+      },
+      {
+        "actual_bytes" : 393598464,
+        "exact" : true,
+        "expected_bytes" : 393598464,
+        "ok" : true,
+        "path" : "store4\/layer_35.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_36.idx"
+      },
+      {
+        "actual_bytes" : 393515392,
+        "exact" : true,
+        "expected_bytes" : 393515392,
+        "ok" : true,
+        "path" : "store4\/layer_36.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_37.idx"
+      },
+      {
+        "actual_bytes" : 393585712,
+        "exact" : true,
+        "expected_bytes" : 393585712,
+        "ok" : true,
+        "path" : "store4\/layer_37.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_38.idx"
+      },
+      {
+        "actual_bytes" : 393402000,
+        "exact" : true,
+        "expected_bytes" : 393402000,
+        "ok" : true,
+        "path" : "store4\/layer_38.psc"
+      },
+      {
+        "actual_bytes" : 44072,
+        "exact" : true,
+        "expected_bytes" : 44072,
+        "ok" : true,
+        "path" : "store4\/layer_39.idx"
+      },
+      {
+        "actual_bytes" : 393564544,
+        "exact" : true,
+        "expected_bytes" : 393564544,
+        "ok" : true,
+        "path" : "store4\/layer_39.psc"
+      }
+    ],
+    "layer_files" : [
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc",
+      "psc"
+    ],
+    "layers" : 40,
+    "layout" : "slim",
+    "meta_source" : "store4\/meta.json",
+    "model_dir" : "<app documents>\/model",
+    "optional_present" : [
+
+    ],
+    "present_bytes" : 18150615408,
+    "problems" : [
+
+    ],
+    "record_bytes" : 1769472
+  },
+  "store_codec" : "auto",
+  "thermal_state" : "serious",
+  "time" : "2026-11-22T15:31:32Z"
+}

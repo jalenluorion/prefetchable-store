@@ -1,0 +1,210 @@
+{
+  "free" : 1970176000,
+  "links" : [
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_00.bin",
+      "src" : "dmeng-model\/store\/layer_00.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_01.bin",
+      "src" : "dmeng-model\/store\/layer_01.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_02.bin",
+      "src" : "dmeng-model\/store\/layer_02.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_03.bin",
+      "src" : "dmeng-model\/store\/layer_03.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_04.bin",
+      "src" : "dmeng-model\/store\/layer_04.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_05.bin",
+      "src" : "dmeng-model\/store\/layer_05.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_06.bin",
+      "src" : "dmeng-model\/store\/layer_06.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_07.bin",
+      "src" : "dmeng-model\/store\/layer_07.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_08.bin",
+      "src" : "dmeng-model\/store\/layer_08.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_09.bin",
+      "src" : "dmeng-model\/store\/layer_09.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_10.bin",
+      "src" : "dmeng-model\/store\/layer_10.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_11.bin",
+      "src" : "dmeng-model\/store\/layer_11.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_12.bin",
+      "src" : "dmeng-model\/store\/layer_12.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_13.bin",
+      "src" : "dmeng-model\/store\/layer_13.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_14.bin",
+      "src" : "dmeng-model\/store\/layer_14.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_15.bin",
+      "src" : "dmeng-model\/store\/layer_15.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_16.bin",
+      "src" : "dmeng-model\/store\/layer_16.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_17.bin",
+      "src" : "dmeng-model\/store\/layer_17.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_18.bin",
+      "src" : "dmeng-model\/store\/layer_18.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_19.bin",
+      "src" : "dmeng-model\/store\/layer_19.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_20.bin",
+      "src" : "dmeng-model\/store\/layer_20.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_21.bin",
+      "src" : "dmeng-model\/store\/layer_21.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_22.bin",
+      "src" : "dmeng-model\/store\/layer_22.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_23.bin",
+      "src" : "dmeng-model\/store\/layer_23.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_24.bin",
+      "src" : "dmeng-model\/store\/layer_24.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_25.bin",
+      "src" : "dmeng-model\/store\/layer_25.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_26.bin",
+      "src" : "dmeng-model\/store\/layer_26.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_27.bin",
+      "src" : "dmeng-model\/store\/layer_27.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_28.bin",
+      "src" : "dmeng-model\/store\/layer_28.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_29.bin",
+      "src" : "dmeng-model\/store\/layer_29.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_30.bin",
+      "src" : "dmeng-model\/store\/layer_30.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_31.bin",
+      "src" : "dmeng-model\/store\/layer_31.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_32.bin",
+      "src" : "dmeng-model\/store\/layer_32.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_33.bin",
+      "src" : "dmeng-model\/store\/layer_33.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_34.bin",
+      "src" : "dmeng-model\/store\/layer_34.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_35.bin",
+      "src" : "dmeng-model\/store\/layer_35.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_36.bin",
+      "src" : "dmeng-model\/store\/layer_36.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_37.bin",
+      "src" : "dmeng-model\/store\/layer_37.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_38.bin",
+      "src" : "dmeng-model\/store\/layer_38.bin"
+    },
+    {
+      "bytes" : 452984832,
+      "dst" : "model\/store4\/layer_39.bin",
+      "src" : "dmeng-model\/store\/layer_39.bin"
+    },
+    {
+      "dst" : "<app documents>\/dmeng-model\/embeddings.safetensors",
+      "error" : "Error Domain=NSCocoaErrorDomain Code=513 \"“embeddings.safetensors” couldn’t be linked because you don’t have permission to access “dmeng-model”.\" UserInfo={NSSourceFilePathErrorKey=<app documents>\/model\/embeddings.safetensors, NSUserStringVariant=(\n    Link\n), NSDestinationFilePath=<app documents>\/dmeng-model\/embeddings.safetensors, NSFilePath=<app documents>\/model\/embeddings.safetensors, NSURL=file:\/\/<app documents>\/model\/embeddings.safetensors, NSUnderlyingError=0x12759a250 {Error Domain=NSPOSIXErrorDomain Code=13 \"Permission denied\"}}"
+    }
+  ],
+  "time" : "2026-11-23T00:21:44Z"
+}

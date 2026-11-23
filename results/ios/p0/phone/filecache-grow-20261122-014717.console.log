@@ -1,0 +1,74 @@
+LAUNCH fresh process (args: -- -autotest -fileCacheTest grow); previous process pid 9823: last scene phase active, 80 s ago
+ENGINE PhoneStore (native: -autotest always runs the native engine) mode=prefetch
+DIAG memWarn=log historyMode=strict mappedWeightsInUse=0 mode=prefetch prefixCache=on
+MEM launch: footprint=0.009 peak=0.009 avail=4.286 limit~4.295 GB | mlx active=n/a peak=n/a cache=n/a GB | resident=0.032 file-backed=0.023 compressed=0.000 GB | faults=4886 pageins=4339 | thermal=serious
+FILECACHE launch grow spec '': 40 store files in <app documents>/model/store4
+P0 thermal serious: waiting (0 s)
+SCENE active: same process, up 0.2 s; engine idle, slabs allocated
+P0 thermal serious: waiting (30 s)
+FILECACHE grow: mapped 40 of 40 files, 15.67 GB, 8838 records; resident now 0.00 GB
+FILECACHE phase sweep
+FILECACHE t=1 sweep resident 0.88 GB (early set 0.82) touched 0.83 GB cold 0.08 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=2 sweep resident 1.71 GB (early set 1.06) touched 1.65 GB cold 0.08 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=4 sweep resident 2.41 GB (early set 1.06) touched 2.39 GB cold 0.07 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=5 sweep resident 2.56 GB (early set 0.84) touched 2.63 GB cold 0.02 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=6 sweep resident 2.43 GB (early set 0.45) touched 2.91 GB cold 0.02 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=8 sweep resident 2.19 GB (early set 0.00) touched 3.40 GB cold 0.05 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=9 sweep resident 2.07 GB (early set 0.01) touched 3.93 GB cold 0.05 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=10 sweep resident 2.10 GB (early set 0.00) touched 4.42 GB cold 0.04 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=12 sweep resident 1.97 GB (early set 0.00) touched 4.88 GB cold 0.04 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=13 sweep resident 1.98 GB (early set 0.00) touched 5.37 GB cold 0.05 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=15 sweep resident 2.02 GB (early set 0.01) touched 5.82 GB cold 0.04 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=16 sweep resident 2.04 GB (early set 0.01) touched 6.05 GB cold 0.02 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=17 sweep resident 2.03 GB (early set 0.01) touched 6.33 GB cold 0.02 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=19 sweep resident 2.05 GB (early set 0.01) touched 6.81 GB cold 0.05 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=20 sweep resident 2.09 GB (early set 0.01) touched 7.02 GB cold 0.02 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE sweep done: plateau (no +0.1 GB in 15 s while touching 1.5 GB more), touched 7.10 GB in 21 s, resident 2.10 GB
+FILECACHE phase decode-random
+FILECACHE t=21 decode-random resident 2.14 GB (early set 0.03) touched 7.42 GB cold 0.04 warm 12.79 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=23 decode-random resident 2.23 GB (early set 0.06) touched 7.83 GB cold 0.03 warm 6.74 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=24 decode-random resident 2.30 GB (early set 0.07) touched 8.05 GB cold 0.02 warm 6.21 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=25 decode-random resident 2.28 GB (early set 0.12) touched 8.67 GB cold 0.04 warm 8.05 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=27 decode-random resident 2.16 GB (early set 0.13) touched 8.90 GB cold 0.02 warm 6.12 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=28 decode-random resident 2.15 GB (early set 0.16) touched 9.16 GB cold 0.02 warm 7.66 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=30 decode-random resident 2.12 GB (early set 0.16) touched 9.65 GB cold 0.04 warm 9.74 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=31 decode-random resident 2.12 GB (early set 0.16) touched 9.88 GB cold 0.02 warm 6.47 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=32 decode-random resident 2.20 GB (early set 0.16) touched 10.26 GB cold 0.03 warm 12.98 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=34 decode-random resident 2.31 GB (early set 0.14) touched 11.09 GB cold 0.06 warm 9.14 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=35 decode-random resident 2.38 GB (early set 0.15) touched 11.97 GB cold 0.07 warm 8.46 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=36 decode-random resident 2.39 GB (early set 0.15) touched 12.83 GB cold 0.07 warm 10.65 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=38 decode-random resident 2.42 GB (early set 0.17) touched 13.73 GB cold 0.07 warm 10.35 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=39 decode-random resident 2.40 GB (early set 0.15) touched 14.64 GB cold 0.07 warm 8.24 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=40 decode-random resident 2.35 GB (early set 0.16) touched 15.53 GB cold 0.07 warm 8.88 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=42 decode-random resident 2.35 GB (early set 0.15) touched 16.37 GB cold 0.07 warm 7.64 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=43 decode-random resident 2.34 GB (early set 0.15) touched 17.22 GB cold 0.07 warm 7.54 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=45 decode-random resident 2.39 GB (early set 0.16) touched 18.12 GB cold 0.07 warm 10.26 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=46 decode-random resident 2.39 GB (early set 0.17) touched 18.93 GB cold 0.06 warm 7.23 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=47 decode-random resident 2.38 GB (early set 0.17) touched 19.81 GB cold 0.07 warm 8.60 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=49 decode-random resident 2.38 GB (early set 0.17) touched 20.73 GB cold 0.07 warm 10.55 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=50 decode-random resident 2.30 GB (early set 0.19) touched 21.66 GB cold 0.07 warm 4.99 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE decode_random_all: 0.49 GB/s aggregate, cold 12.76 GB warm 2.13 GB
+FILECACHE phase retouch-resident
+FILECACHE t=52 retouch-resident resident 2.11 GB (early set 0.16) touched 44.05 GB cold 0.07 warm 8.44 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=54 retouch-resident resident 2.09 GB (early set 0.16) touched 192.67 GB cold 0.00 warm 8.06 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=57 retouch-resident resident 2.05 GB (early set 0.16) touched 342.72 GB cold 0.00 warm 6.71 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=61 retouch-resident resident 2.05 GB (early set 0.16) touched 475.78 GB cold 0.00 warm 5.33 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=66 retouch-resident resident 2.05 GB (early set 0.16) touched 550.94 GB cold 0.00 warm 4.98 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE retouch_resident: 35.15 GB/s aggregate, cold 0.07 GB warm 528.88 GB
+FILECACHE phase idle
+FILECACHE t=68 idle resident 2.02 GB (early set 0.16) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=70 idle resident 1.97 GB (early set 0.16) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=71 idle resident 1.95 GB (early set 0.15) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=73 idle resident 1.94 GB (early set 0.15) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=74 idle resident 1.94 GB (early set 0.15) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 fair
+FILECACHE t=75 idle resident 1.94 GB (early set 0.15) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 serious
+FILECACHE t=77 idle resident 1.91 GB (early set 0.15) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 serious
+FILECACHE t=78 idle resident 1.90 GB (early set 0.15) touched 550.94 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 serious
+P0 wrote filecache.json
+DONE
+01:47:17  Acquired tunnel connection to device.
+01:47:17  Enabling developer disk image services.
+01:47:17  Acquired usage assertion.
+Launched application with com.example.phonestore bundle identifier.
+Waiting for the application to terminate...
+The app terminated with the exit code 0.

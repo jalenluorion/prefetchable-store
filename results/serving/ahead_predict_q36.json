@@ -1,0 +1,50 @@
+{
+ "passed": true,
+ "rows": [
+  {
+   "session": "s1_personal",
+   "n": 7,
+   "next": 8,
+   "prompt": 17400,
+   "next_prompt": 17407,
+   "predicted": 17386,
+   "predicted_is_prefix": false,
+   "client_changed_earlier": true,
+   "prediction_leaves_prompt_at": 16189,
+   "wasted_if_wrong": 1197,
+   "lcp_next_vs_prompt": 8209,
+   "next_new_after_prediction": 9198,
+   "next_new_without": 9198
+  },
+  {
+   "session": "s2_clean",
+   "n": 6,
+   "next": 7,
+   "prompt": 8781,
+   "next_prompt": 8792,
+   "predicted": 8767,
+   "predicted_is_prefix": true,
+   "client_changed_earlier": false,
+   "prediction_leaves_prompt_at": 7570,
+   "wasted_if_wrong": 0,
+   "lcp_next_vs_prompt": 7570,
+   "next_new_after_prediction": 25,
+   "next_new_without": 1222
+  },
+  {
+   "session": "s3_personal",
+   "n": 6,
+   "next": 7,
+   "prompt": 17396,
+   "next_prompt": 17424,
+   "predicted": 17382,
+   "predicted_is_prefix": false,
+   "client_changed_earlier": true,
+   "prediction_leaves_prompt_at": 16185,
+   "wasted_if_wrong": 1197,
+   "lcp_next_vs_prompt": 7660,
+   "next_new_after_prediction": 9764,
+   "next_new_without": 9764
+  }
+ ]
+}

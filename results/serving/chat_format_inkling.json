@@ -1,0 +1,989 @@
+{
+ "render": [
+  {
+   "session": "s2_clean",
+   "file": "001.json",
+   "tokens": 615,
+   "ref_tokens": 615,
+   "identical": true,
+   "marks": 2,
+   "messages": 3
+  },
+  {
+   "session": "s2_clean",
+   "file": "002.json",
+   "tokens": 8365,
+   "ref_tokens": 8365,
+   "identical": true,
+   "marks": 1,
+   "messages": 2
+  },
+  {
+   "session": "s2_clean",
+   "file": "003.json",
+   "tokens": 8873,
+   "ref_tokens": 8873,
+   "identical": true,
+   "marks": 4,
+   "messages": 5
+  },
+  {
+   "session": "s2_clean",
+   "file": "004.json",
+   "tokens": 9119,
+   "ref_tokens": 9119,
+   "identical": true,
+   "marks": 6,
+   "messages": 7
+  },
+  {
+   "session": "s2_clean",
+   "file": "005.json",
+   "tokens": 9505,
+   "ref_tokens": 9505,
+   "identical": true,
+   "marks": 9,
+   "messages": 10
+  },
+  {
+   "session": "s2_clean",
+   "file": "006.json",
+   "tokens": 9621,
+   "ref_tokens": 9621,
+   "identical": true,
+   "marks": 11,
+   "messages": 12
+  },
+  {
+   "session": "s2_clean",
+   "file": "007.json",
+   "tokens": 9710,
+   "ref_tokens": 9710,
+   "identical": true,
+   "marks": 13,
+   "messages": 14
+  },
+  {
+   "session": "s2_clean",
+   "file": "008.json",
+   "tokens": 10010,
+   "ref_tokens": 10010,
+   "identical": true,
+   "marks": 15,
+   "messages": 16
+  },
+  {
+   "session": "s2_clean",
+   "file": "009.json",
+   "tokens": 10191,
+   "ref_tokens": 10191,
+   "identical": true,
+   "marks": 17,
+   "messages": 18
+  },
+  {
+   "session": "s2_clean",
+   "file": "010.json",
+   "tokens": 10409,
+   "ref_tokens": 10409,
+   "identical": true,
+   "marks": 19,
+   "messages": 20
+  },
+  {
+   "session": "s2_clean",
+   "file": "011.json",
+   "tokens": 10548,
+   "ref_tokens": 10548,
+   "identical": true,
+   "marks": 21,
+   "messages": 22
+  },
+  {
+   "session": "s4_clean_delays",
+   "file": "001.json",
+   "tokens": 615,
+   "ref_tokens": 615,
+   "identical": true,
+   "marks": 2,
+   "messages": 3
+  },
+  {
+   "session": "s4_clean_delays",
+   "file": "002.json",
+   "tokens": 8365,
+   "ref_tokens": 8365,
+   "identical": true,
+   "marks": 1,
+   "messages": 2
+  },
+  {
+   "session": "s4_clean_delays",
+   "file": "003.json",
+   "tokens": 8873,
+   "ref_tokens": 8873,
+   "identical": true,
+   "marks": 4,
+   "messages": 5
+  },
+  {
+   "session": "s4_clean_delays",
+   "file": "004.json",
+   "tokens": 9119,
+   "ref_tokens": 9119,
+   "identical": true,
+   "marks": 6,
+   "messages": 7
+  },
+  {
+   "session": "s4_clean_delays",
+   "file": "005.json",
+   "tokens": 9505,
+   "ref_tokens": 9505,
+   "identical": true,
+   "marks": 9,
+   "messages": 10
+  },
+  {
+   "session": "s4_clean_delays",
+   "file": "006.json",
+   "tokens": 9621,
+   "ref_tokens": 9621,
+   "identical": true,
+   "marks": 11,
+   "messages": 12
+  },
+  {
+   "session": "s1_personal",
+   "file": "002.json",
+   "tokens": 615,
+   "ref_tokens": 615,
+   "identical": true,
+   "marks": 2,
+   "messages": 3
+  },
+  {
+   "session": "s1_personal",
+   "file": "003.json",
+   "tokens": 17716,
+   "ref_tokens": 17716,
+   "identical": true,
+   "marks": 1,
+   "messages": 2
+  },
+  {
+   "session": "s1_personal",
+   "file": "004.json",
+   "tokens": 18224,
+   "ref_tokens": 18224,
+   "identical": true,
+   "marks": 4,
+   "messages": 5
+  },
+  {
+   "session": "s1_personal",
+   "file": "005.json",
+   "tokens": 18470,
+   "ref_tokens": 18470,
+   "identical": true,
+   "marks": 6,
+   "messages": 7
+  },
+  {
+   "session": "s1_personal",
+   "file": "006.json",
+   "tokens": 18856,
+   "ref_tokens": 18856,
+   "identical": true,
+   "marks": 9,
+   "messages": 10
+  },
+  {
+   "session": "s1_personal",
+   "file": "007.json",
+   "tokens": 18972,
+   "ref_tokens": 18972,
+   "identical": true,
+   "marks": 11,
+   "messages": 12
+  },
+  {
+   "session": "s1_personal",
+   "file": "008.json",
+   "tokens": 19061,
+   "ref_tokens": 19061,
+   "identical": true,
+   "marks": 13,
+   "messages": 14
+  },
+  {
+   "session": "s1_personal",
+   "file": "009.json",
+   "tokens": 19361,
+   "ref_tokens": 19361,
+   "identical": true,
+   "marks": 15,
+   "messages": 16
+  },
+  {
+   "session": "s1_personal",
+   "file": "010.json",
+   "tokens": 19542,
+   "ref_tokens": 19542,
+   "identical": true,
+   "marks": 17,
+   "messages": 18
+  },
+  {
+   "session": "s1_personal",
+   "file": "011.json",
+   "tokens": 19760,
+   "ref_tokens": 19760,
+   "identical": true,
+   "marks": 19,
+   "messages": 20
+  },
+  {
+   "session": "s1_personal",
+   "file": "012.json",
+   "tokens": 19899,
+   "ref_tokens": 19899,
+   "identical": true,
+   "marks": 21,
+   "messages": 22
+  }
+ ],
+ "parse_recorded": [
+  {
+   "file": "agent.txt",
+   "at": 1643,
+   "calls": [
+    "read_file"
+   ],
+   "reasoning_chars": 200,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "agent.txt",
+   "at": 3289,
+   "calls": [
+    "run_shell"
+   ],
+   "reasoning_chars": 237,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "agent.txt",
+   "at": 4209,
+   "calls": [
+    "edit_file"
+   ],
+   "reasoning_chars": 621,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "agent.txt",
+   "at": 5845,
+   "calls": [
+    "edit_file"
+   ],
+   "reasoning_chars": 0,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "agent.txt",
+   "at": 6238,
+   "calls": [
+    "read_file"
+   ],
+   "reasoning_chars": 175,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "agent.txt",
+   "at": 7405,
+   "calls": [
+    "edit_file"
+   ],
+   "reasoning_chars": 0,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "agent.txt",
+   "at": 8091,
+   "calls": [
+    "run_shell"
+   ],
+   "reasoning_chars": 0,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "agent.txt",
+   "at": 8569,
+   "calls": [],
+   "reasoning_chars": 0,
+   "content_chars": 886,
+   "rerender_identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "tool_prompt.txt",
+   "at": 728,
+   "calls": [
+    "read_file"
+   ],
+   "reasoning_chars": 0,
+   "content_chars": 0,
+   "rerender_identical": true,
+   "stream_identical": true
+  }
+ ],
+ "parse_opencode_calls": [
+  {
+   "file": "003.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "004.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "004.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 16,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 16,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 18,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 16,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 18,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 20,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "003.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "004.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "004.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "004.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "005.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "006.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "007.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "008.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "009.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "010.json",
+   "msg": 16,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 16,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "011.json",
+   "msg": 18,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 2,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 5,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 7,
+   "calls": 2,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 10,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 14,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 16,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 18,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  },
+  {
+   "file": "012.json",
+   "msg": 20,
+   "calls": 1,
+   "identical": true,
+   "stream_identical": true
+  }
+ ],
+ "stream": [],
+ "passed": true
+}

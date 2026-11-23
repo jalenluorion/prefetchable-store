@@ -1,0 +1,152 @@
+LAUNCH fresh process (args: -- -autotest); previous process pid 10200: last scene phase active, 391 s ago
+ENGINE PhoneStore (native: -autotest always runs the native engine) mode=prefetch
+DIAG memWarn=log historyMode=strict mappedWeightsInUse=0 mode=prefetch prefixCache=on
+MEM launch: footprint=0.009 peak=0.009 avail=4.286 limit~4.295 GB | mlx active=n/a peak=n/a cache=n/a GB | resident=0.032 file-backed=0.023 compressed=0.000 GB | faults=3012 pageins=400 | thermal=nominal
+PROBE avail=4.27GB phys=5.94GB disk_free=4.78GB thermal=nominal cap=18 (budget) layer_caps=auto:720 slots=720 layout=slim store=complete (0 problems) codec_layers=40
+LOAD tokenizer + chat template from model/
+SCENE active: same process, up 0.4 s; engine loading, slabs allocated
+LOAD kernels: mlx.metallib (-fno-fast-math): /var/containers/Bundle/Application/<app>/PhoneStoreApp.app/mlx.metallib
+LOAD weights loaded: resident 1.10 GB + routers 0.33 GB; phys_footprint 0.177 -> 1.599 GB (+1.423), resident pages +1.363 GB (file-backed +-0.027)
+LOAD loaded in 2.5s
+LOAD ready in 2.9s: prefetch, cap 18, 2.75 GB planned, layout slim
+LOAD layout slim: embeddings <app documents>/model/embeddings.safetensors; resident <app documents>/model/cache/resident_q4.safetensors; routers <app documents>/model/cache/routers_k4_r8.safetensors
+LOAD ready: native runtime (mlx-swift 0.32.3, MLX core 0.32.3); prefetch, int8 lag-4 routers, cap 18 (auto:720, 720 slots); layout slim; codec: 40 layers .psc; kernels: mlx.metallib (-fno-fast-math): /var/containers/Bundle/Application/<app>/PhoneStoreApp.app/mlx.metallib
+SETTING mode = prefetch
+SETTING layout = slim
+SETTING embeddings = bf16 rows read per token from <app documents>/model/embeddings.safetensors
+SETTING routers = lag-4, 8 named, int8 matrices (<app documents>/model/cache/routers_k4_r8.safetensors)
+SETTING keep = 31
+SETTING evict = hazard
+SETTING drop = no drop
+SETTING resident = int4, 1.10 GB (<app documents>/model/cache/resident_q4.safetensors)
+SETTING cap (slots / layer) = per layer (auto:720), mean 18
+SETTING slots per layer = 14 13 13 16 16 17 16 19 18 19 17 18 19 19 19 19 19 19 17 20 18 17 19 17 20 19 19 18 17 18 17 18 19 18 20 19 18 20 19 23
+SETTING slabs = 720 slots (sum over layers) x 1.77 MB = 1.27 GB
+SETTING memory plan = 2.75 GB (resident 1.10 + routers 0.33 + slabs 1.27 + codec staging 0.04)
+SETTING store codec = auto: 40 layers compressed (0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39), 0 raw; staging 24 x 1.65 MB
+SETTING readers = 8, 4 chunks / record
+SETTING page cache = F_NOCACHE + no readahead
+SETTING read overlap = late wait on, head start on
+SETTING sampling = greedy (launch argument -autotest)
+SETTING prefill = token by token
+SETTING prefill read-ahead = off
+SETTING prefix re-land = lazy: the next chunk reads what it uses or keeps
+SETTING kernel warm-up = off (token-by-token prefill)
+SETTING MLX cache limit = 64 MB, wired limit on
+SETTING kernels = mlx.metallib (-fno-fast-math): /var/containers/Bundle/Application/<app>/PhoneStoreApp.app/mlx.metallib
+SETTING MLX core = 0.32.3
+SETTING native cache = <app documents>/model/cache
+SETTING model dir = <app documents>/model
+SETTING thinking budget = none
+SETTING history = strict template: transformers' bytes; follow-ups re-prefill the previous answer
+SETTING prefix cache = on: 3 states, 208 MB in prefix/, LRU cap 1.5 GB
+MEM after load: footprint=2.855 peak=2.855 avail=1.440 limit~4.295 GB | mlx active=2.712 peak=2.712 cache=0.000 GB | resident=1.570 file-backed=0.015 compressed=0.029 GB | faults=104348 pageins=1557 | thermal=nominal
+AUTOTEST start (native engine)
+AUTOTEST prefix cache emptied (reply 1 must start cold; -keepPrefixCache keeps it)
+[prefix-cache] miss: no cached prefix of the 41 tokens | cache: 2 entries, 0.14 GB
+PROGRESS reply=1 cold done=0/41 reused=0 read=0.0 MB reland=0.0 MB prefill=0.00 s elapsed=0.04 s
+PROGRESS reply=1 cold done=10/41 reused=0 read=2770.4 MB reland=0.0 MB prefill=5.07 s elapsed=5.11 s
+PROGRESS reply=1 cold done=20/41 reused=0 read=5093.8 MB reland=0.0 MB prefill=8.77 s elapsed=8.81 s
+PROGRESS reply=1 cold done=30/41 reused=0 read=7159.6 MB reland=0.0 MB prefill=12.09 s elapsed=12.13 s
+PROGRESS reply=1 cold done=40/41 reused=0 read=9492.9 MB reland=0.0 MB prefill=15.69 s elapsed=15.73 s
+PROGRESS reply=1 cold done=41/41 reused=0 read=9623.7 MB reland=0.0 MB prefill=15.91 s elapsed=15.95 s
+[prefix-cache] saved 41 tokens -> n0000041-9945eee9eebd0970ac068d294e797476f5b4d04d230f33efd277999c85dfbb47.safetensors (66.6 MB, 0.596 s) | cache: 3 entries, 0.21 GB
+MEM reply 1 first token: footprint=2.957 peak=2.984 avail=1.338 limit~4.295 GB | mlx active=2.783 peak=2.790 cache=0.008 GB | resident=1.587 file-backed=0.014 compressed=0.093 GB | faults=117383 pageins=3839 | thermal=nominal
+MEM reply 1 token 10: footprint=2.958 peak=2.984 avail=1.337 limit~4.295 GB | mlx active=2.783 peak=2.790 cache=0.008 GB | resident=1.598 file-backed=0.019 compressed=0.087 GB | faults=119307 pageins=5001 | thermal=nominal
+MEM reply 1 token 20: footprint=2.959 peak=2.984 avail=1.336 limit~4.295 GB | mlx active=2.782 peak=2.790 cache=0.008 GB | resident=1.596 file-backed=0.019 compressed=0.089 GB | faults=119447 pageins=5016 | thermal=nominal
+MEM reply 1 token 30: footprint=2.958 peak=2.984 avail=1.337 limit~4.295 GB | mlx active=2.783 peak=2.790 cache=0.008 GB | resident=1.593 file-backed=0.017 compressed=0.091 GB | faults=119702 pageins=5076 | thermal=nominal
+MEM reply 1 token 40: footprint=2.959 peak=2.984 avail=1.336 limit~4.295 GB | mlx active=2.783 peak=2.790 cache=0.007 GB | resident=1.594 file-backed=0.016 compressed=0.090 GB | faults=119945 pageins=5123 | thermal=nominal
+MEM reply 1 token 50: footprint=2.958 peak=2.984 avail=1.336 limit~4.295 GB | mlx active=2.783 peak=2.790 cache=0.008 GB | resident=1.594 file-backed=0.016 compressed=0.090 GB | faults=120086 pageins=5147 | thermal=nominal
+MEM reply 1 token 60: footprint=2.959 peak=2.984 avail=1.336 limit~4.295 GB | mlx active=2.783 peak=2.790 cache=0.008 GB | resident=1.593 file-backed=0.016 compressed=0.091 GB | faults=120217 pageins=5175 | thermal=nominal
+MEM reply 1 token 70: footprint=2.959 peak=2.984 avail=1.336 limit~4.295 GB | mlx active=2.782 peak=2.790 cache=0.008 GB | resident=1.595 file-backed=0.016 compressed=0.090 GB | faults=120921 pageins=5265 | thermal=nominal
+EVENT thermal -> fair
+MEM reply 1 token 80: footprint=2.964 peak=2.984 avail=1.331 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.595 file-backed=0.016 compressed=0.090 GB | faults=121102 pageins=5311 | thermal=fair
+MEM reply 1 token 90: footprint=2.964 peak=2.984 avail=1.331 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.596 file-backed=0.016 compressed=0.090 GB | faults=121307 pageins=5321 | thermal=fair
+MEM reply 1 token 100: footprint=2.964 peak=2.984 avail=1.331 limit~4.295 GB | mlx active=2.782 peak=2.792 cache=0.011 GB | resident=1.596 file-backed=0.016 compressed=0.090 GB | faults=121380 pageins=5353 | thermal=fair
+MEM reply 1 token 110: footprint=2.963 peak=2.984 avail=1.332 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.597 file-backed=0.016 compressed=0.089 GB | faults=121874 pageins=5368 | thermal=fair
+MEM reply 1 token 120: footprint=2.966 peak=2.984 avail=1.329 limit~4.295 GB | mlx active=2.790 peak=2.792 cache=0.003 GB | resident=1.600 file-backed=0.019 compressed=0.089 GB | faults=122446 pageins=5807 | thermal=fair
+MEM reply 1 token 130: footprint=2.966 peak=2.984 avail=1.329 limit~4.295 GB | mlx active=2.782 peak=2.792 cache=0.011 GB | resident=1.599 file-backed=0.019 compressed=0.091 GB | faults=122670 pageins=5822 | thermal=fair
+MEM reply 1 token 140: footprint=2.964 peak=2.984 avail=1.331 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.599 file-backed=0.019 compressed=0.091 GB | faults=123133 pageins=5830 | thermal=fair
+MEM reply 1 token 150: footprint=2.966 peak=2.984 avail=1.329 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.598 file-backed=0.017 compressed=0.091 GB | faults=123256 pageins=5844 | thermal=fair
+MEM reply 1 token 160: footprint=2.966 peak=2.984 avail=1.329 limit~4.295 GB | mlx active=2.782 peak=2.792 cache=0.010 GB | resident=1.599 file-backed=0.017 compressed=0.090 GB | faults=123739 pageins=5859 | thermal=fair
+MEM reply 1 token 170: footprint=2.967 peak=2.984 avail=1.328 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.599 file-backed=0.017 compressed=0.090 GB | faults=123800 pageins=5863 | thermal=fair
+MEM reply 1 token 180: footprint=2.967 peak=2.984 avail=1.328 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.600 file-backed=0.017 compressed=0.090 GB | faults=124067 pageins=5877 | thermal=fair
+MEM reply 1 token 190: footprint=2.967 peak=2.984 avail=1.328 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.600 file-backed=0.017 compressed=0.089 GB | faults=124373 pageins=5913 | thermal=fair
+MEM reply 1 token 200: footprint=2.967 peak=2.984 avail=1.328 limit~4.295 GB | mlx active=2.783 peak=2.792 cache=0.010 GB | resident=1.599 file-backed=0.017 compressed=0.091 GB | faults=124672 pageins=5915 | thermal=fair
+MEM reply 1 token 210: footprint=2.967 peak=2.984 avail=1.328 limit~4.295 GB | mlx active=2.782 peak=2.792 cache=0.011 GB | resident=1.600 file-backed=0.017 compressed=0.090 GB | faults=125012 pageins=5922 | thermal=fair
+MEM reply 1 token 220: footprint=2.979 peak=2.984 avail=1.316 limit~4.295 GB | mlx active=2.788 peak=2.795 cache=0.016 GB | resident=1.601 file-backed=0.017 compressed=0.089 GB | faults=125356 pageins=5932 | thermal=fair
+MEM reply 1 token 230: footprint=2.979 peak=2.984 avail=1.316 limit~4.295 GB | mlx active=2.788 peak=2.797 cache=0.016 GB | resident=1.601 file-backed=0.017 compressed=0.090 GB | faults=125393 pageins=5936 | thermal=fair
+MEM reply 1 token 240: footprint=2.979 peak=2.984 avail=1.316 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.600 file-backed=0.017 compressed=0.091 GB | faults=125708 pageins=5949 | thermal=fair
+MEM reply 1 token 250: footprint=2.978 peak=2.984 avail=1.317 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.600 file-backed=0.017 compressed=0.091 GB | faults=126079 pageins=5959 | thermal=fair
+MEM reply 1 token 260: footprint=2.978 peak=2.984 avail=1.317 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.598 file-backed=0.016 compressed=0.092 GB | faults=126150 pageins=5964 | thermal=fair
+MEM reply 1 token 270: footprint=2.978 peak=2.984 avail=1.317 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.597 file-backed=0.016 compressed=0.093 GB | faults=126544 pageins=5966 | thermal=fair
+MEM reply 1 token 280: footprint=2.979 peak=2.984 avail=1.316 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.597 file-backed=0.015 compressed=0.094 GB | faults=127107 pageins=6035 | thermal=fair
+MEM reply 1 token 290: footprint=2.978 peak=2.984 avail=1.317 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.015 GB | resident=1.597 file-backed=0.015 compressed=0.094 GB | faults=127286 pageins=6069 | thermal=fair
+MEM reply 1 token 300: footprint=2.980 peak=2.984 avail=1.315 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.599 file-backed=0.016 compressed=0.093 GB | faults=128281 pageins=6247 | thermal=fair
+PROGRESS check reply=1: last event 41/41 tokens, 9623.7 MB, 15.91 s; engine prefilled 41 tokens (cold), 9623.7 MB, 15.94 s; tokens equal, kind equal
+REPLY tokens=300 reason=max_new 3.20 tok/s 206.1 MB/token
+UI reply=1 decode_tok_s=3.201 engine_tok_s=3.200 diff=0.02% ttft_ms=16902 (engine 16899) mb_per_token=206.1 (engine 206.1) prefill=cold
+PREFIX reply=1 hit=0 restored_tokens=n/a restore=n/a ms (load n/a ms, state n/a MB; re-land n/a ms, n/a MB read, n/a read / n/a kept / n/a moved) saved=1 save=596 ms (66.6 MB) cache=3 states 208 MB
+PREFILL reply=1 tokens=41 seconds=15.94 read=9623.7 MB records=6297 drive=0.604 GB/s (busy 0.639) blocked_on_reads=15145 ms gpu=5093 ms encode=764 ms template=34.7 ms first_token=318.6 ms
+SPLIT reply=1 tokens=300 tok/s=3.200 ms/token=312.5 encode=11.4 blocked_on_reads=286.2 (name 3.1 land 283.0) sync_wait=14.4 gpu=118.4 ms gpu_busy=37.9% drive=0.660 GB/s busy=0.709 GB/s (93% of the time) MiB/token=196.6 in_memory=0.8214 sync_reads=0 records/token=135.06 reads_in_flight=7.34
+MEM end of reply 1 (300 tokens, max_new): footprint=2.980 peak=2.984 avail=1.315 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.604 file-backed=0.016 compressed=0.088 GB | faults=128657 pageins=6272 | thermal=fair
+IDENTITY skipped: no bundled reference for auto720 (bundled: pf10, pf14, auto560; -ref FILE compares anyway)
+RUN1 3.200 tok/s 196.6 MiB/token in_memory 0.8214 held 720 sync_reads 0 prefill 41 tokens 15.9s (cold)
+PROGRESS reply=2 live prefix done=0/26 reused=341 read=0.0 MB reland=0.0 MB prefill=0.00 s elapsed=0.02 s
+PROGRESS reply=2 live prefix done=10/26 reused=341 read=2573.9 MB reland=0.0 MB prefill=3.77 s elapsed=3.80 s
+PROGRESS reply=2 live prefix done=20/26 reused=341 read=4857.1 MB reland=0.0 MB prefill=7.13 s elapsed=7.15 s
+PROGRESS reply=2 live prefix done=26/26 reused=341 read=6057.7 MB reland=0.0 MB prefill=9.50 s elapsed=9.52 s
+[prefix-cache] saved 367 tokens -> n0000367-43e378ca0b34247b412d6f8fe3d747ec53b3b26d3f9f927372f1e1c69ed51b32.safetensors (73.3 MB, 1.034 s) | cache: 4 entries, 0.28 GB
+MEM reply 2 first token: footprint=2.977 peak=2.984 avail=1.318 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.017 GB | resident=1.608 file-backed=0.014 compressed=0.095 GB | faults=134070 pageins=7244 | thermal=fair
+EVENT thermal -> serious
+MEM reply 2 token 10: footprint=2.976 peak=2.984 avail=1.319 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.615 file-backed=0.017 compressed=0.091 GB | faults=135410 pageins=8014 | thermal=serious
+MEM reply 2 token 20: footprint=2.977 peak=2.984 avail=1.318 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.613 file-backed=0.017 compressed=0.093 GB | faults=135513 pageins=8027 | thermal=serious
+MEM reply 2 token 30: footprint=2.976 peak=2.984 avail=1.319 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.017 GB | resident=1.614 file-backed=0.017 compressed=0.092 GB | faults=135764 pageins=8074 | thermal=serious
+MEM reply 2 token 40: footprint=2.977 peak=2.984 avail=1.318 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.613 file-backed=0.016 compressed=0.093 GB | faults=136083 pageins=8099 | thermal=serious
+PROGRESS check reply=2: last event 26/26 tokens, 6057.7 MB, 9.50 s; engine prefilled 26 tokens (live prefix), 6057.7 MB, 9.52 s; tokens equal, kind equal
+REPLY tokens=41 reason=cancelled 3.03 tok/s 216.6 MB/token
+UI reply=2 decode_tok_s=3.035 engine_tok_s=3.031 diff=0.12% ttft_ms=10860 (engine 10860) mb_per_token=216.6 (engine 216.6) prefill=live prefix
+PREFILL reply=2 tokens=26 seconds=9.52 read=6057.7 MB records=3966 drive=0.636 GB/s (busy 0.674) blocked_on_reads=9189 ms gpu=3274 ms encode=304 ms template=21.3 ms first_token=279.4 ms
+SPLIT reply=2 tokens=41 tok/s=3.031 ms/token=329.9 encode=10.9 blocked_on_reads=303.3 (name 3.1 land 300.2) sync_wait=14.9 gpu=123.8 ms gpu_busy=37.5% drive=0.657 GB/s busy=0.705 GB/s (93% of the time) MiB/token=206.6 in_memory=0.7589 sync_reads=0 records/token=141.83 reads_in_flight=7.38
+MEM end of reply 2 (41 tokens, cancelled): footprint=2.977 peak=2.984 avail=1.318 limit~4.295 GB | mlx active=2.788 peak=2.798 cache=0.016 GB | resident=1.615 file-backed=0.017 compressed=0.092 GB | faults=136336 pageins=8296 | thermal=serious
+[prefix-cache] miss: no cached prefix of the 31 tokens | cache: 4 entries, 0.28 GB
+PROGRESS reply=3 cold done=0/31 reused=0 read=0.0 MB reland=0.0 MB prefill=0.00 s elapsed=0.01 s
+PROGRESS reply=3 cold done=10/31 reused=0 read=2695.7 MB reland=0.0 MB prefill=3.64 s elapsed=3.65 s
+PROGRESS reply=3 cold done=20/31 reused=0 read=4830.4 MB reland=0.0 MB prefill=6.49 s elapsed=6.51 s
+PROGRESS reply=3 cold done=30/31 reused=0 read=7155.1 MB reland=0.0 MB prefill=9.57 s elapsed=9.58 s
+PROGRESS reply=3 cold done=31/31 reused=0 read=7298.1 MB reland=0.0 MB prefill=9.77 s elapsed=9.79 s
+[prefix-cache] saved 31 tokens -> n0000031-4fb9674de96db36a19986074da108757487d45b6d761c21d823540be2917b115.safetensors (66.4 MB, 0.190 s) | cache: 5 entries, 0.35 GB
+MEM reply 3 first token: footprint=2.976 peak=2.984 avail=1.319 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.020 GB | resident=1.616 file-backed=0.019 compressed=0.085 GB | faults=138830 pageins=8843 | thermal=serious
+MEM reply 3 token 10: footprint=2.976 peak=2.984 avail=1.319 limit~4.295 GB | mlx active=2.782 peak=2.798 cache=0.021 GB | resident=1.615 file-backed=0.020 compressed=0.087 GB | faults=139192 pageins=9087 | thermal=serious
+MEM reply 3 token 20: footprint=2.977 peak=2.984 avail=1.318 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.021 GB | resident=1.616 file-backed=0.020 compressed=0.087 GB | faults=139293 pageins=9095 | thermal=serious
+MEM reply 3 token 30: footprint=2.975 peak=2.984 avail=1.320 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.020 GB | resident=1.616 file-backed=0.020 compressed=0.087 GB | faults=139362 pageins=9098 | thermal=serious
+MEM reply 3 token 40: footprint=2.977 peak=2.984 avail=1.318 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.021 GB | resident=1.616 file-backed=0.020 compressed=0.087 GB | faults=139399 pageins=9111 | thermal=serious
+MEM reply 3 token 50: footprint=2.977 peak=2.984 avail=1.318 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.021 GB | resident=1.617 file-backed=0.020 compressed=0.087 GB | faults=139528 pageins=9115 | thermal=serious
+MEM reply 3 token 60: footprint=2.978 peak=2.984 avail=1.317 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.020 GB | resident=1.618 file-backed=0.020 compressed=0.086 GB | faults=139620 pageins=9118 | thermal=serious
+MEM reply 3 token 70: footprint=2.978 peak=2.984 avail=1.317 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.021 GB | resident=1.618 file-backed=0.020 compressed=0.086 GB | faults=139809 pageins=9123 | thermal=serious
+PROGRESS check reply=3: last event 31/31 tokens, 7298.1 MB, 9.77 s; engine prefilled 31 tokens (cold), 7298.1 MB, 9.79 s; tokens equal, kind equal
+REPLY tokens=74 reason=eos 3.67 tok/s 189.1 MB/token
+UI reply=3 decode_tok_s=3.669 engine_tok_s=3.666 diff=0.08% ttft_ms=10417 (engine 10413) mb_per_token=189.1 (engine 189.1) prefill=cold
+PREFIX reply=3 hit=0 restored_tokens=n/a restore=n/a ms (load n/a ms, state n/a MB; re-land n/a ms, n/a MB read, n/a read / n/a kept / n/a moved) saved=1 save=190 ms (66.4 MB) cache=5 states 348 MB
+PREFILL reply=3 tokens=31 seconds=9.79 read=7298.1 MB records=4776 drive=0.746 GB/s (busy 0.795) blocked_on_reads=9453 ms gpu=3687 ms encode=318 ms template=7.1 ms first_token=423.2 ms
+SPLIT reply=3 tokens=74 tok/s=3.666 ms/token=272.8 encode=9.8 blocked_on_reads=249.2 (name 3.1 land 246.1) sync_wait=13.5 gpu=111.0 ms gpu_busy=40.7% drive=0.693 GB/s busy=0.749 GB/s (93% of the time) MiB/token=180.3 in_memory=0.8719 sync_reads=0 records/token=124.09 reads_in_flight=7.29
+MEM end of reply 3 (74 tokens, eos): footprint=2.979 peak=2.984 avail=1.316 limit~4.295 GB | mlx active=2.783 peak=2.798 cache=0.021 GB | resident=1.619 file-backed=0.020 compressed=0.086 GB | faults=139831 pageins=9123 | thermal=serious
+CHECK engine_ready=true
+CHECK not_generating_after=true
+CHECK probe_written=true
+CHECK reply1_cold=true
+CHECK reply1_ran_to_max_new=true
+CHECK reply2_cancelled=true
+CHECK reply2_partial=true
+CHECK reply2_thinking_text=true
+CHECK reply3_cold_after_clear=true
+CHECK reply3_no_thinking=true
+CHECK ui_rate_matches_engine_2pct=true
+AUTOTEST PASS
+DONE
+02:20:37  Acquired tunnel connection to device.
+02:20:37  Enabling developer disk image services.
+02:20:37  Acquired usage assertion.
+Launched application with com.example.phonestore bundle identifier.
+Waiting for the application to terminate...
+App terminated due to signal 15.

@@ -1,149 +1,164 @@
-# Qwen3.8-Flash-Next from the SSD of a 16 GB MacBook
+# moved-store
 
-Code for running [Qwen/Qwen3.8-Flash-Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next), a 180B-parameter
-mixture-of-experts model, on a base M4 MacBook Pro with 16 GB of RAM: about 9 GB in memory, 112 GiB of weights on the
-internal SSD, 5.7 tokens/s on a benchmark prompt and 4.6 tokens/s in an agent session under stock OpenCode.
+A local inference engine for large mixture-of-experts language models on an Apple Silicon laptop and an iPhone. The
+routed experts stay on the drive, one record per expert, and are read into a cache as layers need them; everything else
+stays in memory. Small trained routers name each layer's experts a couple of layers early, so their reads are scheduled
+while the layers in between compute. The model's own router still decides every expert.
 
-Weights: [jalenluorion/Qwen3.8-Flash-Next-moved-store](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-moved-store)
-on Hugging Face (experts at 4-bit, the n-gram table at 8-bit, trained routers).
+It runs Qwen3.6-35B-A3B and Inkling 2 Mini on a base M4 MacBook Pro with 16 GB, as a command-line tool, as an
+OpenAI-compatible server for agent clients such as OpenCode, and through a C API (used by the iPhone app).
 
-The released weights are frozen. The only trained part is a small router per layer (576M parameters in total, 0.3% of
-the model) that chooses each layer's experts four layers before that layer runs, so the SSD reads them while the
-layers in between compute.
+## Two modes
+
+| mode | what it does | default on |
+|---|---|---|
+| `exact` | Lossless: generated tokens never depend on the cache, the routers or timing. The model's router picks 8 experts per layer and the engine waits for every one. | Mac, iPhones with enough memory |
+| `fast` | The model's router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out. Tokens can differ from `exact`. | iPhones with less memory; opt-in elsewhere |
+
+## Three profiles, picked from the device
+
+| profile | when | in-memory weights | expert cache | default mode |
+|---|---|---|---|---|
+| `mac` | macOS | 8-bit | locked, sized from free memory at start, follows memory pressure | `exact` |
+| `phone` | iOS with at least 5.0 GB available at open | 8-bit | one locked slab sized at open | `exact` |
+| `phone-small` | iOS with less than 5.0 GB available at open | 35B: 4-bit; Inkling: 8-bit | the same slab rule | `fast` |
+
+`--profile NAME` overrides the automatic choice and `--mode exact|fast` the profile's mode. Each profile also sets the
+per-model defaults (which routers, their names rule, Inkling's cross-token names, eviction, drafting off). They come from
+the weight repo's `moved-store.json`, with built-in fallbacks: [docs/MANIFEST-PRESETS.md](docs/MANIFEST-PRESETS.md).
 
 ## Quick start
 
-Apple Silicon with 16 GB or more, and about 140 GB of free disk (the download is 123 GiB; the first run writes a
-4.3 GiB cache next to it):
-
-```bash
-git clone https://github.com/jalenluorion/Qwen3.8-Flash-Next-moved-store
-cd Qwen3.8-Flash-Next-moved-store
-pip install -r requirements.txt
-hf download jalenluorion/Qwen3.8-Flash-Next-moved-store --local-dir model --exclude "routers3/*"
-
-python mlx_run.py --dir model                          # chat; -v prints the per-turn statistics
-python mlx_run.py --dir model --prompt "Explain what a mixture of experts is." --max-new 200
-python mlx_run.py --dir model --bench --max-new 120    # the timing JSON behind the numbers below
-cd demo && ./demo.sh                                   # the same engine behind an OpenAI-compatible API, in OpenCode
+```
+cmake -S . -B build && cmake --build build -j
+hf download jalenluorion/Qwen3.6-35B-A3B-moved-store --local-dir model
+build/dmeng --model model --chat --prompt "Write a haiku about rivers." --n 200
 ```
 
-The first start quantises the in-memory part to 8-bit once and caches it as `model/resident_int8.safetensors`. On a 16 GB machine close other apps first: the model takes about 9 GB, and macOS
-starts compressing its memory when the rest of the machine wants more than what is left.
+`--prompt` needs the Python packages `tokenizers` and `jinja2` (the tokenizer and chat template are the release's).
+Token ids work without Python: `build/dmeng --model model --prompt-file ids.txt`. The OpenAI-style server for agent
+clients uses the same defaults:
 
-`demo.sh` needs [OpenCode](https://opencode.ai) (tested with 1.19.0). It starts the server if it is not running and
-opens OpenCode with OpenCode's stock prompt and tools. See [demo/README.md](demo/README.md).
+```
+python python/serve/dmserve.py --model-dir model --port 8090
+```
+
+`dmeng --help` lists the everyday options; `dmeng --help-advanced` lists everything else, grouped
+([docs/ADVANCED.md](docs/ADVANCED.md)). The Inkling repository is `jalenluorion/Inkling-2-Mini-moved-store`. A folder
+downloaded from the Hub runs as it is: engine-ready files ship in `derived/`, and anything missing is derived once into
+`<model>/.dmeng/`. Each profile's file list is in the manifest (`profiles.<name>.parts`), for downloading only what one
+device needs.
+
+## Measured numbers
+
+Base M4 MacBook Pro, 16 GB, internal SSD, and an iPhone 15 Plus. The Mac tables are generated from the run records in
+`results/headline/runs_final/` by `results/headline/table.py`; each row gives the conditions it was measured under.
+
+<!-- headline tables: generated by results/headline/table.py -->
+
+**Qwen3.6-35B-A3B, decoding** (400 tokens after the prompt, MacBook Pro M4 16 GB; tokens/s of each clean run)
+
+| cache GB | prompt | cache only | exact | fast | peak footprint GB | others' CPU | exact ids |
+|---|---|---|---|---|---|---|---|
+| 5 | prose (9-token prompt) | 16.3 (one clean run) | - (no clean run) | - (no clean run) | 7.2 | 81% |  |
+| 5 | code (357-token prompt) | 14.7 (one clean run) | - | - | 7.2 | 73% |  |
+| 6.6 | prose (9-token prompt) | - (no clean run) | 23.4 (one clean run) | 27.2 (one clean run) | 8.8 | 62-87% |  |
+
+**Qwen3.6-35B-A3B, agent turns** (recorded agent prompts, batched prompt prefill, generation to the end of the turn)
+
+(no clean runs yet)
+
+**Inkling 2 Mini, decoding** (400 tokens after the prompt, MacBook Pro M4 16 GB; tokens/s of each clean run)
+
+(no clean runs yet)
+
+**Inkling 2 Mini, agent turns** (recorded agent prompts, batched prompt prefill, generation to the end of the turn)
+
+(no clean runs yet)
+
+**Qwen3.6-35B-A3B on an iPhone 15 Plus** (phone-small profile: 4-bit in-memory weights; one run per cell; the old app is the earlier MLX-based app on the same phone)
+
+| aspect | old app | exact | fast |
+|---|---|---|---|
+| decode, Pittsburgh (400) | 3.95 tok/s (Nov 7); 3.48 on 2026-11-22 | 3.02-3.08 | 4.16 (4.83 without names) |
+| decode, coding (400) | not measured | 1.77 (1.93 with names) | 3.19 |
+| first token, 472-token input, cold (as of 2026-11-22) | 21 s (Nov 7) | 26.4 s | 26.6 s |
+| first token, short first message (as of 2026-11-22) | 6.57 s (Nov 7) | 7.8 s | 9.3 s |
+| follow-up in the same chat (as of 2026-11-22) | 5.6-6 s live follow-up | 6.6 s | 6.9 s |
+| same chat after a relaunch (as of 2026-11-22) | 8.7 s (Nov 7) | 12.9 s | 13.2 s |
+| cold launch to ready | 3.5 s (Nov 7) | 2.75-2.95 s (same app and resident) | 2.75-2.95 s |
+
+Cache only: no names and the older eviction rule (`--evict freq`). Exact: the profile's routers (35B: `linear_k2`, top 8; Inkling: `mlp_k2_h512` with the confidence rule and cross-token names). Fast: `--mode fast`. Two numbers are the two repetitions; a run is left out when other processes used more than one core on average (others' CPU above 100%), and a cell with one run left is marked. `*`: on battery. Exact ids: the greedy ids of the row's exact runs compared with each other.
+
+<!-- end of generated tables -->
+
+Quality of `fast` and of the 4-bit in-memory weights (agreement with the released weights and with `exact`, on prose
+and agent-style text) is on each weight repo's model card, next to the conditions it was measured under.
+
+## What we tried and dropped
+
+Kept short here; [docs/INVENTORY.md](docs/INVENTORY.md) has each item with its measurements.
+
+- Replacing a late expert with another one (`approx:bounded`): equal quality to `fast` on the Mac, but it needs spare
+  experts that a small cache does not have. Kept as an advanced preset for measurement.
+- Never waiting for a late expert (`approx:never`): up to a quarter of the top choices change. Measurement only.
+- Using the early routers' names as the routing itself: never built; the model's router always decides.
+- Drafting is off by default: `--drafts 1` turns on lookup and tool-call skeleton drafts for greedy requests, which
+  keep the tokens of plain decoding.
 
 ## How it works
 
-A mixture-of-experts model uses a small part of itself per token: here 10 of 512 experts in each of 48 layers. In the
-released model each layer picks its experts from the hidden state at that layer, so an expert is needed the moment it
-is chosen, and every expert has to sit in memory in case it is picked.
+- **Records on the drive.** Each layer's experts sit in `store/layer_XX.bin`, one record per expert. A slot pool in
+  memory holds the records used most often (`--evict auto`: a hazard keep-score). Reader threads serve an urgent queue
+  (experts needed now) ahead of a scheduled one.
+- **Early names.** Small trained routers name a layer's experts two layers ahead from the token embedding and earlier
+  hidden states, so their reads start while other layers compute. For Inkling, cross-token routers also name the next
+  token's first layers. Names only schedule reads; in `exact`, an expert that was never named is read on the spot.
+- **Prompts.** A prompt runs through a batched prefill that reads each expert once per chunk and leaves bit-identical
+  state to single steps. The server keeps a prefix cache with disk copies, prefills the likely next turn while idle,
+  and saves the hot set of experts across restarts.
+- **One core, short model descriptions.** A model family (`src/models/<family>/`) describes its layers, state and MoE
+  block; the store, the step, the names and the serving are shared.
 
-Here the experts are stored once on the SSD, one contiguous 2.6 MiB record each. A small router per layer reads the
-token's state **four layers earlier** and names the experts that layer will want. Those records are read while the
-four layers in between compute. When the layer runs, the released router makes its usual choice among the experts
-that are in memory.
+## Repository layout
 
-- **Prefetch mode (default).** Nothing is read during a layer's own computation. If the routers named the wrong
-  expert, the released router chooses among what is in memory: the output changes slightly, nothing stalls. `--keep`
-  sets how many tokens a fetched expert stays in memory while it keeps being named (default 3), `--max-slots` the
-  expert slots per layer (default 24, 3.0 GB in total).
-- **Exact mode (`--mode exact`).** The released router's choice is always honoured; an expert that is not in memory
-  is read on the spot. With `--routers /nonexistent` nothing is read ahead at all, which is the fetch-on-demand
-  baseline in the table below.
+```
+include/dmeng/   public headers (model.h, core.h, store.h, address.h, presets.h, lm.h, session.h)
+src/core/        expert store and readers, MoE step and modes, early names, presets, kernels
+src/models/      one folder per model family (qwen3_5_moe, inkling2_loop)
+src/serving/     prefix cache, idle-time prefill, hot set, memory watcher
+src/format/      the weight-repo manifest reader and derived files
+tools/           dmeng (command line), dmserve (model worker), manifest_dump, ms_derive
+python/          run.py (text in, text out), serve/ (the OpenAI-compatible front end), convert/, derive/
+bindings/c/      the C API (the iPhone app's Swift package: Package.swift, apps/ios/)
+bench/           benchmark drivers
+tests/           tiny-model checks per family, prefill and draft exactness checks
+reference/flash/ the Python runner used for Qwen3.8-Flash-Next
+results/         measurements quoted in the docs
+```
 
-The model's n-gram memory (a 51.2B-parameter hash table) is a second store. A token looks up 16 rows whose addresses
-follow from the previous token ids alone, so they are read the moment a token is sampled.
+## Contributor notes
 
-| part | parameters | where |
-|---|---|---|
-| attention layers, shared experts, norms, embeddings, output head, the released router gates | 4.9B | memory, 8-bit (4.3 GiB), the input embedding read from disk one row per token |
-| lag-4 routers | 576M | memory, fp16 (1.1 GB) |
-| 24,576 routed experts, 4-bit | 120.8B | SSD, 63.4 GiB |
-| n-gram memory, 8-bit | 51.2B | SSD, 48.3 GiB |
+The measured-number tables above are generated, never typed: after a timing campaign,
 
-The release's multi-token-prediction head and vision tower are not included.
+```
+python3 results/headline/table.py --sync CAMPAIGN_DIR --write README.md
+```
 
-## Speed and memory
+copies the campaign's run records into `results/headline/runs_final/` (only the fields the tables need) and rewrites
+the block between the markers. Without `--sync` it rebuilds the tables from the records already in the tree.
 
-Base M4 MacBook Pro, 16 GB, internal SSD, `mlx_run.py --bench --max-new 120`, one prompt. The OS file cache is
-bypassed on the stores, so every byte counted was read from the drive.
+## Building and testing
 
-| configuration | tokens/s (each run) | read per token | memory (MLX peak) |
-|---|---|---|---|
-| experts chosen four layers early (default) | 5.70, 5.84, 5.55 | 488 MB | 8.5 GB |
-| chosen early, experts kept only across adjacent tokens (`--keep 0`) | 4.24, 4.34 | 682 MB | 8.5 GB |
-| fetched on demand (exact mode, no routers), default keep window | 2.42, 2.50, 2.49 | 587 MB | 7.5 GB |
-| fetched on demand, kept only across adjacent tokens (`--keep 1`) | 2.16, 2.04 | 741 MB | 7.5 GB |
-| fetched on demand, nothing kept (`--keep 0`) | 1.44, 1.34 | 1,268 MB | 7.5 GB |
-
-For comparison, stock llama.cpp 1.0.0 (Homebrew) with Unsloth's UD-Q4_K_XL file of the same model (111 GB), on the same Mac
-and prompt: with its default settings the load never finishes on 16 GB (it repacks the 4-bit weights into ordinary
-memory); with memory-mapped weights, CPU only and `--no-repack` it runs at 0.45 and 0.39 tokens/s (a third run gave
-0.11), and at 0.20 with the GPU allowed. That is a different 4-bit file and a CPU computation, so it shows what the
-stock tool gives, not a controlled ablation; the fetch-on-demand rows above are the like-for-like comparison. Logs: [results/llama_cpp](results/llama_cpp).
-
-At the default a token takes 170 to 180 ms, about 100 ms of it waiting on expert reads, and 83% of the released router's top-10
-are in memory when the layer runs. The drive sets the speed: the same engine with reads skipped (`--sim-reads`,
-timing only) runs at 10.5 tokens/s.
-
-In the recorded agent session (stock OpenCode, an 8k to 9k-token context, thinking on) the ten requests ran at 4.3 to
-5.4 tokens/s, 4.6 on average, reading 545 to 706 MB per token at about 3.0 GB/s. Activity Monitor showed about 9 GB
-for the process.
-The logs are in [results/mac_bench](results/mac_bench).
-
-## Quality
-
-Loss on held-out text against the released bf16 model (wikitext-103 test / FineWeb-Edu / UltraChat in the chat
-template; released: 1.611 / 2.089 / 1.828 nats), measured on GPUs with each step added to the previous ones:
-
-| configuration | loss gap, nats |
-|---|---|
-| experts at 4-bit | +0.013 / +0.007 / -0.028 |
-| + n-gram memory at 8-bit | +0.014 / +0.008 / -0.026 |
-| + in-memory weights at 8-bit | +0.014 / +0.008 / -0.037 |
-| + experts chosen four layers early (the configuration that runs on the Mac) | +0.027 / +0.019 / -0.008 |
-
-The chat set comes out below the released model once the weights are quantised. We have not explained that and do
-not read it as a gain. The cost of choosing early alone, against the same quantised model with every expert in
-memory, is +0.011 / +0.011 / +0.019 nats. Per window that gap is a small mean with wide two-sided noise (chat: median
-+0.016, standard deviation 0.133 over 128 windows).
-
-Not measured: thinking traces, code and tool calls, which the routers were not trained on, and task benchmarks.
-
-## What is in the repo
-
-| path | what it is |
-|---|---|
-| `mlx_run.py` | the engine: chat, OpenAI-compatible server, benchmark and check modes |
-| `qwen4_exp/` | the model's MLX definition, text only, vendored from the community MLX port ([nopmobiel/Qwen3.8-Flash-Next-MLX-4bit](https://huggingface.co/nopmobiel/Qwen3.8-Flash-Next-MLX-4bit)) on [mlx-vlm](https://github.com/Blaizzy/mlx-vlm) |
-| `demo/` | `demo.sh` and `opencode.json` for stock OpenCode, plus the two small files of the bug-fix task in the video |
-| `convert.py`, `check.py` | rebuild the stores from the released weights (resumable, one shard at a time), and the check that gates the conversion |
-| `make_tiny.py`, `test_tiny.py` | a random tiny model with the release's structure, and the runner tested against the reference model on it |
-| `drivebench.c` | the drive's rate for the store's read pattern, without Python or the model |
-| `results/` | the logs and JSON behind the tables above |
-
-The script that trained the routers is not in the repo yet. They were trained on GPUs by imitation of the released
-routers with the model frozen, on 20.5M tokens of wikitext-103, FineWeb-Edu and UltraChat.
+The default build targets Apple M4 (`-DDM_ARCH=...` to change). `-DDM_METAL=OFF` builds without the Metal prefill
+path. The checks in `tests/` (`tests/README.md`) run the engine on small random models against independent references
+and check the batched prefill and drafting against single steps.
 
 ## Limits
 
-- This is a retrofit of a model that was not built to be read from a drive. A token reads about 490 MB on a plain
-  prompt and 550 to 700 MB in an agent session, so the laptop's SSD sets the speed.
-- The experts are 4-bit and the rest 8-bit on a 16 GB Mac. The numbers above are for that configuration, not for the
-  released bf16 weights.
-- Timings are from one machine at batch 1. A machine under memory pressure is slower: macOS compresses the model's
-  memory when other apps need it.
-- Text only. No vision tower, no multi-token prediction.
+Batch 1. CPU kernels for Apple Silicon, plus one optional GPU path in the 35B's prefill. Text only.
 
-## Paper
+## Licence
 
-Paper soon. This repository retrofits a released model. Models built for this from the first training step are what
-we call prefetchable, and they are the subject of the paper.
-
-## License
-
-The code in this repository is MIT (see `LICENSE`), except `qwen4_exp/`, which comes from a port distributed under
-the Qwen Community License 1.0 (`LICENSE-QWEN`) and includes helper functions from mlx-vlm (MIT). The weights are
-under the Qwen Community License 1.0.
+Code: MIT (`LICENSE`). Each model is under its upstream licence (Qwen models: Apache-2.0 or the Qwen Community License; Inkling 2 Mini: Apache-2.0).
+`LICENSE-QWEN` covers the vendored model code in `reference/flash/qwen4_exp/`.

@@ -1,0 +1,2546 @@
+{
+  "app_after" : {
+    "args" : [
+      "--",
+      "-autotest",
+      "-kernelBench"
+    ],
+    "battery_level" : 0.80000001192092896,
+    "battery_state" : "charging",
+    "low_power" : false,
+    "machine" : "iPhone15,5",
+    "os" : "Version 27.2 (Build 24B119)",
+    "os_proc_available_memory" : 3462887008,
+    "physical_memory" : 5936922624,
+    "thermal" : "serious",
+    "time" : "2026-11-22T06:44:04Z"
+  },
+  "app_before" : {
+    "args" : [
+      "--",
+      "-autotest",
+      "-kernelBench"
+    ],
+    "battery_level" : 0.80000001192092896,
+    "battery_state" : "charging",
+    "low_power" : false,
+    "machine" : "iPhone15,5",
+    "os" : "Version 27.2 (Build 24B119)",
+    "os_proc_available_memory" : 4268439760,
+    "physical_memory" : 5936922624,
+    "thermal" : "nominal",
+    "time" : "2026-11-22T06:34:04Z"
+  },
+  "result" : {
+    "available_start" : 4268390608,
+    "bandwidth" : [
+      {
+        "gbps" : 44.164299999999997,
+        "qos" : "ui",
+        "thermal" : "nominal",
+        "threads" : 1
+      },
+      {
+        "gbps" : 49.399500000000003,
+        "qos" : "ui",
+        "thermal" : "nominal",
+        "threads" : 2
+      },
+      {
+        "gbps" : 50.497300000000003,
+        "qos" : "ui",
+        "thermal" : "nominal",
+        "threads" : 4
+      },
+      {
+        "gbps" : 49.5306,
+        "qos" : "ui",
+        "thermal" : "nominal",
+        "threads" : 6
+      },
+      {
+        "gbps" : 48.883000000000003,
+        "qos" : "default",
+        "thermal" : "nominal",
+        "threads" : 1
+      },
+      {
+        "gbps" : 50.2699,
+        "qos" : "default",
+        "thermal" : "nominal",
+        "threads" : 2
+      },
+      {
+        "gbps" : 50.780999999999999,
+        "qos" : "default",
+        "thermal" : "nominal",
+        "threads" : 4
+      },
+      {
+        "gbps" : 50.232500000000002,
+        "qos" : "default",
+        "thermal" : "nominal",
+        "threads" : 6
+      }
+    ],
+    "batched" : [
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4gu",
+        "gmacs" : 61.100900000000003,
+        "ms" : 0.137291,
+        "N" : 8,
+        "thermal" : "fair",
+        "threads" : 2
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4gu",
+        "gmacs" : 99.567999999999998,
+        "ms" : 0.084250000000000005,
+        "N" : 8,
+        "thermal" : "fair",
+        "threads" : 6
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4gu",
+        "gmacs" : 72.066500000000005,
+        "ms" : 0.93120800000000004,
+        "N" : 64,
+        "thermal" : "fair",
+        "threads" : 2
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4gu",
+        "gmacs" : 100.739,
+        "ms" : 0.66616699999999995,
+        "N" : 64,
+        "thermal" : "fair",
+        "threads" : 6
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4gu",
+        "gmacs" : 73.278000000000006,
+        "ms" : 3.6632500000000001,
+        "N" : 256,
+        "thermal" : "fair",
+        "threads" : 2
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4gu",
+        "gmacs" : 95.050799999999995,
+        "ms" : 2.8241200000000002,
+        "N" : 256,
+        "thermal" : "fair",
+        "threads" : 6
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4qkv",
+        "gmacs" : 78.190799999999996,
+        "ms" : 13.7323,
+        "N" : 64,
+        "thermal" : "fair",
+        "threads" : 2
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4qkv",
+        "gmacs" : 120.449,
+        "ms" : 8.9144600000000001,
+        "N" : 64,
+        "thermal" : "fair",
+        "threads" : 6
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4qkv",
+        "gmacs" : 76.042599999999993,
+        "ms" : 56.481099999999998,
+        "N" : 256,
+        "thermal" : "fair",
+        "threads" : 2
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a4qkv",
+        "gmacs" : 119.634,
+        "ms" : 35.900799999999997,
+        "N" : 256,
+        "thermal" : "fair",
+        "threads" : 6
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a8qkv",
+        "gmacs" : 73.600700000000003,
+        "ms" : 14.588699999999999,
+        "N" : 64,
+        "thermal" : "fair",
+        "threads" : 2
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a8qkv",
+        "gmacs" : 120.999,
+        "ms" : 8.8740000000000006,
+        "N" : 64,
+        "thermal" : "fair",
+        "threads" : 6
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a8qkv",
+        "gmacs" : 73.821600000000004,
+        "ms" : 58.180300000000003,
+        "N" : 256,
+        "thermal" : "fair",
+        "threads" : 2
+      },
+      {
+        "bit_mismatch_vs_mv_pos0" : 0,
+        "case" : "a8qkv",
+        "gmacs" : 123.42,
+        "ms" : 34.799500000000002,
+        "N" : 256,
+        "thermal" : "fair",
+        "threads" : 6
+      }
+    ],
+    "best_threads_experts" : 6,
+    "features" : {
+      "hw.cachelinesize" : 128,
+      "hw.cpufamily" : -2023363094,
+      "hw.l1dcachesize" : 65536,
+      "hw.machine" : "iPhone15,5",
+      "hw.memsize" : 5936922624,
+      "hw.ncpu" : 6,
+      "hw.nperflevels" : 2,
+      "hw.optional.arm.FEAT_BF16" : 1,
+      "hw.optional.arm.FEAT_DotProd" : 1,
+      "hw.optional.arm.FEAT_FHM" : 1,
+      "hw.optional.arm.FEAT_FP16" : 1,
+      "hw.optional.arm.FEAT_I8MM" : 1,
+      "hw.optional.arm.FEAT_SME" : 0,
+      "hw.optional.arm.FEAT_SME2" : 0,
+      "hw.optional.arm.FEAT_SVE" : -1,
+      "hw.pagesize" : 16384,
+      "hw.perflevel0.cpusperl2" : 2,
+      "hw.perflevel0.l2cachesize" : 16777216,
+      "hw.perflevel0.physicalcpu" : 2,
+      "hw.perflevel1.l2cachesize" : 4194304,
+      "hw.perflevel1.physicalcpu" : 4,
+      "kern.osproductversion" : "27.2",
+      "kern.osversion" : "24B119",
+      "machdep.cpu.brand_string" : ""
+    },
+    "footprint_start" : 26576688,
+    "matvec" : [
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 14.998900000000001,
+        "gmacs" : 26.6647,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 112,
+        "qos" : "ui",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 1,
+        "us_per_matrix" : 39.324599999999997,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 23.047599999999999,
+        "gmacs" : 40.973500000000001,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 172,
+        "qos" : "ui",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 2,
+        "us_per_matrix" : 25.5916,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 31.764399999999998,
+        "gmacs" : 56.470100000000002,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 237,
+        "qos" : "ui",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 4,
+        "us_per_matrix" : 18.5687,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 32.082599999999999,
+        "gmacs" : 57.035699999999999,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 240,
+        "qos" : "ui",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 6,
+        "us_per_matrix" : 18.384599999999999,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 13.301299999999999,
+        "gmacs" : 23.646799999999999,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 100,
+        "qos" : "default",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 1,
+        "us_per_matrix" : 44.343200000000003,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 21.347799999999999,
+        "gmacs" : 37.951599999999999,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 160,
+        "qos" : "default",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 2,
+        "us_per_matrix" : 27.629300000000001,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 30.997399999999999,
+        "gmacs" : 55.106499999999997,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 232,
+        "qos" : "default",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 4,
+        "us_per_matrix" : 19.028199999999998,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 30.928699999999999,
+        "gmacs" : 54.984299999999998,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 231,
+        "qos" : "default",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 6,
+        "us_per_matrix" : 19.070499999999999,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 8.2641799999999996,
+        "gmacs" : 14.6919,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 62,
+        "qos" : "background",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 4,
+        "us_per_matrix" : 71.371099999999998,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 15.0707,
+        "gmacs" : 26.792300000000001,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 113,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 1,
+        "us_per_matrix" : 39.137300000000003,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 21.8431,
+        "gmacs" : 38.8322,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 163,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 2,
+        "us_per_matrix" : 27.002700000000001,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 29.589099999999998,
+        "gmacs" : 52.602800000000002,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 221,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 4,
+        "us_per_matrix" : 19.933800000000002,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 30.854199999999999,
+        "gmacs" : 54.851900000000001,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 231,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 6,
+        "us_per_matrix" : 19.116499999999998,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 12.586,
+        "gmacs" : 22.3752,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 94,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 1,
+        "us_per_matrix" : 46.863399999999999,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 20.3292,
+        "gmacs" : 36.140700000000002,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 152,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 2,
+        "us_per_matrix" : 29.0137,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 29.2728,
+        "gmacs" : 52.040500000000002,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 219,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 4,
+        "us_per_matrix" : 20.1492,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a4dn",
+        "cols" : 512,
+        "fmt" : "aff4_g64",
+        "gbps" : 29.191199999999998,
+        "gmacs" : 51.895400000000002,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 218,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 6,
+        "us_per_matrix" : 20.2056,
+        "what" : "routed expert down 2048x512 aff4 (store record)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 20.223400000000002,
+        "gmacs" : 19.033799999999999,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 155,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "nominal",
+        "threads" : 1,
+        "us_per_matrix" : 881.44200000000001,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 29.7623,
+        "gmacs" : 28.011600000000001,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 228,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 598.93799999999999,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 36.851900000000001,
+        "gmacs" : 34.684199999999997,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 282,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 483.714,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 33.351500000000001,
+        "gmacs" : 31.389700000000001,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 256,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 534.48199999999997,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 18.399999999999999,
+        "gmacs" : 17.317599999999999,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 141,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 968.79300000000001,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 29.3126,
+        "gmacs" : 27.5883,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 225,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 608.12699999999995,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 43.353900000000003,
+        "gmacs" : 40.803699999999999,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 332,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 411.16899999999998,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 39.264400000000002,
+        "gmacs" : 36.954700000000003,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 301,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 453.99400000000003,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8qkv",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 13.929600000000001,
+        "gmacs" : 13.110200000000001,
+        "matrix_bytes" : 17825792,
+        "nmat" : 22,
+        "passes" : 107,
+        "qos" : "background",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 1279.71,
+        "what" : "linear-attention qkv 8192x2048 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 21.892099999999999,
+        "gmacs" : 20.604399999999998,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 164,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 407.12799999999999,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 30.072199999999999,
+        "gmacs" : 28.3032,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 225,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 296.38400000000001,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 43.526000000000003,
+        "gmacs" : 40.965600000000002,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 326,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 204.77199999999999,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 39.421100000000003,
+        "gmacs" : 37.102200000000003,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 295,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 226.095,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 18.2257,
+        "gmacs" : 17.153600000000001,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 137,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 489.029,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 28.197900000000001,
+        "gmacs" : 26.539200000000001,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 211,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 316.084,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 41.971200000000003,
+        "gmacs" : 39.502299999999998,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 314,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 212.357,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8out",
+        "cols" : 4096,
+        "fmt" : "aff8_g64",
+        "gbps" : 38.094499999999996,
+        "gmacs" : 35.8536,
+        "matrix_bytes" : 8912896,
+        "nmat" : 45,
+        "passes" : 285,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 233.96799999999999,
+        "what" : "attention out_proj 2048x4096 aff8 (Mac resident)"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 18.595199999999998,
+        "gmacs" : 17.5014,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 139,
+        "qos" : "ui",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 29.956900000000001,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 27.683,
+        "gmacs" : 26.054600000000001,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 207,
+        "qos" : "ui",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 20.122699999999998,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 40.147100000000002,
+        "gmacs" : 37.785499999999999,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 300,
+        "qos" : "ui",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 13.875400000000001,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 34.1798,
+        "gmacs" : 32.169199999999996,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 255,
+        "qos" : "ui",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 16.297799999999999,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 17.3293,
+        "gmacs" : 16.309899999999999,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 130,
+        "qos" : "default",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 32.145400000000002,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 27.206,
+        "gmacs" : 25.605699999999999,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 203,
+        "qos" : "default",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 20.4755,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 39.563699999999997,
+        "gmacs" : 37.236400000000003,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 296,
+        "qos" : "default",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 14.08,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8rt",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 33.130899999999997,
+        "gmacs" : 31.181999999999999,
+        "matrix_bytes" : 557056,
+        "nmat" : 722,
+        "passes" : 248,
+        "qos" : "default",
+        "rows" : 256,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 16.813800000000001,
+        "what" : "router 256x2048 aff8"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 11.630699999999999,
+        "gmacs" : 10.9466,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 98,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 6130.5799999999999,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 30.252400000000002,
+        "gmacs" : 28.472799999999999,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 255,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 2356.9400000000001,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 32.803199999999997,
+        "gmacs" : 30.8736,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 277,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 2173.6599999999999,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 25.128499999999999,
+        "gmacs" : 23.650300000000001,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 212,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 2837.54,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 16.2332,
+        "gmacs" : 15.2783,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 137,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 4392.4200000000001,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 30.0915,
+        "gmacs" : 28.321400000000001,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 254,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 2369.54,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 39.117199999999997,
+        "gmacs" : 36.816200000000002,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 330,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 1822.8099999999999,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a8head",
+        "cols" : 2048,
+        "fmt" : "aff8_g64",
+        "gbps" : 22.2499,
+        "gmacs" : 20.941099999999999,
+        "matrix_bytes" : 71303168,
+        "nmat" : 5,
+        "passes" : 188,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 3204.6399999999999,
+        "what" : "LM head slice 32768x2048 aff8 (head = 248320 rows)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 13.427300000000001,
+        "gmacs" : 23.870799999999999,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 102,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 702.83600000000001,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 21.864599999999999,
+        "gmacs" : 38.8703,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 166,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 431.62,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 30.8338,
+        "gmacs" : 54.815600000000003,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 234,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 306.06700000000001,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 19.1494,
+        "gmacs" : 34.043300000000002,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 145,
+        "qos" : "ui",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 492.81999999999999,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 9.1748200000000004,
+        "gmacs" : 16.3108,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 70,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 1028.5999999999999,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 22.575299999999999,
+        "gmacs" : 40.133899999999997,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 171,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 418.03100000000001,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 27.592500000000001,
+        "gmacs" : 49.0533,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 210,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 342.01999999999998,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4qkv",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 19.347100000000001,
+        "gmacs" : 34.394799999999996,
+        "matrix_bytes" : 9437184,
+        "nmat" : 42,
+        "passes" : 147,
+        "qos" : "default",
+        "rows" : 8192,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 487.78399999999999,
+        "what" : "linear-attention qkv 8192x2048 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 13.750299999999999,
+        "gmacs" : 24.444900000000001,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 103,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 343.16300000000001,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 22.468299999999999,
+        "gmacs" : 39.9437,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 169,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 210.011,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 30.488099999999999,
+        "gmacs" : 54.201099999999997,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 229,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 154.768,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 13.9762,
+        "gmacs" : 24.846499999999999,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 105,
+        "qos" : "ui",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 337.61700000000002,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 8.4420800000000007,
+        "gmacs" : 15.008100000000001,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 64,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 558.93700000000001,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 11.7067,
+        "gmacs" : 20.811800000000002,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 88,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 403.06900000000002,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 21.085899999999999,
+        "gmacs" : 37.485999999999997,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 158,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 223.78,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4out",
+        "cols" : 4096,
+        "fmt" : "aff4_g64",
+        "gbps" : 21.675799999999999,
+        "gmacs" : 38.534700000000001,
+        "matrix_bytes" : 4718592,
+        "nmat" : 85,
+        "passes" : 163,
+        "qos" : "default",
+        "rows" : 2048,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 217.69,
+        "what" : "attention out_proj 2048x4096 aff4 (6 GB phone resident)"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 12.385899999999999,
+        "gmacs" : 22.019400000000001,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 99,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 3047.7199999999998,
+        "what" : "LM head slice 32768x2048 aff4"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 15.440200000000001,
+        "gmacs" : 27.449300000000001,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 123,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 2444.8299999999999,
+        "what" : "LM head slice 32768x2048 aff4"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 23.452500000000001,
+        "gmacs" : 41.693399999999997,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 187,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 1609.5799999999999,
+        "what" : "LM head slice 32768x2048 aff4"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 19.517499999999998,
+        "gmacs" : 34.697800000000001,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 156,
+        "qos" : "ui",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 1934.0999999999999,
+        "what" : "LM head slice 32768x2048 aff4"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 9.7744,
+        "gmacs" : 17.3767,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 78,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 1,
+        "us_per_matrix" : 3862,
+        "what" : "LM head slice 32768x2048 aff4"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 21.988700000000001,
+        "gmacs" : 39.091099999999997,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 175,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 2,
+        "us_per_matrix" : 1716.73,
+        "what" : "LM head slice 32768x2048 aff4"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 21.7273,
+        "gmacs" : 38.626300000000001,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 178,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 4,
+        "us_per_matrix" : 1737.3900000000001,
+        "what" : "LM head slice 32768x2048 aff4"
+      },
+      {
+        "case" : "a4head",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 19.5761,
+        "gmacs" : 34.802,
+        "matrix_bytes" : 37748736,
+        "nmat" : 10,
+        "passes" : 156,
+        "qos" : "default",
+        "rows" : 32768,
+        "thermal_end" : "fair",
+        "thermal_start" : "fair",
+        "threads" : 6,
+        "us_per_matrix" : 1928.3099999999999,
+        "what" : "LM head slice 32768x2048 aff4"
+      }
+    ],
+    "memory_warnings" : 0,
+    "metal" : {
+      "batched" : [
+        {
+          "case" : "a8qkv",
+          "gmacs" : 50.6175,
+          "ms" : 21.212900000000001,
+          "N" : 64
+        },
+        {
+          "case" : "a8qkv",
+          "gmacs" : 71.215299999999999,
+          "ms" : 60.309600000000003,
+          "N" : 256
+        }
+      ],
+      "bit_identity" : {
+        "a4dn" : 0,
+        "a4gu" : 0,
+        "a4out" : 0,
+        "a8out" : 0,
+        "a8rt" : 0,
+        "gd_a8_1024x2048_N64" : 0
+      },
+      "device" : "Apple A16 GPU",
+      "matvec" : [
+        {
+          "case" : "a4gu",
+          "gbps_gpu" : 27.033100000000001,
+          "gbps_wall" : 25.7852,
+          "gmacs_wall" : 45.840299999999999,
+          "nmat" : 682,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 21.8186
+        },
+        {
+          "case" : "a4dn",
+          "gbps_gpu" : 27.863199999999999,
+          "gbps_wall" : 26.596800000000002,
+          "gmacs_wall" : 47.283200000000001,
+          "nmat" : 682,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 21.168600000000001
+        },
+        {
+          "case" : "a8qkv",
+          "gbps_gpu" : 47.761200000000002,
+          "gbps_wall" : 44.314100000000003,
+          "gmacs_wall" : 41.7074,
+          "nmat" : 22,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 373.22699999999998
+        },
+        {
+          "case" : "a8out",
+          "gbps_gpu" : 43.392800000000001,
+          "gbps_wall" : 40.479100000000003,
+          "gmacs_wall" : 38.097900000000003,
+          "nmat" : 45,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 205.40000000000001
+        },
+        {
+          "case" : "a8rt",
+          "gbps_gpu" : 26.43,
+          "gbps_wall" : 25.251899999999999,
+          "gmacs_wall" : 23.766500000000001,
+          "nmat" : 722,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 21.076699999999999
+        },
+        {
+          "case" : "a8head",
+          "gbps_gpu" : 47.970300000000002,
+          "gbps_wall" : 44.186700000000002,
+          "gmacs_wall" : 41.587499999999999,
+          "nmat" : 5,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 1486.4000000000001
+        },
+        {
+          "case" : "a4qkv",
+          "gbps_gpu" : 26.6616,
+          "gbps_wall" : 25.5364,
+          "gmacs_wall" : 45.398000000000003,
+          "nmat" : 42,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 353.96199999999999
+        },
+        {
+          "case" : "a4out",
+          "gbps_gpu" : 30.616299999999999,
+          "gbps_wall" : 29.154199999999999,
+          "gmacs_wall" : 51.829700000000003,
+          "nmat" : 85,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 154.12
+        },
+        {
+          "case" : "a4head",
+          "gbps_gpu" : 34.779000000000003,
+          "gbps_wall" : 32.843800000000002,
+          "gmacs_wall" : 58.3889,
+          "nmat" : 10,
+          "thermal" : "serious",
+          "us_per_matrix_gpu" : 1085.3900000000001
+        }
+      ],
+      "max_working_set" : 4294983680,
+      "read_gbps" : 42.944899999999997,
+      "roundtrip_us_p50" : 419,
+      "roundtrip_us_p90" : 471.5,
+      "sustained_together" : {
+        "case" : "a4gu",
+        "cpu_alone_gbps" : 20.252199999999998,
+        "cpu_threads" : 6,
+        "cpu_together_gbps" : 12.3977,
+        "cpu_together_series" : [
+          [
+            1.0078100000000001,
+            18.360499999999998,
+            "serious"
+          ],
+          [
+            2.0092099999999999,
+            15.2645,
+            "serious"
+          ],
+          [
+            3.01674,
+            11.977600000000001,
+            "serious"
+          ],
+          [
+            4.0568200000000001,
+            8.5087100000000007,
+            "serious"
+          ],
+          [
+            5.0623800000000001,
+            9.2008299999999998,
+            "serious"
+          ],
+          [
+            6.0891400000000004,
+            9.7944200000000006,
+            "serious"
+          ],
+          [
+            7.1029099999999996,
+            11.507,
+            "serious"
+          ],
+          [
+            8.1199100000000008,
+            13.0527,
+            "serious"
+          ],
+          [
+            9.1481399999999997,
+            12.519,
+            "serious"
+          ],
+          [
+            10.1614,
+            12.703799999999999,
+            "serious"
+          ],
+          [
+            11.1823,
+            12.6088,
+            "serious"
+          ],
+          [
+            12.200100000000001,
+            13.0419,
+            "serious"
+          ],
+          [
+            13.214,
+            12.6965,
+            "serious"
+          ],
+          [
+            14.231,
+            13.052300000000001,
+            "serious"
+          ],
+          [
+            15.235200000000001,
+            13.2196,
+            "serious"
+          ],
+          [
+            16.261399999999998,
+            13.3276,
+            "serious"
+          ],
+          [
+            17.282299999999999,
+            11.4261,
+            "serious"
+          ],
+          [
+            18.2897,
+            11.5808,
+            "serious"
+          ],
+          [
+            19.3081,
+            11.4537,
+            "serious"
+          ],
+          [
+            20.308800000000002,
+            11.657999999999999,
+            "serious"
+          ],
+          [
+            21.3248,
+            12.669499999999999,
+            "serious"
+          ],
+          [
+            22.358599999999999,
+            12.841100000000001,
+            "serious"
+          ],
+          [
+            23.364100000000001,
+            12.4008,
+            "serious"
+          ],
+          [
+            24.3812,
+            12.6561,
+            "serious"
+          ],
+          [
+            25.393000000000001,
+            13.1206,
+            "serious"
+          ],
+          [
+            26.413599999999999,
+            13.3996,
+            "serious"
+          ],
+          [
+            27.418600000000001,
+            12.0084,
+            "serious"
+          ],
+          [
+            28.460799999999999,
+            12.3508,
+            "serious"
+          ],
+          [
+            29.468699999999998,
+            12.372299999999999,
+            "serious"
+          ],
+          [
+            30.485299999999999,
+            12.267099999999999,
+            "serious"
+          ],
+          [
+            31.507899999999999,
+            11.407,
+            "serious"
+          ],
+          [
+            32.540700000000001,
+            12.0741,
+            "serious"
+          ],
+          [
+            33.554900000000004,
+            11.8993,
+            "serious"
+          ],
+          [
+            34.5625,
+            11.577199999999999,
+            "serious"
+          ],
+          [
+            35.585799999999999,
+            12.185700000000001,
+            "serious"
+          ],
+          [
+            36.585900000000002,
+            13.2744,
+            "serious"
+          ],
+          [
+            37.5916,
+            11.998799999999999,
+            "serious"
+          ],
+          [
+            38.614100000000001,
+            11.0159,
+            "serious"
+          ],
+          [
+            39.623399999999997,
+            11.956099999999999,
+            "serious"
+          ],
+          [
+            40.641800000000003,
+            12.2448,
+            "serious"
+          ],
+          [
+            41.664099999999998,
+            12.591699999999999,
+            "serious"
+          ],
+          [
+            42.686500000000002,
+            13.377000000000001,
+            "serious"
+          ],
+          [
+            43.698599999999999,
+            13.1158,
+            "serious"
+          ],
+          [
+            44.714500000000001,
+            12.6706,
+            "serious"
+          ],
+          [
+            45.721200000000003,
+            12.7865,
+            "serious"
+          ],
+          [
+            46.724400000000003,
+            12.832000000000001,
+            "serious"
+          ],
+          [
+            47.756999999999998,
+            13.2445,
+            "serious"
+          ],
+          [
+            48.765700000000002,
+            12.363200000000001,
+            "serious"
+          ],
+          [
+            49.790100000000002,
+            11.387600000000001,
+            "serious"
+          ],
+          [
+            50.833300000000001,
+            12.7239,
+            "serious"
+          ],
+          [
+            51.854199999999999,
+            11.4269,
+            "serious"
+          ],
+          [
+            52.8581,
+            12.4223,
+            "serious"
+          ],
+          [
+            53.916699999999999,
+            12.9198,
+            "serious"
+          ],
+          [
+            54.933799999999998,
+            11.468999999999999,
+            "serious"
+          ],
+          [
+            55.956899999999997,
+            12.1884,
+            "serious"
+          ],
+          [
+            56.980200000000004,
+            12.973100000000001,
+            "serious"
+          ],
+          [
+            57.997100000000003,
+            12.658200000000001,
+            "serious"
+          ],
+          [
+            59.009599999999999,
+            13.1097,
+            "serious"
+          ],
+          [
+            60.025599999999997,
+            12.6707,
+            "serious"
+          ]
+        ],
+        "gpu_alone_gbps" : 24.612300000000001,
+        "gpu_alone_series" : [
+          [
+            1.01326,
+            23.819700000000001,
+            "serious"
+          ],
+          [
+            2.0182099999999998,
+            25.617799999999999,
+            "serious"
+          ],
+          [
+            3.0291299999999999,
+            24.6708,
+            "serious"
+          ],
+          [
+            4.0446600000000004,
+            23.766500000000001,
+            "serious"
+          ],
+          [
+            5.0625900000000001,
+            23.710599999999999,
+            "serious"
+          ],
+          [
+            6.0749399999999998,
+            23.046500000000002,
+            "serious"
+          ],
+          [
+            7.0827200000000001,
+            23.550000000000001,
+            "serious"
+          ],
+          [
+            8.08765,
+            22.4161,
+            "serious"
+          ],
+          [
+            9.0889699999999998,
+            22.095099999999999,
+            "serious"
+          ],
+          [
+            10.090400000000001,
+            22.092500000000001,
+            "serious"
+          ],
+          [
+            11.095000000000001,
+            22.424299999999999,
+            "serious"
+          ],
+          [
+            12.107900000000001,
+            23.032800000000002,
+            "serious"
+          ],
+          [
+            13.1119,
+            23.2377,
+            "serious"
+          ],
+          [
+            14.113799999999999,
+            22.8857,
+            "serious"
+          ],
+          [
+            15.1272,
+            23.023900000000001,
+            "serious"
+          ],
+          [
+            16.139299999999999,
+            23.051200000000001,
+            "serious"
+          ],
+          [
+            17.1555,
+            24.146100000000001,
+            "serious"
+          ],
+          [
+            18.169599999999999,
+            23.007000000000001,
+            "serious"
+          ],
+          [
+            19.180800000000001,
+            23.074100000000001,
+            "serious"
+          ],
+          [
+            20.1813,
+            22.915900000000001,
+            "serious"
+          ],
+          [
+            21.196000000000002,
+            22.992699999999999,
+            "serious"
+          ],
+          [
+            22.200600000000001,
+            22.824100000000001,
+            "serious"
+          ],
+          [
+            23.2193,
+            22.903700000000001,
+            "serious"
+          ],
+          [
+            24.2288,
+            23.510400000000001,
+            "serious"
+          ],
+          [
+            25.237400000000001,
+            23.130299999999998,
+            "serious"
+          ],
+          [
+            26.246099999999998,
+            22.732399999999998,
+            "serious"
+          ],
+          [
+            27.258900000000001,
+            23.036100000000001,
+            "serious"
+          ],
+          [
+            28.267800000000001,
+            23.125900000000001,
+            "serious"
+          ],
+          [
+            29.269200000000001,
+            22.895700000000001,
+            "serious"
+          ],
+          [
+            30.275600000000001,
+            23.183,
+            "serious"
+          ],
+          [
+            31.2882,
+            23.040600000000001,
+            "serious"
+          ],
+          [
+            32.295499999999997,
+            23.162099999999999,
+            "serious"
+          ],
+          [
+            33.306399999999996,
+            23.078600000000002,
+            "serious"
+          ],
+          [
+            34.3202,
+            23.014800000000001,
+            "serious"
+          ],
+          [
+            35.331200000000003,
+            23.075600000000001,
+            "serious"
+          ],
+          [
+            36.342300000000002,
+            23.076699999999999,
+            "serious"
+          ],
+          [
+            37.343000000000004,
+            22.911200000000001,
+            "serious"
+          ],
+          [
+            38.352899999999998,
+            23.104099999999999,
+            "serious"
+          ],
+          [
+            39.362200000000001,
+            23.1145,
+            "serious"
+          ],
+          [
+            40.369799999999998,
+            23.156300000000002,
+            "serious"
+          ],
+          [
+            41.374600000000001,
+            23.2197,
+            "serious"
+          ],
+          [
+            42.380400000000002,
+            24.795300000000001,
+            "serious"
+          ],
+          [
+            43.3934,
+            22.635899999999999,
+            "serious"
+          ],
+          [
+            44.401600000000002,
+            22.741,
+            "serious"
+          ],
+          [
+            45.417000000000002,
+            22.581700000000001,
+            "serious"
+          ],
+          [
+            46.434800000000003,
+            22.526599999999998,
+            "serious"
+          ],
+          [
+            47.435099999999998,
+            22.924099999999999,
+            "serious"
+          ],
+          [
+            48.452500000000001,
+            22.9315,
+            "serious"
+          ],
+          [
+            49.460900000000002,
+            23.1357,
+            "serious"
+          ],
+          [
+            50.472900000000003,
+            23.054099999999998,
+            "serious"
+          ],
+          [
+            51.4818,
+            23.125699999999998,
+            "serious"
+          ],
+          [
+            52.496899999999997,
+            23.380700000000001,
+            "serious"
+          ],
+          [
+            53.503700000000002,
+            23.174299999999999,
+            "serious"
+          ],
+          [
+            54.5169,
+            23.026800000000001,
+            "serious"
+          ],
+          [
+            55.5289,
+            23.0535,
+            "serious"
+          ],
+          [
+            56.540199999999999,
+            23.069800000000001,
+            "serious"
+          ],
+          [
+            57.543599999999998,
+            22.850999999999999,
+            "serious"
+          ],
+          [
+            58.551200000000001,
+            22.756399999999999,
+            "serious"
+          ],
+          [
+            59.567300000000003,
+            22.961200000000002,
+            "serious"
+          ]
+        ],
+        "gpu_together_gbps" : 13.664300000000001,
+        "seconds" : 60,
+        "sum_together_gbps" : 26.062000000000001,
+        "thermal_end" : "serious"
+      },
+      "together" : {
+        "case" : "a4gu",
+        "cpu_alone_gbps" : 22.453399999999998,
+        "cpu_threads" : 6,
+        "cpu_together_gbps" : 14.5312,
+        "gpu_alone_gbps" : 26.111999999999998,
+        "gpu_together_gbps" : 13.9955,
+        "seconds" : 6,
+        "sum_together_gbps" : 28.526599999999998,
+        "thermal_end" : "serious"
+      }
+    },
+    "pressure_events" : 0,
+    "seconds_total" : 599.49699999999996,
+    "spec" : "",
+    "sustained_cpu" : {
+      "case" : "a4gu",
+      "gbps" : 20.0503,
+      "gmacs" : 35.645000000000003,
+      "passes" : 2991,
+      "qos" : "ui",
+      "seconds" : 60,
+      "series" : [
+        [
+          1.0074399999999999,
+          37.932600000000001,
+          "fair"
+        ],
+        [
+          2.0141,
+          25.174700000000001,
+          "fair"
+        ],
+        [
+          3.0283699999999998,
+          20.226600000000001,
+          "fair"
+        ],
+        [
+          4.0455199999999998,
+          18.587499999999999,
+          "fair"
+        ],
+        [
+          5.0477699999999999,
+          18.863700000000001,
+          "fair"
+        ],
+        [
+          6.06759,
+          18.933299999999999,
+          "fair"
+        ],
+        [
+          7.0886399999999998,
+          18.516400000000001,
+          "fair"
+        ],
+        [
+          8.1055100000000007,
+          19.383800000000001,
+          "fair"
+        ],
+        [
+          9.1201799999999995,
+          19.425699999999999,
+          "fair"
+        ],
+        [
+          10.132199999999999,
+          19.477499999999999,
+          "fair"
+        ],
+        [
+          11.143599999999999,
+          19.0898,
+          "fair"
+        ],
+        [
+          12.1645,
+          19.306699999999999,
+          "fair"
+        ],
+        [
+          13.1815,
+          19.381900000000002,
+          "fair"
+        ],
+        [
+          14.1953,
+          19.045200000000001,
+          "fair"
+        ],
+        [
+          15.210000000000001,
+          19.425599999999999,
+          "fair"
+        ],
+        [
+          16.220199999999998,
+          19.512599999999999,
+          "fair"
+        ],
+        [
+          17.2376,
+          19.373200000000001,
+          "fair"
+        ],
+        [
+          18.247,
+          19.128299999999999,
+          "fair"
+        ],
+        [
+          19.261199999999999,
+          19.434899999999999,
+          "fair"
+        ],
+        [
+          20.263200000000001,
+          19.671099999999999,
+          "fair"
+        ],
+        [
+          21.276800000000001,
+          19.445799999999998,
+          "fair"
+        ],
+        [
+          22.284600000000001,
+          19.558399999999999,
+          "fair"
+        ],
+        [
+          23.2972,
+          19.465800000000002,
+          "fair"
+        ],
+        [
+          24.3111,
+          19.837299999999999,
+          "fair"
+        ],
+        [
+          25.326799999999999,
+          19.406600000000001,
+          "fair"
+        ],
+        [
+          26.338799999999999,
+          19.873999999999999,
+          "fair"
+        ],
+        [
+          27.350300000000001,
+          19.8843,
+          "fair"
+        ],
+        [
+          28.360199999999999,
+          19.517499999999998,
+          "fair"
+        ],
+        [
+          29.374099999999999,
+          19.836600000000001,
+          "fair"
+        ],
+        [
+          30.380600000000001,
+          19.9847,
+          "fair"
+        ],
+        [
+          31.3855,
+          20.014800000000001,
+          "fair"
+        ],
+        [
+          32.399500000000003,
+          20.230799999999999,
+          "fair"
+        ],
+        [
+          33.417099999999998,
+          19.765999999999998,
+          "fair"
+        ],
+        [
+          34.422699999999999,
+          20.001300000000001,
+          "fair"
+        ],
+        [
+          35.429299999999998,
+          19.580500000000001,
+          "fair"
+        ],
+        [
+          36.439100000000003,
+          19.917899999999999,
+          "fair"
+        ],
+        [
+          37.444499999999998,
+          19.605799999999999,
+          "fair"
+        ],
+        [
+          38.448,
+          20.8432,
+          "fair"
+        ],
+        [
+          39.4651,
+          19.776,
+          "fair"
+        ],
+        [
+          40.472999999999999,
+          19.156500000000001,
+          "fair"
+        ],
+        [
+          41.4788,
+          20.396100000000001,
+          "fair"
+        ],
+        [
+          42.483199999999997,
+          19.625399999999999,
+          "fair"
+        ],
+        [
+          43.497999999999998,
+          20.2165,
+          "fair"
+        ],
+        [
+          44.511200000000002,
+          20.247,
+          "fair"
+        ],
+        [
+          45.515799999999999,
+          19.2212,
+          "fair"
+        ],
+        [
+          46.5184,
+          18.455500000000001,
+          "fair"
+        ],
+        [
+          47.521999999999998,
+          20.842400000000001,
+          "fair"
+        ],
+        [
+          48.533799999999999,
+          18.685300000000002,
+          "fair"
+        ],
+        [
+          49.541899999999998,
+          19.952300000000001,
+          "fair"
+        ],
+        [
+          50.5625,
+          19.706299999999999,
+          "fair"
+        ],
+        [
+          51.577100000000002,
+          19.427099999999999,
+          "fair"
+        ],
+        [
+          52.579099999999997,
+          20.473700000000001,
+          "serious"
+        ],
+        [
+          53.582799999999999,
+          19.6388,
+          "serious"
+        ],
+        [
+          54.5854,
+          20.863199999999999,
+          "serious"
+        ],
+        [
+          55.598799999999997,
+          19.846,
+          "serious"
+        ],
+        [
+          56.604900000000001,
+          19.991700000000002,
+          "serious"
+        ],
+        [
+          57.611600000000003,
+          19.979800000000001,
+          "serious"
+        ],
+        [
+          58.618099999999998,
+          19.982500000000002,
+          "serious"
+        ],
+        [
+          59.622399999999999,
+          20.027999999999999,
+          "serious"
+        ]
+      ],
+      "thermal_end" : "serious",
+      "thermal_start" : "fair",
+      "threads" : 6,
+      "us_per_matrix" : 29.417200000000001
+    },
+    "thermal_at_end" : "serious",
+    "thermal_at_start" : "nominal"
+  }
+}

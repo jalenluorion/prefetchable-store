@@ -1,0 +1,22 @@
+CMD: build/dmserve --model ../../../q36/_tiny/run/model --cache-gb 0.05 --mem mlock --ctx 2048 --chunk 256 --span 8192 --ahead-span 64 --check-ahead results/serving2/tiny_A.txt results/serving2/tiny_B.txt --check-ahead-len 600 --gen 16 --threads 4 --readers 2
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9838, "mem_free_pct": 79, "disk_free_gb": 36.2, "avail_gb": 9.42, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+{"mode":"check_ahead","model":"qwen3_5_moe","a":600,"b":630,"ahead_len":600,"ms_ref":109.242,"request_path":{"cmp":{"logit_bits_differ":0,"fixed_state_bytes_differ":0,"kv_bytes_differ":0,"kv_len":[2580480,2580480],"greedy_identical":true},"b_reused":0,"b_computed":630,"b_source":"cold","ahead_cancelled_run":{},"ahead_resumed_run":{},"session":{"requests":2,"reused_positions":0,"computed_positions":1230,"live":646,"checkpoints":[630],"checkpoint_mb":0.116736,"parked":0,"parked_mb":0,"parks":0,"unparks":0,"disk_loads":0,"disk_writes":0,"ahead":{"runs":0,"positions":0,"hits":0,"parks":0,"pending_len":0}}},"with_ahead":{"cmp":{"logit_bits_differ":0,"fixed_state_bytes_differ":0,"kv_bytes_differ":0,"kv_len":[2580480,2580480],"greedy_identical":true},"b_reused":600,"b_computed":30,"b_source":"live","ahead_cancelled_run":{"predicted":600,"lcp_live":380,"live_len":608,"reused":0,"computed":65,"source":"cold","cancelled":true,"ms":6.40388,"ms_prefill":6.34033,"ms_restore":0.002,"ms_cancel_to_stop":0.00075,"mb_read":0,"span":64,"pos":65,"runs":1,"ms_prefill_total":6.34033,"prefill":{}},"ahead_resumed_run":{"predicted":600,"lcp_live":65,"live_len":65,"reused":65,"computed":535,"source":"live","cancelled":false,"ms":86.2138,"ms_prefill":86.2109,"ms_restore":0.000292,"ms_cancel_to_stop":-1,"mb_read":0,"span":64,"pos":600,"runs":2,"ms_prefill_total":92.5512,"prefill":{}},"session":{"requests":2,"reused_positions":665,"computed_positions":1165,"live":646,"checkpoints":[600,630],"checkpoint_mb":0.233472,"parked":0,"parked_mb":0,"parks":1,"unparks":0,"disk_loads":0,"disk_writes":0,"ahead":{"runs":2,"positions":600,"hits":1,"parks":1,"pending_len":0}}},"passed":true}
+        0.52 real         2.03 user         0.00 sys
+            26607616  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1811  page reclaims
+                  37  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 143  voluntary context switches
+                 667  involuntary context switches
+         41337589238  instructions retired
+          7782120005  cycles elapsed
+            21823920  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 0.6, "waited_s": 146, "swap_start_mb": 9838, "peak_swap_growth_mb": 0, "swap_growth_end_mb": 0, "peak_footprint_gb_guard": 0.001, "peak_footprint_gb_time": 0.022, "others_cpu_pct_mean": null, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9838, "mem_free_pct": 79, "disk_free_gb": 36.2, "avail_gb": 9.42, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9838, "mem_free_pct": 79, "disk_free_gb": 36.2, "avail_gb": 9.42, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

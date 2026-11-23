@@ -1,0 +1,246 @@
+{
+ "pitt": {
+  "1.27": {
+   "A_excl|decay:8": {
+    "tokens": 399,
+    "hit": 0.5324,
+    "misses_per_token": 149.619,
+    "mb_per_token": 264.7467,
+    "drive_mb_per_token": 137.1496,
+    "tier2_hits_per_token": 72.1103
+   },
+   "A_incl|decay:8": {
+    "tokens": 399,
+    "hit": 0.5324,
+    "misses_per_token": 149.619,
+    "mb_per_token": 264.7467,
+    "drive_mb_per_token": 158.7159,
+    "tier2_hits_per_token": 59.9223
+   },
+   "A_excl|lru": {
+    "tokens": 399,
+    "hit": 0.5507,
+    "misses_per_token": 143.787,
+    "mb_per_token": 254.427,
+    "drive_mb_per_token": 135.9611,
+    "tier2_hits_per_token": 66.9499
+   },
+   "A_incl|lru": {
+    "tokens": 399,
+    "hit": 0.5507,
+    "misses_per_token": 143.787,
+    "mb_per_token": 254.427,
+    "drive_mb_per_token": 195.5023,
+    "tier2_hits_per_token": 33.3008
+   },
+   "A_excl|hazard": {
+    "tokens": 399,
+    "hit": 0.5784,
+    "misses_per_token": 134.9098,
+    "mb_per_token": 238.7191,
+    "drive_mb_per_token": 130.7236,
+    "tier2_hits_per_token": 61.0326
+   },
+   "A_incl|hazard": {
+    "tokens": 399,
+    "hit": 0.5784,
+    "misses_per_token": 134.9098,
+    "mb_per_token": 238.7191,
+    "drive_mb_per_token": 170.0024,
+    "tier2_hits_per_token": 38.8346
+   },
+   "A_excl|arc": {
+    "tokens": 399,
+    "hit": 0.556,
+    "misses_per_token": 142.0777,
+    "mb_per_token": 251.4025,
+    "drive_mb_per_token": 134.4444,
+    "tier2_hits_per_token": 66.0977
+   },
+   "A_excl|belady": {
+    "tokens": 399,
+    "hit": 0.7381,
+    "misses_per_token": 83.7995,
+    "mb_per_token": 148.2809,
+    "drive_mb_per_token": 125.0604,
+    "tier2_hits_per_token": 13.1228
+   },
+   "A_incl|belady": {
+    "tokens": 399,
+    "hit": 0.7381,
+    "misses_per_token": 83.7995,
+    "mb_per_token": 148.2809,
+    "drive_mb_per_token": 141.305,
+    "tier2_hits_per_token": 3.9424
+   }
+  }
+ },
+ "coding": {
+  "1.27": {
+   "A_excl|decay:8": {
+    "tokens": 399,
+    "hit": 0.438,
+    "misses_per_token": 179.8496,
+    "mb_per_token": 318.2389,
+    "drive_mb_per_token": 157.1061,
+    "tier2_hits_per_token": 91.0627
+   },
+   "A_incl|decay:8": {
+    "tokens": 399,
+    "hit": 0.438,
+    "misses_per_token": 179.8496,
+    "mb_per_token": 318.2389,
+    "drive_mb_per_token": 186.2336,
+    "tier2_hits_per_token": 74.6015
+   },
+   "A_excl|lru": {
+    "tokens": 399,
+    "hit": 0.4559,
+    "misses_per_token": 174.1203,
+    "mb_per_token": 308.101,
+    "drive_mb_per_token": 158.3079,
+    "tier2_hits_per_token": 84.6541
+   },
+   "A_incl|lru": {
+    "tokens": 399,
+    "hit": 0.4559,
+    "misses_per_token": 174.1203,
+    "mb_per_token": 308.101,
+    "drive_mb_per_token": 234.036,
+    "tier2_hits_per_token": 41.8571
+   },
+   "A_excl|hazard": {
+    "tokens": 399,
+    "hit": 0.4988,
+    "misses_per_token": 160.3885,
+    "mb_per_token": 283.8029,
+    "drive_mb_per_token": 154.2634,
+    "tier2_hits_per_token": 73.208
+   },
+   "A_incl|hazard": {
+    "tokens": 399,
+    "hit": 0.4988,
+    "misses_per_token": 160.3885,
+    "mb_per_token": 283.8029,
+    "drive_mb_per_token": 203.9948,
+    "tier2_hits_per_token": 45.1028
+   },
+   "A_excl|arc": {
+    "tokens": 399,
+    "hit": 0.476,
+    "misses_per_token": 167.6717,
+    "mb_per_token": 296.6903,
+    "drive_mb_per_token": 155.6781,
+    "tier2_hits_per_token": 79.6917
+   },
+   "A_excl|belady": {
+    "tokens": 399,
+    "hit": 0.6912,
+    "misses_per_token": 98.8045,
+    "mb_per_token": 174.8318,
+    "drive_mb_per_token": 146.7198,
+    "tier2_hits_per_token": 15.8872
+   },
+   "A_incl|belady": {
+    "tokens": 399,
+    "hit": 0.6912,
+    "misses_per_token": 98.8045,
+    "mb_per_token": 174.8318,
+    "drive_mb_per_token": 164.0465,
+    "tier2_hits_per_token": 6.0952
+   }
+  }
+ },
+ "agent": {
+  "1.27": {
+   "A_excl|decay:8": {
+    "tokens": 2873,
+    "hit": 0.3841,
+    "misses_per_token": 197.0867,
+    "mb_per_token": 348.7393,
+    "miss_in_named8": 0.7156,
+    "miss_in_named12": 0.8507,
+    "drive_mb_per_token": 189.9439,
+    "tier2_hits_per_token": 89.7417
+   },
+   "A_incl|decay:8": {
+    "tokens": 2873,
+    "hit": 0.3841,
+    "misses_per_token": 197.0867,
+    "mb_per_token": 348.7393,
+    "miss_in_named8": 0.7156,
+    "miss_in_named12": 0.8507,
+    "drive_mb_per_token": 217.6247,
+    "tier2_hits_per_token": 74.0982
+   },
+   "A_excl|lru": {
+    "tokens": 2873,
+    "hit": 0.4065,
+    "misses_per_token": 189.9217,
+    "mb_per_token": 336.0611,
+    "miss_in_named8": 0.7075,
+    "miss_in_named12": 0.8453,
+    "drive_mb_per_token": 194.0316,
+    "tier2_hits_per_token": 80.2666
+   },
+   "A_incl|lru": {
+    "tokens": 2873,
+    "hit": 0.4065,
+    "misses_per_token": 189.9217,
+    "mb_per_token": 336.0611,
+    "miss_in_named8": 0.7075,
+    "miss_in_named12": 0.8453,
+    "drive_mb_per_token": 270.1312,
+    "tier2_hits_per_token": 37.2597
+   },
+   "A_excl|hazard": {
+    "tokens": 2873,
+    "hit": 0.4466,
+    "misses_per_token": 177.0731,
+    "mb_per_token": 313.3259,
+    "miss_in_named8": 0.698,
+    "miss_in_named12": 0.8395,
+    "drive_mb_per_token": 187.1428,
+    "tier2_hits_per_token": 71.3112
+   },
+   "A_incl|hazard": {
+    "tokens": 2873,
+    "hit": 0.4466,
+    "misses_per_token": 177.0731,
+    "mb_per_token": 313.3259,
+    "miss_in_named8": 0.698,
+    "miss_in_named12": 0.8395,
+    "drive_mb_per_token": 237.8859,
+    "tier2_hits_per_token": 42.6342
+   },
+   "A_excl|arc": {
+    "tokens": 2873,
+    "hit": 0.4208,
+    "misses_per_token": 185.3422,
+    "mb_per_token": 327.9577,
+    "drive_mb_per_token": 189.8016,
+    "tier2_hits_per_token": 78.0776
+   },
+   "A_excl|belady": {
+    "tokens": 2873,
+    "hit": 0.6519,
+    "misses_per_token": 111.4031,
+    "mb_per_token": 197.1246,
+    "miss_in_named8": 0.6736,
+    "miss_in_named12": 0.8232,
+    "drive_mb_per_token": 177.1233,
+    "tier2_hits_per_token": 11.3035
+   },
+   "A_incl|belady": {
+    "tokens": 2873,
+    "hit": 0.6519,
+    "misses_per_token": 111.4031,
+    "mb_per_token": 197.1246,
+    "miss_in_named8": 0.6736,
+    "miss_in_named12": 0.8232,
+    "drive_mb_per_token": 190.7759,
+    "tier2_hits_per_token": 3.5879
+   }
+  }
+ }
+}

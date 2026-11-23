@@ -1,0 +1,2 @@
+A: IDENTICAL to dc_off_code.ids
+B: IDENTICAL to r_r8_pitt_gb3.3_r1.ids

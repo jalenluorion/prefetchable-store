@@ -1,0 +1,78 @@
+{
+ "stage4": {
+  "pitt 3.3": {
+   "decay": 0.7639,
+   "stage4_ours": 0.7639,
+   "belady": 0.8861,
+   "stage4_belady": 0.8861
+  },
+  "pitt 5.0": {
+   "decay": 0.8606,
+   "stage4_ours": 0.8606,
+   "belady": 0.9318,
+   "stage4_belady": 0.9318
+  },
+  "pitt 6.6": {
+   "decay": 0.9146,
+   "stage4_ours": 0.9146,
+   "belady": 0.9515,
+   "stage4_belady": 0.9515
+  },
+  "coding 3.3": {
+   "decay": 0.723,
+   "stage4_ours": 0.723,
+   "belady": 0.8582,
+   "stage4_belady": 0.8582
+  },
+  "coding 5.0": {
+   "decay": 0.8231,
+   "stage4_ours": 0.8231,
+   "belady": 0.914,
+   "stage4_belady": 0.914
+  },
+  "coding 6.6": {
+   "decay": 0.877,
+   "stage4_ours": 0.877,
+   "belady": 0.9467,
+   "stage4_belady": 0.9467
+  }
+ },
+ "phone_evict_sim": {
+  "ph_chat cap48 hazard_h128": {
+   "ours_MiB": 123.79,
+   "evict_sim": 123.79
+  },
+  "ph_chat cap48 lru_keep": {
+   "ours_MiB": 137.74,
+   "evict_sim": 137.74
+  },
+  "ph_chat cap48 lru": {
+   "ours_MiB": 137.46,
+   "evict_sim": 137.46
+  },
+  "ph_wiki cap48 hazard_h128": {
+   "ours_MiB": 115.68,
+   "evict_sim": 115.68
+  },
+  "ph_wiki cap48 lru_keep": {
+   "ours_MiB": 134.34,
+   "evict_sim": 134.34
+  },
+  "ph_wiki cap48 lru": {
+   "ours_MiB": 134.0,
+   "evict_sim": 134.0
+  },
+  "ph_code cap48 hazard_h128": {
+   "ours_MiB": 138.37,
+   "evict_sim": 138.37
+  },
+  "ph_code cap48 lru_keep": {
+   "ours_MiB": 156.21,
+   "evict_sim": 156.21
+  },
+  "ph_code cap48 lru": {
+   "ours_MiB": 156.17,
+   "evict_sim": 156.17
+  }
+ }
+}

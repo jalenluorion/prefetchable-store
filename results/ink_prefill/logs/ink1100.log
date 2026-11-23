@@ -1,0 +1,22 @@
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7310, "mem_free_pct": 78, "disk_free_gb": 46.1, "avail_gb": 12.78, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+{"mode":"check","model":"inkling2_loop","positions":1100,"ref_chunk":1,"chunk":256,"logit_bits_differ":0,"logit_max_diff":0,"fixed_state_bytes_differ":0,"fixed_first_differing_byte":-1,"kv_bytes_differ":0,"kv_first_differing_position":-1,"greedy_identical":true,"gen_ref":"9969,9965,157,236,103,157,236,103,157,236,103,157,236,103,157,236","gen_batched":"9969,9965,157,236,103,157,236,103,157,236,103,157,236,103,157,236","ref_ms":77590.4,"batched_ms":26162.8,"ref":{},"batched":{"chunk":256,"span":8192,"spans":1,"hold_releases":0,"mb_read":18545.1,"expert_mb_touched":61996.3,"resident_mb_touched":7743.84,"read_mb_per_pos":16.8592,"expert_touched_mb_per_pos":56.3603,"resident_touched_mb_per_pos":7.03986,"wait_ms":526.029}}
+PREFILL CHECK PASSED
+      108.28 real       766.82 user         7.48 sys
+          7480082432  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              462475  page reclaims
+                  21  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   5  signals received
+              150260  voluntary context switches
+              531110  involuntary context switches
+            39216684  instructions retired
+            18272987  cycles elapsed
+             1638760  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 108.8, "waited_s": 100, "swap_start_mb": 7310, "peak_swap_growth_mb": 0, "swap_growth_end_mb": 0, "peak_footprint_gb_guard": 7.479, "peak_footprint_gb_time": 0.002, "others_cpu_pct_mean": 25.0, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7310, "mem_free_pct": 78, "disk_free_gb": 46.1, "avail_gb": 12.78, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 7310, "mem_free_pct": 78, "disk_free_gb": 46.1, "avail_gb": 12.56, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

@@ -1,0 +1,22 @@
+CMD: ../../.venv/bin/python bench/serving/memwatch_check.py results/serving2/memwatch_q36.jsonl bench/prompts/qwen3_5_moe/code.ids 48 -- build/dmserve --model ../../../q36/model --cache-gb auto --mem mlock --chunk 512 --span 8192 --routers ../../../q36/model/routers/lin/q36_router_lin_k2.dmr --m 8
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8516, "mem_free_pct": 78, "disk_free_gb": 37.3, "avail_gb": 9.17, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+identical True 48
+       31.56 real       180.87 user         4.85 sys
+          6959546368  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              546167  page reclaims
+                  66  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+               86516  voluntary context switches
+              487250  involuntary context switches
+           198919777  instructions retired
+           129056452  cycles elapsed
+             9978288  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 31.9, "waited_s": 226, "swap_start_mb": 8516, "peak_swap_growth_mb": 0, "swap_growth_end_mb": -30, "peak_footprint_gb_guard": 6.965, "peak_footprint_gb_time": 0.01, "others_cpu_pct_mean": 53.1, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8516, "mem_free_pct": 78, "disk_free_gb": 37.3, "avail_gb": 9.17, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8486, "mem_free_pct": 75, "disk_free_gb": 38.3, "avail_gb": 11.45, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

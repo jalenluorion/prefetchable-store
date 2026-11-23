@@ -1,0 +1,65 @@
+{
+ "positions": 399,
+ "draft1_equal": 0.9924812030075187,
+ "draft_j_equal_given_previous_equal": [
+  {
+   "j": 1,
+   "compared": 399,
+   "equal": 0.9924812030075187
+  },
+  {
+   "j": 2,
+   "compared": 396,
+   "equal": 0.98989898989899
+  },
+  {
+   "j": 3,
+   "compared": 392,
+   "equal": 0.9897959183673469
+  },
+  {
+   "j": 4,
+   "compared": 388,
+   "equal": 0.9922680412371134
+  },
+  {
+   "j": 5,
+   "compared": 385,
+   "equal": 0.9922077922077922
+  },
+  {
+   "j": 6,
+   "compared": 382,
+   "equal": 0.9869109947643979
+  },
+  {
+   "j": 7,
+   "compared": 377,
+   "equal": 0.9893899204244032
+  }
+ ],
+ "all7_equal": 0.9348370927318296,
+ "prob1_max_abs_diff_where_equal": 0.03017270565032959,
+ "logit_positions": 200,
+ "draft1_logit_max_abs_diff": 0.2766122817993164,
+ "draft1_logit_mean_abs_diff": 0.02875399962067604,
+ "draft1_logit_max_abs_diff_at_ref_top": 0.1805744171142578,
+ "draft1_disagreements": [
+  {
+   "p": 246,
+   "cpp": 152689,
+   "ref": 152107
+  },
+  {
+   "p": 254,
+   "cpp": 149881,
+   "ref": 149879
+  },
+  {
+   "p": 355,
+   "cpp": 68014,
+   "ref": 149917
+  }
+ ],
+ "draft1_disagreements_near_tie": 0
+}

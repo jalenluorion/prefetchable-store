@@ -1,0 +1,1217 @@
+// dmeng: batch-1 decoding of a mixture-of-experts model from its expert store; token ids in, token ids and one JSON line
+// of statistics out. The model family is read from the resident file.
+//
+//   dmeng --model DIR --prompt-file ids.txt                          (the profile's defaults: docs/MANIFEST-PRESETS.md)
+//   dmeng --model DIR --mode fast --prompt "text"                    (text through python/run.py)
+//   dmeng --model DIR --teacher ids.txt --dump-logits out.f32        (teacher-forced logits at every position)
+//   dmeng --help | --help-advanced
+#include <limits.h>
+#include <mach-o/dyld.h>
+#include <mach/mach.h>
+#include <unistd.h>
+
+#include <cerrno>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
+#include <fstream>
+#include <iomanip>
+#include <map>
+#include <random>
+#include <set>
+#include <sstream>
+
+#include "dmeng/address.h"
+#include "dmeng/draft.h"
+#include "dmeng/model.h"
+#include "dmeng/presets.h"
+#include "dmeng/sampler.h"
+#include "../src/models/inkling2_loop/ink_draft.h"
+#include "../src/serving/memwatch.h"
+
+using namespace dm;
+
+static const char* HELP_SHORT = R"(usage: dmeng --model DIR (--prompt TEXT | --prompt-file IDS | --prompt-ids IDS) [options]
+
+  --model DIR            the model folder, as downloaded from the Hub
+  --prompt TEXT          text in, text out (runs python/run.py of this repo: needs the tokenizers package);
+                         --chat renders the model's chat template around it
+  --prompt-file F        token ids from a file (commas or spaces); --prompt-ids 1,2,3 on the command line
+  --mode exact|fast      exact: generated tokens never depend on the cache, the routers or timing (the Mac's default);
+                         fast: a picked expert that is not in memory and has a small routing weight is left out
+  --profile mac|phone|phone-small   default: chosen from the device (macOS: mac)
+  --n N                  tokens to generate (default 120)
+  --temp T --top-p P --top-k K --seed S   sampling (default: greedy)
+  --cache-gb G|auto      expert cache size in GB (default auto: from the memory free at start)
+  --drafts 0|1           draft and verify, greedy only, experimental (default 0)
+  --json F               write the statistics line to F as well
+  --help-advanced        every other option, grouped
+)";
+
+static const char* HELP = R"(usage: dmeng --model DIR (--prompt TEXT | --prompt-ids IDS | --prompt-file F | --teacher F) [options]
+
+profiles and modes (docs/MANIFEST-PRESETS.md)
+  --profile auto|mac|phone|phone-small|none   the defaults below come from the profile (manifest keys `profiles`,
+                         `defaults`, built-in fallbacks); auto (default): from the device; none: no profile, the
+                         engine's built-in values (no names, --cache-gb 5, single-step prompt, ...). A default fills only
+                         what the command line leaves unset; any of --prefetch, --routers, --xtok, --oracle,
+                         --plan-routers makes the early address entirely the command line's
+  --mode exact|fast|lossless|approx[:PRESET]   exact = lossless, fast = approx:drop (default: the profile's)
+  --drafts 0|1           1 = --draft lookup (greedy only); default: the profile's (off)
+  --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
+  --print-defaults       print the resolved profile defaults as JSON and exit
+  --chat --reasoning-effort E   with --prompt: the chat template (python/run.py)
+
+model and memory
+  --model DIR            the model folder (store/, resident.safetensors, tokenizer files)
+  --resident F           the 8-bit resident file (default: derived/ or .dmeng/ of the model folder, derived on first use)
+  --embeddings F         embedding rows from this file (the table alone; default: the manifest's, else
+                         DIR/embeddings.safetensors when that is absent)
+  --cache-gb G|auto      byte budget of the expert slots (default auto under a profile: physical memory - --reserve-gb
+                         - the process's other memory, capped by what is free at start; 5 with --profile none)
+  --pool-share A,B       budget share per record format (default: the model's; Inkling 0.8,0.2)
+  --mem plain|mlock|purgeable|file   expert slots (default mlock); --res-mem plain|mlock resident weights (default mlock)
+                         file: held records are views of the store files' pages in the OS file cache (--cache-gb is then
+                         the policy's bookkeeping, not memory); --file-check 0|1|2 (a held record checked on use: off,
+                         first + last page, every page; default 1), --file-hint 0|1|2 (on eviction: 1 MADV_DONTNEED, 2 msync MS_INVALIDATE; default 0),
+                         --file-skip-resident 0|1 (default 1), --file-prefault 0|1 (default 1),
+                         --file-adapt 0|1 (the budget follows what the OS keeps; --cache-gb is the start and the max),
+                         --file-min-gb G (adaptive floor, default 1), --file-core-gb G (a locked core of the hottest records)
+  --threads N --readers N --split N    compute threads (8), reader threads (4), pieces per record read (1)
+  --prec i16|i8|f16|f32  activation precision (default i16; f32 = the exact reference path, where the model has one)
+  --ctx N                context positions (default 16384)
+  --half-life T          eviction: half-life of the decayed use count, in tokens (default 8)
+  --no-loop-hold         looped layers: do not keep an earlier pass's experts pinned for the later passes
+
+generation
+  --n N --temp T --top-k K --top-p P --seed S --stop-eos ID
+  --fast-head 1|2        exact greedy head (temperature 0); 2 also checks it against the full head
+  --start-pos P          timing of long contexts: the first token sits at position P
+
+early address (lossless: names only schedule reads; the released router decides)
+  --prefetch none|oracle|router|transplant|plan
+  --prefetch transplant --m M      no trained weights: step s + 1's released router on step s's input names its top M
+  --oracle F --lead N|token        replay a routing recorded with --record, N steps ahead or one token ahead
+  --routers F --m M                trained routers (engine file), name the top M per step (default 8)
+  --xtok-bg F                      a second cross-token source whose reads start only while no read of the current
+                                   token is queued or in flight (the readers' background class, one at a time)
+  --xtok F --xtok-tau T            cross-token routers (engine file, kind ink_xtok): name the next token's first steps
+                                   from a late step of this one (threshold T, default 0.5); wraps --prefetch router
+  --rt-tau P --rt-cand C           or name the top-C names whose calibrated probability >= P
+  --router-ecache N                split router files: cache the embedding columns' output of N token ids
+  --router-stats                   run the routers and report how well they name, without naming
+  --plan-routers F1,F2,..          read planner over a cascade of router sets (longest lag first); --plan-u,
+                                   --plan-budget 0|1|2, --plan-tau-long, --plan-tau, --plan-pin-p, --plan-revoke,
+                                   --plan-revoke-p, --plan-maxcand, --plan-calib rank|q
+  --evict auto|freq|pred|hazard  --rd-prio 0|1  --rd-excl 0|1  --spec-max N  --cancel 0|1
+                         auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
+                         EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
+                         pick (35B below 2.26 GB), else one pool (results/cache-policy/POLICY.md); freq: the decayed use
+                         count of the engines before (one pool); hazard: the table, caps as --layer-caps says
+  --layer-caps auto|uniform|none   per-layer slot caps (each layer evicts its own records at its cap); auto: the rule
+  --router-heavy F       a heavy-pick head (router file of the same format) beside --routers: its positives are named first
+  --drop 0|1             approx mode: leave missing light picks out (kept picks keep their released weights) instead of replacing them
+  --evict-policy F.json  learned keep-score (logistic next-use predictor; router features from --prefetch router), or a
+                         ranker over hazard's shortlist (a file with "features", e.g. the design study's v3:
+                         q36_d_evict3_policy.json; turns hazard on; its early-router features need --routers F with
+                         --prefetch router or --router-stats, the router of the file's lag)
+  --evict-trace F        per (token, step) the released router's and the early router's top-32 rows (for the simulator)
+
+modes
+  --mode lossless|exact  (default) token ids never depend on the cache, the routers or the timing
+  --mode approx[:PRESET] opt-in (fast = approx:drop): a released pick that has not landed may be replaced by the released router's
+                         next-ranked expert in memory. Presets: PRESETS
+  --late none|always|MS  --read-w W  --read-mass M  --bg 0|1     the approximate rule set, set by hand
+
+outputs
+  --json F --out-ids F --steps-out F --record F --dump-names F
+  --teacher F --dump-logits F --dump-from P --nll-out F --ref-nll F --qual-out F --ref-qual F --taps-out F
+  --skip-reads --force-routing F   timing without reads, with a recorded routing forced
+  --state-check          after the decode, restore the state saved after the prompt (fixed + positional parts) and
+                         decode again: the ids must be the same
+  --prefill-chunk N      the prompt through the model's batched prefill in chunks of N (1: single steps); exact
+                         (default 512 under a profile unless --record is given, else 1)
+  --prefill-gpu-frac F   with --prefill-chunk: that share of each 8-bit attention projection's rows on the GPU beside
+                         the CPU (builds with DM_METAL; the same bits); 0 = CPU only (default)
+  --draft lookup|fixed|head|both   draft and verify (greedy only): drafts verified up to --draft-max 7 at a time in
+                         one pass; accepted while each equals the model's own greedy token, the rest rolled back, so the
+                         ids are one-position decoding's. Sources: the lookup (the longest earlier match of the sequence's
+                         last 2-16 tokens) and the model's draft head (Inkling's MTP, mtp.safetensors; its features come
+                         from the model's own steps). lookup / head / both: a controller picks the source and the draft
+                         length from running acceptance and measured step costs (or a plain step); fixed: the whole
+                         lookup draft every step
+  --draft-thr P          head drafts are used only while their top-1 probability is >= P (default 0.9: the best measured on the
+                         Pittsburgh generation, within 0.1% of the best on the coding answer; results/ink_draft/DRAFT-HEAD.md)
+  --head-backoff B,M     after a lost head try (no draft over the threshold, its draft not chosen, none accepted, or the
+                         step plus the head slower per token than a plain step) the
+                         head is not run for B tokens, doubling on each further loss up to M (default 32,256)
+  --draft-exact 0|1      the head's output layer as the MLX reference computes it (bf16 unembedding; slow, checks only)
+  --draft-check TAPS --prompt-file IDS --draft-check-start P --draft-check-out PREFIX [--draft-check-logits N]
+                         the head's port check on recorded features (TAPS: per position int32 + float [4, H], as
+                         --taps-out writes): for every committed position p >= P, the 7 drafts after IDS[p+1] without a
+                         threshold and their probabilities (PREFIX.drafts: int32 p, int32 [7], float [7]) and draft 1's
+                         logits for the first N positions (PREFIX.logits; default 200); no decoding. Compare with
+                         tests/inkling2_loop/draft_ref_mlx_run.py + draft_compare.py
+  --early N              with --draft: before each step, name the released picks recorded at the lookup match's source
+                         positions for the step's own positions and N positions past them, so their reads start before
+                         the step (0 = off, the default); names only schedule reads, the ids do not change
+  --verify-names 0|1     with --draft and an early-address hook: inside a verify pass, the hook names every position's
+                         experts of later steps as one-position steps do (routers: the first two blocks per position at
+                         the pass's start, the lag rows in each step's router fork-join; oracle: the recorded picks); names
+                         only schedule reads (default 0 under a profile, 1 with --profile none)
+  --skeleton F           with --draft: tool-call skeleton fragments (one line of token ids each) as a second draft source
+  --probe-every N        with --draft lookup: one short draft after N declined offers (default 48)
+  --verify-check N       after the prompt: N greedy single steps, then the same positions again through verify passes of
+                         2-8 positions (every third with a wrong last draft, rolled back); every kept position's logits and
+                         the final state must be bit-identical (prints verify_check in the JSON; exit 3 if not)
+)";
+
+struct Args {
+  std::string model, resident, embeddings, family, prompt_ids, prompt_file, teacher, dump_logits, record, oracle, routers, out_ids, json,
+      steps_out, force, pool_share, nll_out, ref_nll, qual_out, ref_qual, dump_names, taps_out, plan_routers, evict_trace;
+  std::string prefetch = "none", mem = "mlock", res_mem = "mlock", prec = "i16", lead = "4", mode = "lossless", evict = "auto",
+              plan_calib = "rank", late, evict_policy, router_heavy, layer_caps;
+  int n = 120, start_pos = 0, ctx = 16384, threads = 8, readers = 4, split = 1, m = 8, top_k = 0, dump_from = 0, stop_eos = -1, drop = -1;
+  int rt_cand = 16, router_ecache = 0, fast_head = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1;
+  int plan_budget = 1, plan_revoke = 1, plan_maxcand = 32;
+  int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1;
+  double prefill_gpu_frac = 0;
+  std::string xtok, xtok_bg, skeleton;
+  int verify_check = 0;
+  double xtok_tau = 0.5;
+  std::string draft = "none";  // none | lookup | head | both (controller) | fixed (the whole lookup draft every step)
+  double draft_thr = 0.9;
+  int backoff0 = 32, backoff_max = 256, draft_exact = 0, check_start = 0, check_logits = 200;
+  std::string draft_check, check_out;
+  int draft_bench = 0;
+  int file_check = 1, file_hint = 0, file_skip_resident = 1, file_prefault = 1, file_adapt = 0;
+  double file_min_gb = 1.0, file_core_gb = 0;
+  double temp = 0, top_p = 1.0, cache_gb = 5.0, half_life = 8.0, rt_tau = -1, read_w = -1, read_mass = -1;
+  double plan_u = 0.9, plan_tau_long = 0.5, plan_tau = -1, plan_pin_p = 0.2, plan_revoke_p = 0.1;
+  uint64_t seed = 0;
+  bool skip_reads = false, router_stats = false, loop_hold = true, state_check = false;
+  // the user-facing surface (include/dmeng/presets.h)
+  std::string profile = "auto", prompt_text, reasoning_effort;
+  int drafts = -1;
+  bool cache_auto = false, print_defaults = false, chat = false;
+  MemRule mr;
+  std::set<std::string> given;  // the flags on the command line (a profile default fills only the others)
+};
+
+// --prompt TEXT: text in, text out through python/run.py of this repo (the tokenizer and chat template are Python's);
+// it calls this binary back with --prompt-ids and every other flag unchanged
+static int run_text(const Args& a, int argc, char** argv) {
+  char self[PATH_MAX];
+  uint32_t sz = sizeof self;
+  std::string exe = _NSGetExecutablePath(self, &sz) == 0 ? std::string(self) : std::string(argv[0]);
+  char real[PATH_MAX];
+  if (realpath(exe.c_str(), real)) exe = real;
+  const std::string dir = exe.substr(0, exe.find_last_of('/'));
+  std::string py = getenv("DMENG_RUN_PY") ? getenv("DMENG_RUN_PY") : "";
+  for (const std::string& c : std::vector<std::string>{dir + "/../python/run.py", dir + "/python/run.py"})
+    if (py.empty() && access(c.c_str(), R_OK) == 0) py = c;
+  if (py.empty()) {
+    fprintf(stderr, "--prompt: python/run.py not found beside %s (set DMENG_RUN_PY, or pass token ids with --prompt-file)\n", exe.c_str());
+    return 2;
+  }
+  const char* python = getenv("DMENG_PYTHON") ? getenv("DMENG_PYTHON") : "python3";
+  std::vector<std::string> v = {python, py, "--model", a.model, "--bin", exe, "--prompt", a.prompt_text};
+  if (a.chat) v.push_back("--chat");
+  if (!a.reasoning_effort.empty()) v.insert(v.end(), {"--reasoning-effort", a.reasoning_effort});
+  for (int i = 1; i < argc; i++) {
+    const std::string k = argv[i];
+    if (k == "--prompt" || k == "--model" || k == "--reasoning-effort") i++;
+    else if (k != "--chat") v.push_back(k);
+  }
+  std::vector<char*> cv;
+  for (auto& x : v) cv.push_back((char*)x.c_str());
+  cv.push_back(nullptr);
+  execvp(python, cv.data());
+  fprintf(stderr, "--prompt: cannot run %s (%s)\n", python, strerror(errno));
+  return 2;
+}
+
+static std::vector<int> parse_ids(const std::string& s) {
+  std::vector<int> v;
+  std::string t;
+  for (char ch : s + ",") {
+    if (ch == ',' || ch == ' ' || ch == '\n' || ch == '\t') {
+      if (!t.empty()) v.push_back(std::stoi(t));
+      t.clear();
+    } else {
+      t += ch;
+    }
+  }
+  return v;
+}
+
+static std::vector<std::string> split_list(const std::string& s) {
+  std::vector<std::string> v;
+  std::string t;
+  for (char ch : s + ",") {
+    if (ch == ',') {
+      if (!t.empty()) v.push_back(t);
+      t.clear();
+    } else {
+      t += ch;
+    }
+  }
+  return v;
+}
+
+static std::string slurp(const std::string& p) {
+  std::ifstream f(p);
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+
+struct MemStat {
+  double footprint_gb, footprint_peak_gb, compressed_gb, resident_gb;
+};
+static MemStat memstat() {
+  task_vm_info_data_t vi;
+  mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+  MemStat m{0, 0, 0, 0};
+  if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS) {
+    m.footprint_gb = vi.phys_footprint / 1e9;
+    m.footprint_peak_gb = vi.ledger_phys_footprint_peak / 1e9;
+    m.compressed_gb = vi.compressed / 1e9;
+    m.resident_gb = vi.resident_size / 1e9;
+  }
+  return m;
+}
+
+// per position of a teacher-forced text: argmax, NLL of the true next token, this run's top 32 (ids, log-probs), and the
+// log-probs of a reference run's top 32 ids under this run (--ref-qual)
+constexpr int TK = 32;
+struct QRec {
+  int32_t argmax;
+  float nll;
+  int32_t ids[TK];
+  float lp[TK];
+  float ref_lp[TK];
+};
+
+static int die(const std::string& what, const std::string& err) {
+  fprintf(stderr, "%s: %s\n", what.c_str(), err.c_str());
+  return 1;
+}
+
+int main(int argc, char** argv) {
+  Args a;
+  for (int i = 1; i < argc; i++) {
+    std::string k = argv[i];
+    auto v = [&]() -> std::string {
+      if (i + 1 >= argc) {
+        fprintf(stderr, "%s needs a value\n", k.c_str());
+        exit(2);
+      }
+      return argv[++i];
+    };
+    a.given.insert(k);
+    if (k == "--help" || k == "-h") {
+      printf("%s", HELP_SHORT);
+      return 0;
+    } else if (k == "--help-advanced") {
+      std::string h = HELP;
+      h.replace(h.find("PRESETS"), 7, Approx::presets_help());
+      printf("%s", h.c_str());
+      return 0;
+    } else if (k == "--model") a.model = v();
+    else if (k == "--resident") a.resident = v();
+    else if (k == "--embeddings") a.embeddings = v();
+    else if (k == "--family") a.family = v();
+    else if (k == "--prompt-ids") a.prompt_ids = v();
+    else if (k == "--prompt-file") a.prompt_file = v();
+    else if (k == "--teacher") a.teacher = v();
+    else if (k == "--dump-logits") a.dump_logits = v();
+    else if (k == "--dump-from") a.dump_from = std::stoi(v());
+    else if (k == "--record") a.record = v();
+    else if (k == "--oracle") a.oracle = v();
+    else if (k == "--routers") a.routers = v();
+    else if (k == "--router-stats") a.router_stats = true;
+    else if (k == "--out-ids") a.out_ids = v();
+    else if (k == "--json") a.json = v();
+    else if (k == "--steps-out") a.steps_out = v();
+    else if (k == "--prefetch") a.prefetch = v();
+    else if (k == "--lead") a.lead = v();
+    else if (k == "--m") a.m = std::stoi(v());
+    else if (k == "--rt-tau") a.rt_tau = std::stod(v());
+    else if (k == "--rt-cand") a.rt_cand = std::stoi(v());
+    else if (k == "--router-ecache") a.router_ecache = std::stoi(v());
+    else if (k == "--mem") a.mem = v();
+    else if (k == "--res-mem") a.res_mem = v();
+    else if (k == "--prec") a.prec = v();
+    else if (k == "--n") a.n = std::stoi(v());
+    else if (k == "--ctx") a.ctx = std::stoi(v());
+    else if (k == "--start-pos") a.start_pos = std::stoi(v());
+    else if (k == "--threads") a.threads = std::stoi(v());
+    else if (k == "--readers") a.readers = std::stoi(v());
+    else if (k == "--split") a.split = std::stoi(v());
+    else if (k == "--temp") a.temp = std::stod(v());
+    else if (k == "--top-k") a.top_k = std::stoi(v());
+    else if (k == "--top-p") a.top_p = std::stod(v());
+    else if (k == "--seed") a.seed = std::stoull(v());
+    else if (k == "--cache-gb") {
+      const std::string x = v();
+      a.cache_auto = x == "auto";
+      if (!a.cache_auto) a.cache_gb = std::stod(x);
+    } else if (k == "--profile") a.profile = v();
+    else if (k == "--drafts") a.drafts = std::stoi(v());
+    else if (k == "--prompt") a.prompt_text = v();
+    else if (k == "--chat") a.chat = true;
+    else if (k == "--reasoning-effort") a.reasoning_effort = v();
+    else if (k == "--reserve-gb") a.mr.reserve_gb = std::stod(v());
+    else if (k == "--print-defaults") a.print_defaults = true;
+    else if (k == "--pool-share") a.pool_share = v();
+    else if (k == "--half-life") a.half_life = std::stod(v());
+    else if (k == "--stop-eos") a.stop_eos = std::stoi(v());
+    else if (k == "--skip-reads") a.skip_reads = true;
+    else if (k == "--no-loop-hold") a.loop_hold = false;
+    else if (k == "--force-routing") a.force = v();
+    else if (k == "--fast-head") a.fast_head = std::stoi(v());
+    else if (k == "--mode") a.mode = v();
+    else if (k == "--late") a.late = v();
+    else if (k == "--read-w") a.read_w = std::stod(v());
+    else if (k == "--read-mass") a.read_mass = std::stod(v());
+    else if (k == "--bg") a.bg = std::stoi(v());
+    else if (k == "--evict") a.evict = v();
+    else if (k == "--evict-policy") a.evict_policy = v();
+    else if (k == "--evict-trace") a.evict_trace = v();
+    else if (k == "--layer-caps") a.layer_caps = v();
+    else if (k == "--drop") a.drop = std::stoi(v());
+    else if (k == "--router-heavy") a.router_heavy = v();
+    else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
+    else if (k == "--rd-excl") a.rd_excl = std::stoi(v());
+    else if (k == "--spec-max") a.spec_max = std::stoi(v());
+    else if (k == "--cancel") a.cancel = std::stoi(v());
+    else if (k == "--plan-routers") a.plan_routers = v();
+    else if (k == "--plan-u") a.plan_u = std::stod(v());
+    else if (k == "--plan-budget") a.plan_budget = std::stoi(v());
+    else if (k == "--plan-tau-long") a.plan_tau_long = std::stod(v());
+    else if (k == "--plan-tau") a.plan_tau = std::stod(v());
+    else if (k == "--plan-pin-p") a.plan_pin_p = std::stod(v());
+    else if (k == "--plan-revoke") a.plan_revoke = std::stoi(v());
+    else if (k == "--plan-revoke-p") a.plan_revoke_p = std::stod(v());
+    else if (k == "--plan-maxcand") a.plan_maxcand = std::stoi(v());
+    else if (k == "--plan-calib") a.plan_calib = v();
+    else if (k == "--nll-out") a.nll_out = v();
+    else if (k == "--ref-nll") a.ref_nll = v();
+    else if (k == "--qual-out") a.qual_out = v();
+    else if (k == "--ref-qual") a.ref_qual = v();
+    else if (k == "--dump-names") a.dump_names = v();
+    else if (k == "--taps-out") a.taps_out = v();
+    else if (k == "--state-check") a.state_check = true;
+    else if (k == "--prefill-chunk") a.prefill_chunk = std::stoi(v());
+    else if (k == "--prefill-gpu-frac") a.prefill_gpu_frac = std::stod(v());
+    else if (k == "--xtok") a.xtok = v();
+    else if (k == "--xtok-bg") a.xtok_bg = v();
+    else if (k == "--xtok-tau") a.xtok_tau = std::stod(v());
+    else if (k == "--draft") a.draft = v();
+    else if (k == "--draft-max") a.draft_max = std::stoi(v());
+    else if (k == "--draft-thr") a.draft_thr = std::stod(v());
+    else if (k == "--draft-exact") a.draft_exact = std::stoi(v());
+    else if (k == "--draft-check") a.draft_check = v();
+    else if (k == "--draft-bench") a.draft_bench = std::stoi(v());
+    else if (k == "--draft-check-start") a.check_start = std::stoi(v());
+    else if (k == "--draft-check-out") a.check_out = v();
+    else if (k == "--draft-check-logits") a.check_logits = std::stoi(v());
+    else if (k == "--head-backoff") {
+      auto b = split_list(v());
+      a.backoff0 = std::stoi(b.at(0));
+      a.backoff_max = b.size() > 1 ? std::stoi(b[1]) : a.backoff0;
+    }
+    else if (k == "--probe-every") a.probe_every = std::stoi(v());
+    else if (k == "--early") a.early = std::stoi(v());
+    else if (k == "--verify-names") a.verify_names = std::stoi(v());
+    else if (k == "--skeleton") a.skeleton = v();
+    else if (k == "--verify-check") a.verify_check = std::stoi(v());
+    else if (k == "--file-check") a.file_check = std::stoi(v());
+    else if (k == "--file-hint") a.file_hint = std::stoi(v());
+    else if (k == "--file-skip-resident") a.file_skip_resident = std::stoi(v());
+    else if (k == "--file-prefault") a.file_prefault = std::stoi(v());
+    else if (k == "--file-adapt") a.file_adapt = std::stoi(v());
+    else if (k == "--file-min-gb") a.file_min_gb = std::stod(v());
+    else if (k == "--file-core-gb") a.file_core_gb = std::stod(v());
+    else if (k == "--draft-n") {
+      fprintf(stderr, "--draft-n: the draft length is --draft-max N (with --draft lookup|fixed)\n");
+      return 2;
+    } else {
+      fprintf(stderr, "unknown flag %s (dmeng --help)\n", k.c_str());
+      return 2;
+    }
+  }
+  if (a.draft_bench > 0) {  // the draft head's bf16 products on synthetic weights (no model)
+    Pool pool(a.threads);
+    printf("%s\n", ink_draft_bench(pool, a.draft_bench).c_str());
+    return 0;
+  }
+  if (a.model.empty()) {
+    fprintf(stderr, "usage: dmeng --model DIR (--prompt-ids IDS | --prompt-file F | --teacher F) [options]  (dmeng --help)\n");
+    return 2;
+  }
+  if (!a.prompt_text.empty()) return run_text(a, argc, argv);
+  std::string err;
+  // ---- the profile's defaults: each fills only what the command line leaves unset
+  auto has = [&](const char* f) { return a.given.count(f) > 0; };
+  Preset P;
+  if (a.profile != "none" && !resolve_preset(a.model, a.profile, has("--mode") ? a.mode : "", "", -1, P, err)) return die("profile", err);
+  const bool profiled = a.profile != "none" && P.profile != "none";
+  if (profiled) {
+    for (auto& n : P.notes) fprintf(stderr, "dmeng: %s\n", n.c_str());
+    if (a.print_defaults) {
+      printf("%s\n", P.json().c_str());
+      return 0;
+    }
+    a.mode = P.engine_mode;
+    if (!has("--resident") && !P.resident.empty()) a.resident = P.resident;
+    const bool addr_given = has("--prefetch") || has("--routers") || has("--xtok") || has("--oracle") || has("--plan-routers");
+    if (!addr_given && !P.routers.empty()) {
+      a.prefetch = "router";
+      a.routers = P.routers;
+      if (!has("--m")) a.m = P.m;
+      if (!has("--rt-tau")) a.rt_tau = P.tau;
+      if (!has("--rt-cand")) a.rt_cand = P.cand;
+    }
+    if (!addr_given && !P.xtok.empty()) {
+      a.xtok = P.xtok;
+      if (!has("--xtok-tau")) a.xtok_tau = P.xtok_tau;
+      if (!has("--rd-prio") && P.rd_prio) a.rd_prio = 1;
+    }
+    if (!has("--evict")) a.evict = P.evict;
+    if (!has("--cache-gb")) a.cache_auto = true;
+    if (!has("--prefill-chunk") && a.record.empty()) a.prefill_chunk = 512;
+    if (!has("--verify-names")) a.verify_names = 0;
+    if (a.drafts < 0) a.drafts = P.drafts && a.temp <= 0 ? 1 : 0;
+  } else {
+    if (a.print_defaults) {
+      printf("null\n");
+      return 0;
+    }
+    a.mode = engine_mode_of(a.mode);
+  }
+  if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
+  LoadOpts lo;
+  std::string family;
+  if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings)) return die("model", err);
+  if (!a.family.empty()) family = a.family;
+  CoreOpts co;
+  co.threads = a.threads;
+  co.readers = a.readers;
+  co.split = a.split;
+  co.prec = a.prec == "i8" ? Prec::I8 : a.prec == "f16" ? Prec::F16 : Prec::I16;
+  co.ref = a.prec == "f32";
+  co.cache_gb = a.cache_gb;
+  co.half_life = a.half_life;
+  co.mem = mem_of(a.mem);
+  co.skip_reads = a.skip_reads;
+  co.loop_hold = a.loop_hold;
+  co.evict = a.evict;
+  co.layer_caps = a.layer_caps.empty() ? "auto" : a.layer_caps;
+  if (!a.evict_policy.empty() && a.evict == "auto" && !Cache::is_ranker_file(a.evict_policy)) co.evict = "freq";  // a keep-score file replaces the default
+  for (auto& s : split_list(a.pool_share)) co.pool_share.push_back(std::stod(s));
+
+  set_qos_interactive();
+  auto t_load = clk::now();
+  std::unique_ptr<Model> M = make_model(family, err);
+  if (!M) return die("model", err);
+  if (!M->load(lo, err)) return die("load", err);
+  std::string auto_why = "null";
+  if (a.cache_auto) {  // the serving worker's rule (src/serving/memwatch.h), the resident weights loaded: here the start size
+    const ModelInfo& mi0 = M->info();
+    double start = 0;
+    a.mr.kv_positions = a.ctx;
+    a.cache_gb = auto_cache_gb(a.mr, M->pos_bytes(), 0, store_bytes_gb(a.model, mi0.layer_file, mi0.layers), start, auto_why);
+    a.cache_gb = std::min(a.cache_gb, start);
+    co.cache_gb = a.cache_gb;
+  }
+  Core C;
+  if (!C.init(M->info(), co, a.model, err)) return die("core", err);
+  C.cache.file_check = a.file_check;
+  C.cache.file_evict_hint = a.file_hint;
+  C.cache.rd.file_skip_resident = a.file_skip_resident != 0;
+  C.cache.rd.file_prefault = a.file_prefault != 0;
+  C.cache.fa.on = a.file_adapt != 0 && C.cache.mem == Mem::FILE;
+  C.cache.fa.min_bytes = (int64_t)(a.file_min_gb * 1e9);
+  if (!C.cache.core_init((int64_t)(a.file_core_gb * 1e9), err)) return die("core", err);
+  const double file_res0_gb = C.cache.mem == Mem::FILE ? C.cache.file_resident_bytes() / 1e9 : 0;
+  if (!M->bind(C, err)) return die("model", err);
+  std::unique_ptr<State> S = M->new_state(a.ctx, err);
+  if (!S) return die("state", err);
+  const ModelInfo& mi = M->info();
+  const int VO = mi.vocab_out;
+  const double load_s = ms_since(t_load) / 1000;
+
+  // ---- the early address
+  Oracle orc;
+  Routers rts, hrts;
+  Transplant tpl;
+  Planner pln;
+  const bool plan = a.prefetch == "plan";
+  if (a.prefetch == "oracle") {
+    if (!orc.load(a.oracle, C.steps, C.K, err)) return die("oracle", err);
+    orc.token_lead = a.lead == "token";
+    orc.lead = orc.token_lead ? C.steps : std::stoi(a.lead);
+    C.hook = &orc;
+  } else if (a.prefetch == "router" || a.router_stats) {
+    rts.ecap = a.router_ecache;
+    if (!rts.load(a.routers, C, err)) return die("routers", err);
+    rts.m = a.m;
+    rts.tau = a.rt_tau;
+    rts.cand = a.rt_cand;
+    rts.active = a.prefetch == "router";
+    if (!a.router_heavy.empty()) {  // a heavy-pick head beside the router (names nothing itself)
+      if (!hrts.load(a.router_heavy, C, err)) return die("heavy head", err);
+      hrts.active = false;
+      rts.heavy = &hrts;
+    }
+    C.hook = &rts;
+  } else if (a.prefetch == "transplant") {
+    tpl.m = a.m;
+    C.hook = &tpl;
+  } else if (plan) {
+    if (!pln.load(split_list(a.plan_routers), C, err)) return die("planner", err);
+    pln.u = a.plan_u;
+    pln.budget_on = a.plan_budget != 0;
+    pln.budget_mode = a.plan_budget == 2 ? 2 : 1;
+    pln.tau_long = a.plan_tau_long;
+    pln.tau_fixed = a.plan_tau;
+    pln.pin_p = a.plan_pin_p;
+    pln.revoke_on = a.plan_revoke != 0;
+    pln.revoke_p = a.plan_revoke_p;
+    pln.maxcand = a.plan_maxcand;
+    pln.calib_q_only = a.plan_calib == "q";
+    C.hook = &pln;
+  } else if (a.prefetch != "none") {
+    fprintf(stderr, "--prefetch none|oracle|router|transplant|plan\n");
+    return 2;
+  }
+
+  Xtok xt;  // cross-token routers, wrapping the hook chosen above (if any)
+  if (!a.xtok.empty()) {
+    if (!xt.load(a.xtok, C, err)) return die("xtok", err);
+    xt.tau = a.xtok_tau;
+    xt.inner = C.hook;
+    C.hook = &xt;
+  }
+  Xtok xb;  // a second cross-token source whose names use the readers' background class
+  if (!a.xtok_bg.empty()) {
+    if (!xb.load(a.xtok_bg, C, err)) return die("xtok-bg", err);
+    xb.tau = a.xtok_tau;
+    xb.background = true;
+    xb.inner = C.hook;
+    C.hook = &xb;
+  }
+
+  // ---- the mode
+  if (a.mode != "lossless") {
+    const std::string preset = a.mode == "approx" ? "" : a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
+    if (!C.ns.preset(preset)) {
+      fprintf(stderr, "--mode lossless|approx[:PRESET]; presets: %s\n", Approx::presets_help());
+      return 2;
+    }
+  }
+  if (!a.late.empty()) C.ns.late_ms = a.late == "none" ? -1 : a.late == "always" ? 1000 : std::stod(a.late);
+  if (a.read_w >= 0) C.ns.read_w = a.read_w;
+  if (a.read_mass >= 0) C.ns.read_mass = a.read_mass;
+  if (a.bg >= 0) C.ns.bg = a.bg != 0;
+  if (a.drop >= 0) C.ns.drop = a.drop != 0;  // --drop overrides the preset (approx:drop sets it, the others clear it)
+  C.cache.rd.prio = a.rd_prio < 0 ? (plan || (C.ns.on && C.ns.prio)) : a.rd_prio != 0;
+  C.cache.rd.excl = a.rd_excl != 0;
+  if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;
+  C.cancel_stale = a.cancel < 0 ? (plan || (C.ns.on && C.ns.cancel)) : a.cancel != 0;
+  C.chunk_names = a.verify_names != 0;
+  if (!a.evict_policy.empty()) {  // the learned keep-score (router features from --prefetch router), or a ranker
+    std::string perr;
+    const bool hz = C.cache.hazard_evict;
+    if (!C.cache.load_policy(a.evict_policy, perr)) {
+      fprintf(stderr, "%s\n", perr.c_str());
+      return 1;
+    }
+    if (hz && C.cache.learned_evict) {
+      fprintf(stderr, "--evict hazard and a keep-score --evict-policy are two keep-scores: pick one\n");
+      return 1;
+    }
+    if (C.cache.rk.rt) {  // the ranker's early-router rows
+      if (C.hook != &rts || rts.lay.empty()) {
+        fprintf(stderr, "%s reads an early router (%s): --routers F with --prefetch router or --router-stats\n",
+                a.evict_policy.c_str(), C.cache.rk.router.c_str());
+        return 1;
+      }
+      if (C.cache.rk.router_lag >= 0 && rts.lag != C.cache.rk.router_lag) {
+        fprintf(stderr, "%s was trained with a lag-%d router, --routers has lag %d\n", a.evict_policy.c_str(),
+                C.cache.rk.router_lag, rts.lag);
+        return 1;
+      }
+      rts.feed = true;
+    }
+  }
+  if (!a.evict_trace.empty()) {
+    if (C.hook == &rts) rts.feed = true;
+    C.cache.trace_init(0);
+  }
+
+  std::vector<int16_t> forced;
+  if (!a.force.empty()) {
+    FILE* f = fopen(a.force.c_str(), "rb");
+    int32_t hdr[3];
+    if (!f || fread(hdr, 4, 3, f) != 3 || hdr[1] != C.steps || hdr[2] != C.K) return die(a.force, "not a routing record of this model");
+    forced.resize((size_t)hdr[0] * C.steps * C.K);
+    if (fread(forced.data(), 2, forced.size(), f) != forced.size()) return die(a.force, "short routing record");
+    fclose(f);
+    C.force = forced.data();
+    C.force_n = hdr[0];
+  }
+  if (a.fast_head && a.temp <= 0 && a.teacher.empty() && !M->set_option("fast_head", std::to_string(a.fast_head), err)) return die("model", err);
+  if (!a.taps_out.empty() && !M->set_option("taps", "1", err)) return die("model", err);
+  if (a.start_pos > 0 && !M->seek(*S, a.start_pos)) return die("model", "--start-pos is not supported by this model");
+  const bool use_lookup = a.draft == "lookup" || a.draft == "fixed" || a.draft == "both";
+  const bool use_head = a.draft == "head" || a.draft == "both" || !a.draft_check.empty();
+  if (a.draft != "none" && !use_lookup && !use_head) return die("draft", "--draft lookup|fixed|head|both");
+  double head_load_s = 0;
+  if (use_head) {  // before the prompt: the head's features are taken from every committed position
+    auto th = clk::now();
+    if (!M->set_option("draft_ctx", std::to_string(a.ctx), err) || !M->set_option("draft_exact", std::to_string(a.draft_exact), err) ||
+        !M->set_option("draft_head", "1", err))
+      return die("draft head", err);
+    head_load_s = ms_since(th) / 1000;
+  }
+
+  FILE* recf = nullptr;
+  int nrec = 0;
+  if (!a.record.empty()) {
+    recf = fopen(a.record.c_str(), "wb");
+    int32_t hdr[3] = {0, C.steps, C.K};
+    fwrite(hdr, 4, 3, recf);
+  }
+  auto record = [&]() {  // the released routing of the last step, [steps, K]
+    if (!recf) return;
+    std::vector<int16_t> r(C.picks.begin(), C.picks.end());
+    fwrite(r.data(), 2, r.size(), recf);
+    nrec++;
+  };
+  FILE* namesf = a.dump_names.empty() ? nullptr : fopen(a.dump_names.c_str(), "wb");
+  auto dump_names = [&]() {  // per step: the routers' top-16 names per step, int16 [steps, 16]
+    if (!namesf || !C.hook || !C.hook->names()) return;
+    std::vector<int16_t> r(C.hook->names(), C.hook->names() + (size_t)C.steps * 16);
+    fwrite(r.data(), 2, r.size(), namesf);
+  };
+
+  std::ostringstream js;
+  js.setf(std::ios::fixed);
+  js.precision(4);
+  const MemStat m0 = memstat();
+  auto& CS = C.cache.st;
+  auto& RD = C.cache.rd;
+  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0;
+  auto reset_stats = [&]() {
+    C.reset_stats();
+    M->reset_stats();
+    rd_busy0 = RD.busy_ns.load();
+    rd_wall0 = RD.busy_wall();
+    rd_bytes0 = RD.bytes.load();
+    sau0 = RD.spec_inflight_at_urgent.load();
+    fskip0 = RD.file_resident_skips.load();
+    fskipb0 = RD.file_bytes_skipped.load();
+    for (int i = 0; i < 3; i++) {
+      q0[i] = RD.q_ns[i].load();
+      s0[i] = RD.svc_ns[i].load();
+      j0[i] = RD.njobs[i].load();
+    }
+  };
+  // statistics of a timed loop (decode, or the whole teacher-forced text)
+  auto emit_stats = [&](int steps, double dec_s, const std::vector<double>& step_ms) {
+    const MemStat m1 = memstat();
+    std::vector<double> sm = step_ms;
+    std::sort(sm.begin(), sm.end());
+    const double med = sm.empty() ? 0 : sm[sm.size() / 2];
+    double tot_ms = 0;
+    for (double v : step_ms) tot_ms += v;
+    auto per = [&](double v) { return v / std::max(1, steps); };
+    const Times& T = C.t;
+    const uint64_t picks = CS.n_hit + CS.n_late + CS.n_miss;
+    const double comp = tot_ms - T.wait;
+    js << ",\"decode_steps\":" << steps << ",\"decode_s\":" << dec_s << ",\"tok_s\":" << steps / std::max(1e-9, dec_s)
+       << ",\"ms_per_token\":" << per(tot_ms) << ",\"ms_per_token_median\":" << med << ",\"compute_ms_per_token\":" << per(comp)
+       << ",\"wait_ms_per_token\":" << per(T.wait) << ",\"policy_ms_per_token\":" << per(CS.policy_ms)
+       << ",\"by_stage_ms_per_token\":{\"embed\":" << per(T.embed)
+       << ",\"depth_attn\":" << per(T.depth) << ",\"message_gates_norms\":" << per(T.msg) << ",\"attn_proj\":" << per(T.attn_proj)
+       << ",\"attn_core\":" << per(T.attn_core) << ",\"attn_out\":" << per(T.attn_out) << ",\"moe_router\":" << per(T.router)
+       << ",\"experts\":" << per(T.experts) << ",\"wait\":" << per(T.wait) << ",\"cache_mgmt\":" << per(T.cache)
+       << ",\"prefetch_hooks\":" << per(T.pf) << ",\"post_mlp\":" << per(T.misc) << ",\"head\":" << per(T.head) << "}"
+       << ",\"weight_mb_touched_per_token\":{\"resident\":" << per(T.bytes_res / 1e6) << ",\"experts\":" << per(T.bytes_exp / 1e6) << "}"
+       << ",\"mb_read_per_token\":" << per((CS.bytes_urgent + CS.bytes_pf) / 1e6) << ",\"mb_read_urgent_per_token\":" << per(CS.bytes_urgent / 1e6)
+       << ",\"mb_read_prefetch_per_token\":" << per(CS.bytes_pf / 1e6)
+       << ",\"read_gb_s_while_busy\":" << ((CS.bytes_urgent + CS.bytes_pf) / 1e9) / std::max(1e-9, (RD.busy_ns.load() - rd_busy0) / 1e9 / std::max(1, a.readers))
+       << ",\"picks\":" << picks << ",\"hit_rate\":" << (double)CS.n_hit / std::max<uint64_t>(1, picks)
+       << ",\"late_rate\":" << (double)CS.n_late / std::max<uint64_t>(1, picks) << ",\"miss_rate\":" << (double)CS.n_miss / std::max<uint64_t>(1, picks)
+       << ",\"hit_rate_looped\":" << (double)CS.n_hit_r[0] / std::max<uint64_t>(1, CS.n_pick_r[0])
+       << ",\"hit_rate_other\":" << (double)CS.n_hit_r[1] / std::max<uint64_t>(1, CS.n_pick_r[1])
+       << ",\"looped_picks_used_by_an_earlier_pass\":" << (double)CS.n_reuse_hit / std::max<uint64_t>(1, CS.n_pick_r[0])
+       << ",\"pf_issued_per_token\":" << per(CS.n_pf_issued) << ",\"pf_dropped_per_token\":" << per(CS.n_pf_dropped)
+       << ",\"pf_evicted_unused_per_token\":" << per(CS.n_pf_unused_evicted) << ",\"pf_stolen_per_token\":" << per(CS.n_pf_stolen)
+       << ",\"purged\":" << CS.n_purged << ",\"held_at_end\":[";
+    for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.held(p);
+    js << "],\"held_gb\":" << C.cache.held_bytes() / 1e9 << ",\"mb_preads_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6);
+    if (C.cache.mem == Mem::FILE) {
+      js << ",\"file\":{\"check\":" << C.cache.file_check << ",\"evict_hint\":" << C.cache.file_evict_hint << ",\"skip_resident\":" << RD.file_skip_resident
+         << ",\"prefault\":" << RD.file_prefault << ",\"checks_per_token\":" << per(CS.file_checks) << ",\"file_refaults\":" << CS.file_refaults
+         << ",\"refaults_per_token\":" << per(CS.file_refaults) << ",\"resident_skips_per_token\":" << per(RD.file_resident_skips.load() - fskip0)
+         << ",\"mb_skipped_resident_per_token\":" << per((RD.file_bytes_skipped.load() - fskipb0) / 1e6)
+         << ",\"file_cache_resident_gb_at_load\":" << file_res0_gb << ",\"file_cache_resident_gb_at_end\":" << C.cache.file_resident_bytes() / 1e9
+         << ",\"budget_gb_at_end\":" << C.cache.budget_bytes() / 1e9 << ",\"adapt\":{\"on\":" << C.cache.fa.on << ",\"resident_fraction\":" << C.cache.fa.res_frac
+         << ",\"refaults_per_token_ema\":" << C.cache.fa.refault_ema << ",\"shrinks\":" << C.cache.fa.shrinks << ",\"grows\":" << C.cache.fa.grows << ",\"trace\":[";
+      for (size_t i = 0; i < C.cache.fa.trace.size(); i++) js << (i ? "," : "") << "[" << C.cache.fa.trace[i].first << "," << C.cache.fa.trace[i].second / 1e9 << "]";
+      js << "]},\"core\":{\"gb\":" << C.cache.core_slab_bytes / 1e9 << ",\"records\":" << C.cache.core_held() << ",\"swapped\":" << C.cache.core_swapped << "}}";
+    }
+    js << ",\"footprint_gb\":" << m1.footprint_gb << ",\"footprint_peak_gb\":" << m1.footprint_peak_gb << ",\"compressed_gb\":" << m1.compressed_gb
+       << ",\"resident_gb\":" << m1.resident_gb << ",\"footprint_after_load_gb\":" << m0.footprint_gb;
+    {  // wait and on-the-spot misses by step group: before the loop, the looped steps, after it
+      double w[3] = {0, 0, 0}, mi3[3] = {0, 0, 0};
+      bool seen = false;
+      for (int s = 0; s < C.steps; s++) {
+        const int g = C.looped(s) ? 1 : seen ? 2 : 0;
+        seen |= C.looped(s);
+        w[g] += C.wait_step[s];
+        mi3[g] += (double)C.miss_step[s];
+      }
+      js << ",\"wait_ms_by_group\":{\"before_loop\":" << per(w[0]) << ",\"looped\":" << per(w[1]) << ",\"after_loop\":" << per(w[2])
+         << "},\"misses_by_group\":{\"before_loop\":" << per(mi3[0]) << ",\"looped\":" << per(mi3[1]) << ",\"after_loop\":" << per(mi3[2]) << "}";
+      js << ",\"wait_ms_by_step\":[";  // per step (application), per token
+      for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per(C.wait_step[s]);
+      js << "],\"misses_by_step\":[";
+      for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per((double)C.miss_step[s]);
+      js << "]";
+    }
+    {
+      auto dj = [&](int i) { return std::max<uint64_t>(1, RD.njobs[i].load() - j0[i]); };
+      const double wall = (RD.busy_wall() - rd_wall0) / 1e6;
+      js << ",\"read_queue\":{\"prio\":" << RD.prio << ",\"excl\":" << RD.excl << ",\"spec_max\":" << (a.spec_max > 0 ? a.spec_max : 0)
+         << ",\"cancel_stale\":" << C.cancel_stale << ",\"evict\":\"" << a.evict << "\""
+         << ",\"evict_policy\":\"" << (C.cache.rk.on ? C.cache.rk.name : C.cache.learned_evict ? "keep-score" : C.cache.hazard_evict ? "hazard" : a.evict) << "\""
+         << ",\"layer_caps\":" << (C.cache.lcap.empty() ? "false" : "true")
+         << ",\"ranker_choices\":" << C.cache.rk_choices << ",\"ranker_shortlist\":" << (double)C.cache.rk_cands / std::max<uint64_t>(1, C.cache.rk_choices)
+         << ",\"ranker_evals_per_token\":" << per(C.cache.rk_evals)
+         << ",\"wait_miss_ms_per_token\":" << per(CS.wait_ms_miss) << ",\"wait_late_ms_per_token\":" << per(CS.wait_ms_late)
+         << ",\"misses_per_token\":" << per(CS.n_miss) << ",\"cap_borrow_per_token\":" << per(CS.n_cap_borrow) << ",\"late_per_token\":" << per(CS.n_late) << ",\"late_still_queued_per_token\":" << per(CS.n_late_queued)
+         << ",\"miss_after_evict_per_token\":" << per(CS.n_miss_evicted) << ",\"miss_after_pf_evict_per_token\":" << per(CS.n_miss_pf_evicted)
+         << ",\"pf_cancelled_per_token\":" << per(CS.n_pf_cancelled) << ",\"misses_by_planner_p_per_token\":[";
+      for (int i = 0; i < 6; i++) js << (i ? "," : "") << per(CS.miss_pbin[i]);
+      js << "],\"bg_jobs\":" << RD.njobs[2].load() - j0[2] << ",\"bg_promoted\":" << RD.bg_promoted.load()
+         << ",\"bg_queue_ms\":" << (RD.q_ns[2].load() - q0[2]) / 1e6 / dj(2)
+         << ",\"urgent_jobs\":" << RD.njobs[0].load() - j0[0] << ",\"urgent_queue_ms\":" << (RD.q_ns[0].load() - q0[0]) / 1e6 / dj(0)
+         << ",\"urgent_service_ms\":" << (RD.svc_ns[0].load() - s0[0]) / 1e6 / dj(0)
+         << ",\"spec_inflight_at_urgent_start\":" << (double)(RD.spec_inflight_at_urgent.load() - sau0) / dj(0)
+         << ",\"spec_jobs\":" << RD.njobs[1].load() - j0[1] << ",\"spec_queue_ms\":" << (RD.q_ns[1].load() - q0[1]) / 1e6 / dj(1)
+         << ",\"spec_service_ms\":" << (RD.svc_ns[1].load() - s0[1]) / 1e6 / dj(1) << ",\"drive_busy_ms_per_token\":" << per(wall)
+         << ",\"drive_gb_s_while_busy\":" << (RD.bytes.load() - rd_bytes0) / 1e9 / std::max(1e-9, wall / 1e3)
+         << ",\"drive_depth\":" << (RD.busy_ns.load() - rd_busy0) / 1e6 / std::max(1e-9, wall) << "}";
+    }
+    {
+      const Approx& N = C.ns;
+      const double ns = std::max(1.0, N.steps);
+      js << ",\"approx\":{\"on\":" << (N.on ? "true" : "false") << ",\"late_ms\":" << N.late_ms << ",\"read_w\":" << N.read_w
+         << ",\"read_mass\":" << N.read_mass << ",\"bg\":" << (N.bg ? "true" : "false") << ",\"weight_replaced\":" << N.w_replaced / ns
+         << ",\"replaced_per_token\":" << per(N.n_replaced) << ",\"steps_with_a_replacement\":" << N.steps_replaced / ns
+         << ",\"max_replaced_weight\":" << N.w_replaced_max << ",\"read_now_per_token\":" << per(N.n_read_now)
+         << ",\"weight_read_now\":" << N.w_read_now / ns << ",\"late_waited_per_token\":" << per(N.n_late_waited)
+         << ",\"late_got_per_token\":" << per(N.n_late_got) << ",\"late_dropped_per_token\":" << per(N.n_late_dropped)
+         << ",\"late_wait_ms_per_token\":" << per(N.late_wait_ms) << ",\"bg_per_token\":" << per(N.n_bg) << ",\"cold_steps\":" << N.cold
+         << ",\"replaced_by_weight_per_token\":[";
+      for (int i = 0; i < 6; i++) js << (i ? "," : "") << per(N.w_hist[i]);
+      js << "]";
+      std::vector<float> w = N.w_tok;  // released weight replaced / dropped per token (drop: left out)
+      double sw = 0;
+      for (float x : w) sw += x;
+      std::sort(w.begin(), w.end());
+      js << ",\"drop\":" << (N.drop ? "true" : "false") << ",\"weight_left_out_per_token_mean\":" << sw / std::max<double>(1, w.size())
+         << ",\"weight_left_out_per_token_p90\":" << (w.empty() ? 0.0 : (double)w[std::min(w.size() - 1, (size_t)(0.9 * w.size()))])
+         << ",\"steps_with_a_drop_share\":" << N.steps_replaced / ns << ",\"picks_read_and_waited_per_token\":" << per(N.n_read_now + N.n_late_waited) << "}";
+    }
+    if (C.hook) js << ",\"" << (plan ? "planner" : a.prefetch == "oracle" ? "oracle" : a.prefetch == "transplant" ? "transplant" : "routers") << "\":" << C.hook->stats_json(C, steps);
+    js << ",\"model\":" << M->stats_json(steps);
+  };
+  auto head = [&](const char* mode) {
+    js << "{\"engine\":\"dmeng\",\"family\":\"" << family << "\",\"mode\":\"" << mode << "\",\"accuracy\":\"" << a.mode
+       << "\",\"preset\":" << (profiled ? P.json() : std::string("null")) << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
+       << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
+       << "\",\"m\":" << (a.prefetch == "router" ? a.m : 0) << ",\"cache_gb\":" << a.cache_gb << ",\"slots\":[";
+    for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.slots(p);
+    js << "],\"threads\":" << a.threads << ",\"readers\":" << a.readers << ",\"split\":" << a.split << ",\"mem\":\"" << a.mem << "\",\"res_mem\":\""
+       << a.res_mem << "\",\"prec\":\"" << a.prec << "\",\"skip_reads\":" << (a.skip_reads ? "true" : "false") << ",\"loop_hold\":"
+       << (a.loop_hold ? "true" : "false") << ",\"ctx\":" << a.ctx << ",\"temp\":" << a.temp << ",\"load_s\":" << load_s;
+  };
+  if (!a.draft_check.empty()) {
+    // ---------------------------------------------------------------- the head's port check on recorded features
+    std::vector<int> ids = parse_ids(slurp(a.prompt_file));
+    const int N = (int)ids.size(), H = mi.hidden;
+    const size_t rec = 4 + (size_t)16 * H;
+    std::vector<uint8_t> raw(rec * N);
+    FILE* tf = fopen(a.draft_check.c_str(), "rb");
+    if (!tf || fread(raw.data(), 1, raw.size(), tf) != raw.size()) return die("draft check", "features file shorter than the ids");
+    fclose(tf);
+    FILE* fd = fopen((a.check_out + ".drafts").c_str(), "wb");
+    FILE* fl = fopen((a.check_out + ".logits").c_str(), "wb");
+    if (!fd || !fl) return die("draft check", "cannot write " + a.check_out);
+    std::vector<float> feats((size_t)4 * H), lg(VO);
+    int fed = 0, done = 0;
+    auto t0 = clk::now();
+    for (int p = a.check_start; p < N - 2; p++) {
+      for (; fed <= p; fed++) {
+        std::memcpy(feats.data(), raw.data() + (size_t)fed * rec + 4, feats.size() * 4);
+        M->draft_head_feed(feats.data(), 1, fed);
+      }
+      int32_t d[7] = {0};
+      float pr[7] = {0};
+      const int nd = M->draft_head(ids[p + 1], 7, 0.f, d, pr, done < a.check_logits ? lg.data() : nullptr);
+      if (nd != 7) return die("draft check", "position " + std::to_string(p) + ": " + std::to_string(nd) + " drafts");
+      const int32_t pp = p;
+      fwrite(&pp, 4, 1, fd);
+      fwrite(d, 4, 7, fd);
+      fwrite(pr, 4, 7, fd);
+      if (done < a.check_logits) fwrite(lg.data(), 4, VO, fl);
+      done++;
+    }
+    fclose(fd);
+    fclose(fl);
+    const MemStat m1 = memstat();
+    js << "{\"engine\":\"dmeng\",\"mode\":\"draft_check\",\"positions\":" << done << ",\"exact\":" << a.draft_exact << ",\"s\":" << ms_since(t0) / 1000
+       << ",\"head_load_s\":" << head_load_s << ",\"head_memory_gb\":" << M->draft_head_bytes() / 1e9 << ",\"footprint_peak_gb\":" << m1.footprint_peak_gb
+       << ",\"model\":" << M->stats_json(done) << "}";
+  } else if (!a.teacher.empty()) {
+    // ---------------------------------------------------------------- teacher forcing
+    std::vector<int> ids = parse_ids(slurp(a.teacher));
+    FILE* df = a.dump_logits.empty() ? nullptr : fopen(a.dump_logits.c_str(), "wb");
+    FILE* qf = a.qual_out.empty() ? nullptr : fopen(a.qual_out.c_str(), "wb");
+    FILE* tf = a.taps_out.empty() ? nullptr : fopen(a.taps_out.c_str(), "wb");  // per position: argmax int32, taps float [4, H]
+    std::vector<QRec> ref;
+    if (!a.ref_qual.empty()) {
+      FILE* f = fopen(a.ref_qual.c_str(), "rb");
+      QRec q;
+      while (f && fread(&q, sizeof q, 1, f) == 1) ref.push_back(q);
+      if (f) fclose(f);
+    }
+    struct NllRow {
+      double nll;
+      int am;
+    };
+    std::vector<NllRow> rows;
+    std::vector<int> am;
+    std::vector<double> step_ms;
+    std::vector<int> idx(VO);
+    reset_stats();
+    auto t0 = clk::now();
+    for (size_t p = 0; p < ids.size(); p++) {
+      const bool want = (int)p >= a.dump_from || qf || tf || !a.nll_out.empty() || !a.ref_nll.empty();
+      auto ts = clk::now();
+      M->step(*S, ids[p], want ? Want::LAST : Want::NONE);
+      record();
+      dump_names();
+      if (want) {
+        const std::vector<float>& lg = M->logits();
+        const int b = argmax(lg.data(), VO);
+        if ((int)p >= a.dump_from) am.push_back(b);
+        if (df && (int)p >= a.dump_from) fwrite(lg.data(), 4, VO, df);
+        if (tf) {
+          fwrite(&b, 4, 1, tf);
+          fwrite(M->taps()->data(), 4, M->taps()->size(), tf);
+        }
+        if (p + 1 < ids.size()) {  // NLL of the next text token: log-sum-exp over the vocabulary in double
+          double z = 0;
+          for (int i = 0; i < VO; i++) z += std::exp((double)lg[i] - lg[b]);
+          const double lse = lg[b] + std::log(z);
+          rows.push_back({lse - (double)lg[ids[p + 1]], b});
+          if (qf) {
+            QRec q;
+            q.argmax = b;
+            q.nll = (float)(lse - lg[ids[p + 1]]);
+            for (int i = 0; i < VO; i++) idx[i] = i;
+            std::partial_sort(idx.begin(), idx.begin() + TK, idx.end(), [&](int x, int y) { return lg[x] > lg[y] || (lg[x] == lg[y] && x < y); });
+            for (int k = 0; k < TK; k++) {
+              q.ids[k] = idx[k];
+              q.lp[k] = (float)(lg[idx[k]] - lse);
+              q.ref_lp[k] = p < ref.size() ? (float)(lg[ref[p].ids[k]] - lse) : NAN;
+            }
+            fwrite(&q, sizeof q, 1, qf);
+          }
+        }
+      }
+      step_ms.push_back(ms_since(ts));
+    }
+    const double dt = ms_since(t0) / 1000;
+    if (df) fclose(df);
+    if (qf) fclose(qf);
+    if (tf) fclose(tf);
+    double nll = 0;
+    for (auto& r : rows) nll += r.nll;
+    if (!a.nll_out.empty()) {
+      FILE* f = fopen(a.nll_out.c_str(), "w");
+      for (auto& r : rows) fprintf(f, "%.6f %d\n", r.nll, r.am);
+      fclose(f);
+    }
+    head("teacher");
+    js << ",\"positions\":" << ids.size() << ",\"dumped\":" << am.size() << ",\"vocab\":" << VO << ",\"s\":" << dt
+       << ",\"reads\":" << RD.jobs.load() << ",\"scored\":" << rows.size() << ",\"nll_mean\":" << std::setprecision(6) << nll / std::max<size_t>(1, rows.size());
+    if (!a.ref_nll.empty()) {
+      std::vector<NllRow> rr;
+      FILE* f = fopen(a.ref_nll.c_str(), "r");
+      NllRow r;
+      while (f && fscanf(f, "%lf %d", &r.nll, &r.am) == 2) rr.push_back(r);
+      if (f) fclose(f);
+      const size_t n = std::min(rr.size(), rows.size());
+      double d = 0, rn = 0, d2 = 0;
+      size_t agree = 0;
+      for (size_t i = 0; i < n; i++) {
+        d += rows[i].nll - rr[i].nll;
+        d2 += (rows[i].nll - rr[i].nll) * (rows[i].nll - rr[i].nll);
+        rn += rr[i].nll;
+        agree += rows[i].am == rr[i].am;
+      }
+      const double nn = std::max<size_t>(1, n);
+      js << ",\"ref_positions\":" << n << ",\"ref_nll_mean\":" << rn / nn << ",\"nll_delta\":" << d / nn
+         << ",\"nll_delta_se\":" << std::sqrt(std::max(0.0, d2 / nn - (d / nn) * (d / nn)) / nn) << ",\"top1_agree\":" << agree / nn;
+    }
+    js << std::setprecision(4);
+    emit_stats((int)ids.size(), dt, step_ms);
+    js << ",\"argmax\":[";
+    for (size_t i = 0; i < am.size(); i++) js << (i ? "," : "") << am[i];
+    js << "]}";
+  } else {
+    // ---------------------------------------------------------------- generation
+    std::vector<int> prompt = !a.prompt_ids.empty() ? parse_ids(a.prompt_ids) : parse_ids(slurp(a.prompt_file));
+    if (prompt.empty()) {
+      fprintf(stderr, "empty prompt\n");
+      return 2;
+    }
+    if (a.early < 0 || (a.early > 0 && a.draft == "none")) return die("early", "--early N (N >= 0) goes with --draft lookup|fixed");
+    // draft and verify: the shared drafter (include/dmeng/draft.h); with --early it keeps every position's released picks.
+    // head / both: the model's draft head as a third source (HeadSource), lookup off for head
+    Drafter dr;
+    HeadSource hs;
+    dr.o.mode = a.draft == "none" || a.draft == "fixed" ? a.draft : "lookup";
+    dr.o.lookup = a.draft != "head";
+    dr.o.max = a.draft_max;
+    dr.o.probe_every = a.probe_every;
+    dr.o.early = a.early;
+    const bool head_src = a.draft == "head" || a.draft == "both";
+    if (head_src) {
+      hs.M = M.get();
+      hs.thr = (float)a.draft_thr;
+      hs.backoff0 = a.backoff0;
+      hs.backoff_max = a.backoff_max;
+      dr.extra.push_back(&hs);
+    }
+    dr.init(family, a.early > 0 ? &C : nullptr);
+    dr.reads = &C;
+    if (!a.skeleton.empty()) {
+      std::vector<std::vector<int32_t>> fr;
+      std::ifstream sf(a.skeleton);
+      for (std::string ln; std::getline(sf, ln);) {
+        std::vector<int> v = parse_ids(ln);
+        if (!v.empty()) fr.emplace_back(v.begin(), v.end());
+      }
+      dr.skeleton.set(fr);
+    }
+    std::mt19937_64 rng(a.seed);
+    const bool fast = a.fast_head > 0 && a.temp <= 0;
+    const Want want = fast ? Want::GREEDY : Want::LAST;
+    auto tp = clk::now();
+    if (a.prefill_chunk > 1) {  // the batched prefill (records not kept)
+      std::string e2;
+      if (!M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
+      if (a.prefill_gpu_frac > 0 && !M->set_option("prefill_gpu_frac", std::to_string(a.prefill_gpu_frac), e2)) return die("prefill", e2);
+      std::vector<int32_t> pid(prompt.begin(), prompt.end());
+      M->prefill(*S, pid.data(), (int)pid.size(), true, {}, nullptr, nullptr, nullptr);
+    } else {
+      for (size_t i = 0; i < prompt.size(); i++) {
+        M->step(*S, prompt[i], i + 1 == prompt.size() ? want : Want::NONE);
+        record();
+      }
+    }
+    const double prefill_s = ms_since(tp) / 1000;
+    const uint64_t pre_bytes = CS.bytes_urgent + CS.bytes_pf, pre_miss = CS.n_miss, pre_hit = CS.n_hit;
+    const double pre_wait_ms = CS.wait_ms;  // the compute thread waiting on reads during the prompt
+    // --state-check: the state after the prompt, as the prefix cache would save it
+    std::vector<uint8_t> fixed_saved, pos_saved;
+    std::vector<float> logits_saved;
+    const int pos_saved_at = S->pos;
+    if (a.state_check) {
+      fixed_saved.resize(M->fixed_bytes(*S));
+      pos_saved.resize(M->pos_bytes() * (size_t)S->pos);
+      if (!M->save_fixed(*S, fixed_saved.data()) || !M->save_pos(*S, 0, S->pos, pos_saved.data())) return die("state", "save not supported");
+      logits_saved = M->logits();
+    }
+    reset_stats();  // decode statistics from here on
+    auto next_tok = [&]() { return fast ? M->greedy() : sample(M->logits().data(), VO, a.temp, a.top_k, a.top_p, rng); };
+    std::vector<int> out{next_tok()};
+    std::vector<double> step_ms, step_wait, step_mb, step_hit;
+    std::vector<int> step_n, step_acc;
+    const bool drafting = a.draft != "none";
+    if ((drafting || a.verify_check > 0) && (a.temp > 0 || fast)) return die("draft", "greedy decoding with the full head only");
+    struct ModelTarget : DraftTarget {
+      Model& M;
+      State& S;
+      ModelTarget(Model& m, State& s) : M(m), S(s) {}
+      int pos() const override { return S.pos; }
+      void step(int id) override { M.step(S, id, Want::LAST); }
+      const float* logits() const override { return M.logits().data(); }
+      bool verify(const int* ids, int n) override { return M.verify(S, (const int32_t*)ids, n); }
+      const float* logits_at(int i) const override { return M.logits_at(i); }
+      void commit(int a2) override { M.commit(S, a2); }
+    } tgt(*M, *S);
+    std::string vcheck_json;
+    if (a.verify_check > 0) {
+      // reference: N single steps from the state after the prompt; then the same tokens through verify passes
+      std::vector<uint8_t> f0(M->fixed_bytes(*S)), p0(M->pos_bytes() * (size_t)S->pos);
+      const int pp = S->pos;
+      M->save_fixed(*S, f0.data());
+      M->save_pos(*S, 0, pp, p0.data());
+      const std::vector<float> lg0 = M->logits();
+      const int N = a.verify_check;
+      std::vector<int> t{argmax(lg0.data(), VO)};
+      std::vector<float> ref((size_t)N * VO);
+      for (int k = 0; k < N; k++) {
+        M->step(*S, t[k], Want::LAST);
+        std::memcpy(ref.data() + (size_t)k * VO, M->logits().data(), 4 * (size_t)VO);
+        t.push_back(argmax(M->logits().data(), VO));
+      }
+      std::vector<uint8_t> f1(M->fixed_bytes(*S)), p1(M->pos_bytes() * (size_t)S->pos), f2, p2;
+      M->save_fixed(*S, f1.data());
+      M->save_pos(*S, 0, S->pos, p1.data());
+      if (!M->load_fixed(*S, f0.data(), pp) || !M->load_pos(*S, 0, pp, p0.data())) return die("verify-check", "restore not supported");
+      long passes = 0, rolled = 0, bad = 0, cmpd = 0;
+      int j = 0;
+      while (j < N) {
+        const int w = std::min(2 + (int)(passes % 7), N - j);
+        std::vector<int32_t> toks(t.begin() + j, t.begin() + j + w);
+        const bool wrong = w >= 2 && passes % 3 == 2;
+        if (wrong) toks[w - 1] = (toks[w - 1] + 1) % VO;
+        if (!M->verify(*S, toks.data(), w)) return die("verify-check", "this model has no multi-position verify");
+        const int keep = wrong ? w - 1 : w;
+        for (int i = 0; i < keep; i++, cmpd++) bad += std::memcmp(M->logits_at(i), ref.data() + (size_t)(j + i) * VO, 4 * (size_t)VO) != 0;
+        M->commit(*S, keep);
+        rolled += wrong;
+        passes++;
+        j += keep;
+      }
+      bad += std::memcmp(M->logits().data(), ref.data() + (size_t)(N - 1) * VO, 4 * (size_t)VO) != 0;
+      f2.resize(f1.size());
+      p2.resize(p1.size());
+      M->save_fixed(*S, f2.data());
+      M->save_pos(*S, 0, S->pos, p2.data());
+      long fb = 0, pb = 0;
+      for (size_t i = 0; i < f1.size(); i++) fb += f1[i] != f2[i];
+      for (size_t i = 0; i < p1.size(); i++) pb += p1[i] != p2[i];
+      std::ostringstream vc;
+      vc << ",\"verify_check\":{\"positions\":" << N << ",\"passes\":" << passes << ",\"rollbacks\":" << rolled << ",\"logits_compared\":" << cmpd
+         << ",\"logits_differ\":" << bad << ",\"fixed_bytes_differ\":" << fb << ",\"kv_bytes_differ\":" << pb << ",\"pos_after\":" << S->pos
+         << ",\"ok\":" << (bad == 0 && fb == 0 && pb == 0 && S->pos == pp + N ? "true" : "false") << "}";
+      vcheck_json = vc.str();
+      fprintf(stderr, "verify_check %s\n", vcheck_json.c_str() + 16);
+      if (bad || fb || pb) {
+        printf("{\"engine\":\"dmeng\"%s}\n", vcheck_json.c_str());
+        return 3;
+      }
+      M->load_fixed(*S, f0.data(), pp);  // back to the state after the prompt for the generation below
+      M->load_pos(*S, 0, pp, p0.data());
+      reset_stats();
+    }
+    std::vector<int32_t> hist(prompt.begin(), prompt.end());
+    hist.push_back(out.back());
+    const std::vector<int> stops = a.stop_eos >= 0 ? std::vector<int>{a.stop_eos} : std::vector<int>{};
+    std::vector<int> got;
+    auto td = clk::now();
+    while ((int)out.size() < a.n) {
+      if (a.stop_eos >= 0 && out.back() == a.stop_eos) break;
+      const double w0 = C.t.wait;
+      const uint64_t b0 = C.cache.st.bytes_urgent + C.cache.st.bytes_pf, h0 = C.cache.st.n_hit;
+      auto ts = clk::now();
+      int n = 1, acc = 0;
+      if (!drafting) {
+        M->step(*S, out.back(), want);
+        record();
+        dump_names();
+        out.push_back(next_tok());
+      } else {
+        got.clear();
+        acc = dr.step(tgt, hist, VO, a.n - (int)out.size(), stops, got) - 1;
+        n = dr.last_n;
+        for (int g : got) {
+          out.push_back(g);
+          hist.push_back(g);
+        }
+      }
+      step_ms.push_back(ms_since(ts));
+      step_wait.push_back(C.t.wait - w0);
+      step_mb.push_back((C.cache.st.bytes_urgent + C.cache.st.bytes_pf - b0) / 1e6);
+      step_hit.push_back((double)(C.cache.st.n_hit - h0));
+      step_n.push_back(n);
+      step_acc.push_back(acc);
+    }
+    if ((int)out.size() > a.n) out.resize(a.n);
+    const double dec_s = ms_since(td) / 1000;
+    dr.end();
+    C.pick_log = nullptr;
+    const int steps = (int)out.size() - 1;  // generated tokens (a verify step can produce several)
+    int state_same = -1;
+    if (a.state_check) {  // restore into a fresh state and decode the same number of tokens again
+      std::unique_ptr<State> S2 = M->new_state(a.ctx, err);
+      if (!S2 || !M->load_fixed(*S2, fixed_saved.data(), pos_saved_at) || !M->load_pos(*S2, 0, pos_saved_at, pos_saved.data()))
+        return die("state", "restore failed");
+      std::vector<int> out2{fast ? out[0] : argmax(logits_saved.data(), VO)};
+      while (out2.size() < out.size()) {
+        M->step(*S2, out2.back(), want);
+        out2.push_back(fast ? M->greedy() : argmax(M->logits().data(), VO));
+      }
+      state_same = out2 == out;
+    }
+    if (!a.steps_out.empty()) {  // per decode step: wall ms, wait ms, MB read, hits
+      FILE* f = fopen(a.steps_out.c_str(), "w");
+      for (size_t i = 0; i < step_ms.size(); i++) fprintf(f, "%.3f %.3f %.3f %.0f\n", step_ms[i], step_wait[i], step_mb[i], step_hit[i]);
+      fclose(f);
+    }
+    if (!a.out_ids.empty()) {
+      FILE* f = fopen(a.out_ids.c_str(), "w");
+      for (size_t i = 0; i < out.size(); i++) fprintf(f, "%s%d", i ? "," : "", out[i]);
+      fprintf(f, "\n");
+      fclose(f);
+    }
+    head("generate");
+    js << ",\"start_pos\":" << a.start_pos << ",\"prompt_tokens\":" << prompt.size() << ",\"prefill_s\":" << prefill_s
+       << ",\"prefill_tok_s\":" << prompt.size() / prefill_s << ",\"prefill_mb_read\":" << pre_bytes / 1e6 << ",\"prefill_hits\":" << pre_hit
+       << ",\"prefill_misses\":" << pre_miss << ",\"prefill_wait_ms\":" << pre_wait_ms << ",\"tokens\":" << out.size();
+    if (drafting) {
+      std::string dj = dr.stats_json();
+      if (head_src) {
+        std::string hj = hs.stats_json();
+        hj.insert(hj.size() - 1, ",\"load_s\":" + std::to_string(head_load_s));
+        dj.insert(dj.size() - 1, ",\"head\":" + hj);
+      }
+      js << ",\"draft\":" << dj;
+    }
+    js << vcheck_json;
+    if (a.prefill_chunk > 1) js << ",\"prefill_chunk\":" << a.prefill_chunk;
+    if (a.prefill_chunk > 1 && a.prefill_gpu_frac > 0) js << ",\"prefill_gpu_frac\":" << a.prefill_gpu_frac;
+    if (a.state_check) js << ",\"state_check\":{\"fixed_mb\":" << fixed_saved.size() / 1e6 << ",\"pos_mb\":" << pos_saved.size() / 1e6 << ",\"same_ids\":" << (state_same ? "true" : "false") << "}";
+    emit_stats(steps, dec_s, step_ms);
+    js << "}";
+  }
+  if (namesf) fclose(namesf);
+  if (!a.evict_trace.empty() && !C.cache.trace_write(a.evict_trace, err)) return die("evict trace", err);
+  if (recf) {
+    fseek(recf, 0, SEEK_SET);
+    fwrite(&nrec, 4, 1, recf);
+    fclose(recf);
+  }
+  const std::string out = js.str();
+  if (!a.json.empty()) {
+    FILE* f = fopen(a.json.c_str(), "w");
+    fprintf(f, "%s\n", out.c_str());
+    fclose(f);
+  }
+  printf("%s\n", out.c_str());
+  return 0;
+}

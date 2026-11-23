@@ -1,0 +1,28 @@
+CMD: ../../.venv/bin/python bench/serving/memwatch_check.py results/serving2/memwatch_ink.jsonl bench/prompts/inkling2_loop/code.ids 48 -- build/dmserve --model ../../../inkling/model --cache-gb auto --mem mlock --chunk 512 --span 8192 --routers ../../../inkling/model/routers/ink_r_best/ink_router_full_k2_h512_b8.dmr --rt-tau 0.5 --xtok ../../../inkling/model/routers/ink_x_main/ink_router_xtok_s47_t0-5_b8.dmr --rd-prio 1
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8899, "mem_free_pct": 67, "disk_free_gb": 37.2, "avail_gb": 10.9, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+Traceback (most recent call last):
+  File "DM/local/flash/github/moved-store-serve2/bench/serving/memwatch_check.py", line 67, in <module>
+    b = gen(2, "shrunk")
+  File "DM/local/flash/github/moved-store-serve2/bench/serving/memwatch_check.py", line 57, in gen
+    O.write(json.dumps({"tag": tag, "budget_gb": budget[0], "tokens": toks, "decode_tok_s": e.get("decode_tok_s"), "mem": e.get("mem"),
+                                                                                            ^^^^^
+AttributeError: 'NoneType' object has no attribute 'get'
+      929.26 real         0.12 user         0.03 sys
+            20152320  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                3140  page reclaims
+                 130  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                  96  voluntary context switches
+                2388  involuntary context switches
+           301266112  instructions retired
+           376482977  cycles elapsed
+            10863024  peak memory footprint
+GUARD {"rc": 1, "killed_by_guard": null, "wall_s": 929.5, "waited_s": 30, "swap_start_mb": 8899, "peak_swap_growth_mb": 0, "swap_growth_end_mb": -544, "peak_footprint_gb_guard": 8.102, "peak_footprint_gb_time": 0.011, "others_cpu_pct_mean": 139.7, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8899, "mem_free_pct": 67, "disk_free_gb": 37.2, "avail_gb": 10.9, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 8355, "mem_free_pct": 31, "disk_free_gb": 38.3, "avail_gb": 2.7, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

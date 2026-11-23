@@ -1,0 +1,22 @@
+CMD: build/dmserve --model ../../../q36/_tiny/run/model --cache-gb 0.05 --mem mlock --ctx 2048 --chunk 256 --span 8192 --check results/serving2/tiny_ids.txt --gen 16 --threads 4 --readers 2
+STATE_BEFORE: {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9942, "mem_free_pct": 81, "disk_free_gb": 36.3, "avail_gb": 9.22, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}
+{"mode":"check","model":"qwen3_5_moe","positions":700,"ref_chunk":1,"chunk":256,"logit_bits_differ":0,"logit_max_diff":0,"fixed_state_bytes_differ":0,"fixed_first_differing_byte":-1,"kv_bytes_differ":0,"kv_first_differing_position":-1,"greedy_identical":true,"gen_ref":"216,314,373,15,424,426,199,226,156,52,219,131,364,40,75,227","gen_batched":"216,314,373,15,424,426,199,226,156,52,219,131,364,40,75,227","ref_ms":125.5,"batched_ms":161.2,"ref":{},"batched":{}}
+        0.60 real         1.17 user         0.01 sys
+            27410432  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                1894  page reclaims
+                   1  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 138  voluntary context switches
+                1722  involuntary context switches
+         21451155468  instructions retired
+          4319073965  cycles elapsed
+            22659504  peak memory footprint
+GUARD {"rc": 0, "killed_by_guard": null, "wall_s": 1.1, "waited_s": 92, "swap_start_mb": 9942, "peak_swap_growth_mb": 0, "swap_growth_end_mb": 0, "peak_footprint_gb_guard": 0.02, "peak_footprint_gb_time": 0.023, "others_cpu_pct_mean": null, "before": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9942, "mem_free_pct": 81, "disk_free_gb": 36.3, "avail_gb": 9.22, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}, "after": {"power": "AC Power", "battery": "-InternalBattery-0\t100%; charged; 0:00 remaining present: true", "swap_used_mb": 9942, "mem_free_pct": 78, "disk_free_gb": 36.3, "avail_gb": 8.91, "therm": "Note: No thermal warning level has been recorded Note: No performance warning level has been recorded Note: No CPU power"}}

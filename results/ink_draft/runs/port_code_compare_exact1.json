@@ -1,0 +1,49 @@
+{
+ "positions": 399,
+ "draft1_equal": 1.0,
+ "draft_j_equal_given_previous_equal": [
+  {
+   "j": 1,
+   "compared": 399,
+   "equal": 1.0
+  },
+  {
+   "j": 2,
+   "compared": 399,
+   "equal": 1.0
+  },
+  {
+   "j": 3,
+   "compared": 399,
+   "equal": 1.0
+  },
+  {
+   "j": 4,
+   "compared": 399,
+   "equal": 0.9949874686716792
+  },
+  {
+   "j": 5,
+   "compared": 397,
+   "equal": 1.0
+  },
+  {
+   "j": 6,
+   "compared": 397,
+   "equal": 0.9974811083123426
+  },
+  {
+   "j": 7,
+   "compared": 396,
+   "equal": 1.0
+  }
+ ],
+ "all7_equal": 0.9924812030075187,
+ "prob1_max_abs_diff_where_equal": 0.01916790008544922,
+ "logit_positions": 200,
+ "draft1_logit_max_abs_diff": 0.18970680236816406,
+ "draft1_logit_mean_abs_diff": 0.014939517714083195,
+ "draft1_logit_max_abs_diff_at_ref_top": 0.1427173614501953,
+ "draft1_disagreements": [],
+ "draft1_disagreements_near_tie": 0
+}

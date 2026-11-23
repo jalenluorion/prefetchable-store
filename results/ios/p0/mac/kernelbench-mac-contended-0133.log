@@ -1,0 +1,66 @@
+KBENCH start: features {"hw.optional.arm.FEAT_DotProd":1,"hw.optional.arm.FEAT_I8MM":1,"hw.optional.arm.FEAT_FHM":1,"hw.optional.arm.FEAT_FP16":1,"hw.optional.arm.FEAT_BF16":1,"hw.optional.arm.FEAT_SME":1,"hw.optional.arm.FEAT_SME2":1,"hw.optional.arm.FEAT_SVE":-1,"hw.ncpu":10,"hw.perflevel0.physicalcpu":4,"hw.perflevel1.physicalcpu":6,"hw.perflevel0.l2cachesize":16777216,"hw.perflevel1.l2cachesize":4194304,"hw.l1dcachesize":65536,"hw.cachelinesize":128,"hw.pagesize":16384,"hw.memsize":17179869184,"hw.cpufamily":1867590060,"hw.perflevel0.cpusperl2":4,"hw.nperflevels":2,"hw.machine":"arm64","kern.osversion":"25F80","kern.osproductversion":"26.5.1","machdep.cpu.brand_string":"Apple M4"} thermal nominal
+KBENCH bw qos=ui threads=1 28.0 GB/s
+KBENCH bw qos=ui threads=4 50.0 GB/s
+KBENCH bw qos=ui threads=8 54.7 GB/s
+KBENCH mv a4gu qos=ui t=1 11.5 GB/s 20.4 GMAC/s 51.5 us/mat [nominal]
+KBENCH mv a4gu qos=ui t=4 31.8 GB/s 56.6 GMAC/s 18.5 us/mat [nominal]
+KBENCH mv a4gu qos=ui t=8 39.4 GB/s 70.1 GMAC/s 15.0 us/mat [nominal]
+KBENCH mv a4dn qos=ui t=1 16.9 GB/s 30.1 GMAC/s 34.9 us/mat [nominal]
+KBENCH mv a4dn qos=ui t=4 41.9 GB/s 74.6 GMAC/s 14.1 us/mat [nominal]
+KBENCH mv a4dn qos=ui t=8 46.9 GB/s 83.4 GMAC/s 12.6 us/mat [nominal]
+KBENCH mv a8qkv qos=ui t=1 30.7 GB/s 28.9 GMAC/s 580.8 us/mat [nominal]
+KBENCH mv a8qkv qos=ui t=4 53.2 GB/s 50.1 GMAC/s 334.9 us/mat [nominal]
+KBENCH mv a8qkv qos=ui t=8 52.2 GB/s 49.1 GMAC/s 341.7 us/mat [nominal]
+KBENCH mv a8out qos=ui t=1 30.4 GB/s 28.6 GMAC/s 293.0 us/mat [nominal]
+KBENCH mv a8out qos=ui t=4 44.6 GB/s 41.9 GMAC/s 200.0 us/mat [nominal]
+KBENCH mv a8out qos=ui t=8 52.5 GB/s 49.4 GMAC/s 169.7 us/mat [nominal]
+KBENCH mv a8rt qos=ui t=1 27.5 GB/s 25.9 GMAC/s 20.2 us/mat [nominal]
+KBENCH mv a8rt qos=ui t=4 50.7 GB/s 47.7 GMAC/s 11.0 us/mat [nominal]
+KBENCH mv a8rt qos=ui t=8 43.1 GB/s 40.6 GMAC/s 12.9 us/mat [nominal]
+KBENCH mv a8head qos=ui t=1 32.7 GB/s 30.8 GMAC/s 2178.1 us/mat [nominal]
+KBENCH mv a8head qos=ui t=4 54.5 GB/s 51.3 GMAC/s 1309.2 us/mat [nominal]
+KBENCH mv a8head qos=ui t=8 62.4 GB/s 58.8 GMAC/s 1141.8 us/mat [nominal]
+KBENCH mv a4qkv qos=ui t=1 13.6 GB/s 24.1 GMAC/s 695.8 us/mat [nominal]
+KBENCH mv a4qkv qos=ui t=4 43.7 GB/s 77.6 GMAC/s 216.1 us/mat [nominal]
+KBENCH mv a4qkv qos=ui t=8 54.3 GB/s 96.5 GMAC/s 173.8 us/mat [nominal]
+KBENCH mv a4out qos=ui t=1 19.5 GB/s 34.7 GMAC/s 241.7 us/mat [nominal]
+KBENCH mv a4out qos=ui t=4 45.8 GB/s 81.4 GMAC/s 103.0 us/mat [nominal]
+KBENCH mv a4out qos=ui t=8 53.8 GB/s 95.7 GMAC/s 87.7 us/mat [nominal]
+KBENCH mv a4head qos=ui t=1 20.0 GB/s 35.5 GMAC/s 1889.7 us/mat [nominal]
+KBENCH mv a4head qos=ui t=4 43.0 GB/s 76.4 GMAC/s 877.8 us/mat [nominal]
+KBENCH mv a4head qos=ui t=8 49.5 GB/s 88.1 GMAC/s 762.0 us/mat [nominal]
+KBENCH gemm a4gu N=8 t=2 151.8 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4gu N=8 t=8 258.1 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4gu N=64 t=2 102.6 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4gu N=64 t=8 191.8 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4gu N=256 t=2 111.8 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4gu N=256 t=8 98.1 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4qkv N=64 t=2 79.5 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4qkv N=64 t=8 171.7 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4qkv N=256 t=2 90.4 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a4qkv N=256 t=8 221.8 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a8qkv N=64 t=2 125.9 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a8qkv N=64 t=8 192.6 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a8qkv N=256 t=2 116.1 GMAC/s (pos0 mismatches 0)
+KBENCH gemm a8qkv N=256 t=8 247.8 GMAC/s (pos0 mismatches 0)
+KBENCH metal exact a4gu: 0 of 512 rows differ from the CPU kernel
+KBENCH metal exact a4dn: 0 of 2048 rows differ from the CPU kernel
+KBENCH metal exact a8rt: 0 of 256 rows differ from the CPU kernel
+KBENCH metal exact a8out: 0 of 2048 rows differ from the CPU kernel
+KBENCH metal exact a4out: 0 of 2048 rows differ from the CPU kernel
+KBENCH metal exact gd N=64: 0 of 65536 outputs differ
+KBENCH metal command buffer round trip p50 197 us p90 343 us
+KBENCH metal read bandwidth 71.3 GB/s
+KBENCH metal mv a4gu 48.7 GB/s 86.6 GMAC/s (gpu-time 53.1 GB/s, 11.1 us/mat)
+KBENCH metal mv a4dn 53.6 GB/s 95.3 GMAC/s (gpu-time 57.2 GB/s, 10.3 us/mat)
+KBENCH metal mv a8qkv 65.4 GB/s 61.5 GMAC/s (gpu-time 68.9 GB/s, 258.9 us/mat)
+KBENCH metal mv a8out 62.2 GB/s 58.5 GMAC/s (gpu-time 66.7 GB/s, 133.7 us/mat)
+KBENCH metal mv a8rt 48.0 GB/s 45.2 GMAC/s (gpu-time 50.5 GB/s, 11.0 us/mat)
+KBENCH metal mv a8head 63.9 GB/s 60.1 GMAC/s (gpu-time 67.6 GB/s, 1055.1 us/mat)
+KBENCH metal mv a4qkv 65.5 GB/s 116.5 GMAC/s (gpu-time 70.0 GB/s, 134.9 us/mat)
+KBENCH metal mv a4out 61.3 GB/s 109.0 GMAC/s (gpu-time 64.9 GB/s, 72.8 us/mat)
+KBENCH metal mv a4head 69.6 GB/s 123.7 GMAC/s (gpu-time 73.4 GB/s, 514.2 us/mat)
+KBENCH metal gd a8qkv N=64 212.1 GMAC/s
+KBENCH metal gd a8qkv N=256 221.5 GMAC/s
+KBENCH metal together: gpu alone 59.8, cpu(8) alone 48.3, together gpu 47.2 + cpu 13.4 = 60.6 GB/s [nominal]
+KBENCH done in 71 s, thermal nominal

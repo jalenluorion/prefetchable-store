@@ -1,0 +1,88 @@
+{
+ "runs": {
+  "toff": {
+   "power": "slot:  -InternalBattery-0 100%; charged; 0:00 remaining present: true",
+   "new_user_turn": [
+    {
+     "ttft_s": 17.771,
+     "prompt": 8792,
+     "reused": 7537,
+     "computed": 1255,
+     "source": "checkpoint",
+     "ms_wait_worker": 1.6,
+     "ms_prefill": 17699,
+     "ahead_before": [],
+     "gap_s": 5.0,
+     "client_ttft_s": 17.773
+    },
+    {
+     "ttft_s": 17.319,
+     "prompt": 8792,
+     "reused": 7537,
+     "computed": 1255,
+     "source": "checkpoint",
+     "ms_wait_worker": 2.0,
+     "ms_prefill": 17281,
+     "ahead_before": [],
+     "gap_s": 30.0,
+     "client_ttft_s": 17.322
+    }
+   ],
+   "max_footprint_mb_at_request_end": 8337
+  },
+  "ton": {
+   "power": "slot:  -InternalBattery-0 100%; charged; 0:00 remaining present: true",
+   "new_user_turn": [
+    {
+     "ttft_s": 18.064,
+     "prompt": 8792,
+     "reused": 7537,
+     "computed": 1255,
+     "source": "live",
+     "ms_wait_worker": 91.7,
+     "ms_prefill": 17935,
+     "ahead_before": [
+      {
+       "predicted": 8767,
+       "computed": 0,
+       "cancelled": true,
+       "ms_prefill": 5038.62,
+       "ms_cancel_to_stop": 91.7186,
+       "mb_read": 9110.81,
+       "source": "checkpoint"
+      }
+     ],
+     "gap_s": 5.0,
+     "client_ttft_s": 18.065
+    },
+    {
+     "ttft_s": 1.114,
+     "prompt": 8792,
+     "reused": 8767,
+     "computed": 25,
+     "source": "live",
+     "ms_wait_worker": 1.7,
+     "ms_prefill": 1095,
+     "ahead_before": [
+      {
+       "predicted": 8767,
+       "computed": 1230,
+       "cancelled": false,
+       "ms_prefill": 20825.1,
+       "ms_cancel_to_stop": -1,
+       "mb_read": 46036.7,
+       "source": "checkpoint"
+      }
+     ],
+     "gap_s": 30.0,
+     "client_ttft_s": 1.116
+    }
+   ],
+   "max_footprint_mb_at_request_end": 8519
+  }
+ },
+ "tokens_identical": {
+  "ton": true
+ },
+ "requests_compared": 12
+}

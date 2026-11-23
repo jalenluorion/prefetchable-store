@@ -1,0 +1,43 @@
+LAUNCH fresh process (args: -- -autotest -fileCacheTest bg -p0spec bgtouch=2.0); previous process pid 9936: last scene phase active, 357 s ago
+ENGINE PhoneStore (native: -autotest always runs the native engine) mode=prefetch
+DIAG memWarn=log historyMode=strict mappedWeightsInUse=0 mode=prefetch prefixCache=on
+MEM launch: footprint=0.009 peak=0.009 avail=4.286 limit~4.295 GB | mlx active=n/a peak=n/a cache=n/a GB | resident=0.032 file-backed=0.023 compressed=0.000 GB | faults=3844 pageins=1503 | thermal=nominal
+FILECACHE launch bg spec 'bgtouch=2.0': 40 store files in <app documents>/model/store4
+SCENE active: same process, up 0.2 s; engine idle, slabs allocated
+FILECACHE bg: mapped 40 of 40 files, 15.67 GB, 8838 records; resident now 0.00 GB
+FILECACHE phase bg-fill
+FILECACHE t=1 bg-fill resident 0.66 GB (early set 0.68) touched 0.69 GB cold 0.07 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=2 bg-fill resident 1.36 GB (early set 1.06) touched 1.37 GB cold 0.06 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=4 bg-fill resident 2.11 GB (early set 1.06) touched 2.09 GB cold 0.07 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+FILECACHE sweep done: target touched, touched 2.11 GB in 4 s, resident 2.24 GB
+FILECACHE phase bg-wait
+FILECACHE ready for background: touched set resident 2.11 GB, all 2.23 GB
+FILECACHE t=5 bg-wait resident 2.13 GB (early set 0.96) touched 2.11 GB cold 0.07 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=6 bg-wait resident 1.91 GB (early set 0.80) touched 2.11 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=8 bg-wait resident 1.84 GB (early set 0.78) touched 2.11 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=9 bg-wait resident 1.83 GB (early set 0.78) touched 2.11 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=10 bg-wait resident 1.81 GB (early set 0.76) touched 2.11 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+SCENE inactive: same process, up 12.4 s; engine idle, slabs allocated
+FILECACHE t=12 bg-wait resident 1.51 GB (early set 0.33) touched 2.11 GB cold 0.00 warm 0.00 GB/s/thread fp 0.03 avail 4.26 GB warn 0/0 nominal
+P0 background
+SCENE background: same process, up 13.2 s; engine idle, slabs allocated
+P0 foreground
+SCENE inactive: same process, up 42.7 s; engine idle, slabs allocated
+FILECACHE t=42 bg-wait resident 0.97 GB (early set 0.00) touched 2.11 GB cold 0.00 warm 0.00 GB/s/thread fp 0.04 avail 4.26 GB warn 0/0 nominal
+FILECACHE back after 29.5 s: touched set resident 1.04 GB (was 2.11), all 0.95 GB (was 2.23)
+FILECACHE phase bg-retouch
+SCENE active: same process, up 43.1 s; engine idle, slabs allocated, back after 29.9 s in the background
+FILECACHE t=43 bg-retouch resident 1.36 GB (early set 0.57) touched 3.80 GB cold 0.07 warm 14.22 GB/s/thread fp 0.04 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=45 bg-retouch resident 2.01 GB (early set 1.03) touched 9.31 GB cold 0.07 warm 18.73 GB/s/thread fp 0.04 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=46 bg-retouch resident 2.21 GB (early set 1.06) touched 161.64 GB cold 0.12 warm 8.04 GB/s/thread fp 0.04 avail 4.26 GB warn 0/0 nominal
+FILECACHE t=49 bg-retouch resident 2.18 GB (early set 1.06) touched 343.54 GB cold 0.00 warm 8.22 GB/s/thread fp 0.04 avail 4.26 GB warn 0/0 nominal
+FILECACHE retouch_after_return: 34.28 GB/s aggregate, cold 1.57 GB warm 344.77 GB
+FILECACHE t=53 bg-retouch resident 2.11 GB (early set 1.06) touched 348.45 GB cold 0.00 warm 9.08 GB/s/thread fp 0.04 avail 4.26 GB warn 0/0 nominal
+P0 wrote filecache.json
+DONE
+02:02:52  Acquired tunnel connection to device.
+02:02:52  Enabling developer disk image services.
+02:02:52  Acquired usage assertion.
+Launched application with com.example.phonestore bundle identifier.
+Waiting for the application to terminate...
+The app terminated with the exit code 0.

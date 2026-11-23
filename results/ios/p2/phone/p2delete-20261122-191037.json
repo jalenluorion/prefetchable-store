@@ -1,0 +1,15 @@
+{
+  "bytes_freed" : 1438049975,
+  "free_after" : 20275200000,
+  "free_before" : 20275200000,
+  "removed" : [
+    {
+      "bytes" : 1438049975,
+      "error" : "Error Domain=NSCocoaErrorDomain Code=513 \"“cache” couldn’t be removed because you don’t have permission to access it.\" UserInfo={NSUserStringVariant=(\n    Remove\n), NSFilePath=<app documents>\/model\/cache, NSURL=file:\/\/<app documents>\/model\/cache, NSUnderlyingError=0x12157a790 {Error Domain=NSPOSIXErrorDomain Code=13 \"Permission denied\"}}",
+      "path" : "<app documents>\/model\/cache",
+      "removed" : false,
+      "truncated_bytes" : 1438049975
+    }
+  ],
+  "time" : "2026-11-23T00:10:37Z"
+}

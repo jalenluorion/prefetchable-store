@@ -1,0 +1,1 @@
+{"weight_gb": 0.5, "n1_ms": 6.07, "n1_gb_s": 81.66, "n2_ms": 6.54, "n2_gb_s": 75.71, "n4_ms": 8.53, "n4_gb_s": 58.11, "n8_ms": 12.71, "n8_gb_s": 38.97, "guard": {"wall_s": 2.2, "waited_s": 50, "peak_footprint_gb_time": 0.499, "others_cpu_pct_mean": 53.0}, "power": ["battery 100% discharging", "Battery Power 100%"]}
