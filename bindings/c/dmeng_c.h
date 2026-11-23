@@ -64,7 +64,7 @@ typedef struct dm_open_opts {
   int readers;             /* expert reader threads; 0 = 4 */
   int64_t cache_bytes;     /* expert cache budget in bytes; 0 = 3.3e9 on macOS; on iOS sized at open from
                               os_proc_available_memory(): available - resident file - router file - 0.3 GB (state,
-                              scratch) - 0.9 GB (margin), clamped to [0.6, 3.3] GB (P2: at 4.27 GB available a 1.0 GB
+                              scratch) - 0.9 GB (margin), clamped to [0.6, 8.0] GB (P2: at 4.27 GB available a 1.0 GB
                               slab drew no warning, 1.3 GB did) */
   int memory_mode;         /* DM_MEM_* of the expert cache; default DM_MEM_MLOCK on both (iOS since P2: the FILE tier
                               read at 0.56 GB/s against 0.74 for a locked slab, and the OS kept 0.85 GB of it) */

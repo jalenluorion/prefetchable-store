@@ -262,7 +262,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     struct stat st;
     const int64_t res = stat(lo.resident.c_str(), &st) == 0 ? (int64_t)st.st_size : (int64_t)2.1e9;
     const int64_t rt = !e->routers_path.empty() && stat(e->routers_path.c_str(), &st) == 0 ? (int64_t)st.st_size : 0;
-    const int64_t slab = std::min<int64_t>((int64_t)3.3e9, std::max<int64_t>((int64_t)0.6e9, e->avail_open - res - rt - (int64_t)0.3e9 - (int64_t)0.9e9));
+    const int64_t slab = std::min<int64_t>((int64_t)8.0e9, std::max<int64_t>((int64_t)0.6e9, e->avail_open - res - rt - (int64_t)0.3e9 - (int64_t)0.9e9));  // follows what iOS makes available: phones with more memory get a larger cache
     e->slab_auto = slab;
     co.cache_gb = slab / 1e9;
     fprintf(stderr, "dmeng: expert slab %.2f GB = available %.2f - resident %.2f - router %.2f - state 0.30 - margin 0.90 GB\n",
