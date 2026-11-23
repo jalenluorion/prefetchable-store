@@ -1,10 +1,11 @@
 # moved-store
 
 Run mixture-of-experts language models that are larger than your memory, from the SSD, on a 16 GB MacBook and on an
-iPhone.
+iPhone. That includes a 180B-parameter model whose weights are eight times the laptop's memory.
 
 | model | machine | memory used | speed |
 |---|---|---|---|
+| [Qwen3.8-Flash-Next](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-moved-store) (180B parameters) | base M4 MacBook Pro, 16 GB | 9 GB | 5.7 tokens/s |
 | [Qwen3.6-35B-A3B](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-moved-store) (35B parameters) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 26 to 29 tokens/s exact, 30 to 32 fast |
 | [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-moved-store) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 17 to 20 tokens/s exact, about 21 fast |
 | Qwen3.6-35B-A3B | iPhone 15 Plus, 6 GB | 2.9 GB | 3.4 tokens/s exact, 4.1 fast |
@@ -40,6 +41,15 @@ For Inkling 2 Mini, download `jalenluorion/Inkling-2-Mini-moved-store` instead; 
 downloaded from the Hub runs as it is. Each weight repo's card lists the files one device needs, so a Mac does not
 download the phone's files.
 
+**The 180B model.** Qwen3.8-Flash-Next runs through the Python runner in [reference/flash](reference/flash); it needs
+about 140 GB of free disk:
+
+```bash
+cd reference/flash && pip install -r requirements.txt
+hf download jalenluorion/Qwen3.8-Flash-Next-moved-store --local-dir model --exclude "routers3/*"
+python mlx_run.py --dir model --prompt "Explain what a mixture of experts is." --max-new 200
+```
+
 **On an iPhone.** [apps/ios](apps/ios/README.md) is a chat app that runs either model on the phone: open
 `apps/ios/MovedStore.xcodeproj` in Xcode, set your own signing team and bundle identifier, and run it on an iPhone with
 an A16 chip or newer. The app downloads the model from the Hub in the profile that fits the phone (15.5 to 21.3 GB)
@@ -67,6 +77,9 @@ A model is prefetchable when that timing is turned around:
 
 When these hold, the drive stops being a wait and becomes background work, and the memory a model needs is set by what
 it computes with per token, not by its size.
+
+The more a model outgrows the machine's memory, the more this matters. The 180B model here has weights eight times
+the size of the laptop's memory, and it runs on that laptop.
 
 Released models are not built this way. This repository retrofits it onto frozen weights; building it in from the
 first training step is the subject of the paper.
@@ -150,6 +163,18 @@ every expert read when its layer asks for it.
 | Qwen3.6-35B-A3B (7,572 tokens) | 68.6 | 15.3 | 24.0 |
 | Inkling 2 Mini (8,365 tokens) | 162.4 | 6.7 | 46.6 |
 
+**Qwen3.8-Flash-Next, 180B** (Python runner in `reference/flash`, one prompt, 120 generated tokens, each run listed;
+its default mode never waits for a read: the model's router chooses among the experts that have arrived, see Quality)
+
+| configuration | tokens/s | read per token | memory |
+|---|---|---|---|
+| experts named four layers ahead (default) | 5.70, 5.84, 5.55 | 488 MB | 8.5 GB |
+| read on demand, no routers | 2.42, 2.50, 2.49 | 587 MB | 7.5 GB |
+| stock llama.cpp, a 4-bit GGUF of the same model, memory-mapped, CPU | 0.45, 0.39 | | |
+
+The llama.cpp row uses a different 4-bit file, so it shows what the stock tool gives on this machine; the on-demand
+row is the like-for-like comparison. In a recorded OpenCode session the model ran at 4.3 to 5.4 tokens/s.
+
 **iPhone 15 Plus** (6 GB phone; the app uses 2.9 GB; measured on the device)
 
 | | Qwen3.6-35B-A3B, exact | Qwen3.6-35B-A3B, fast | Inkling 2 Mini, exact | Inkling 2 Mini, fast |
@@ -190,6 +215,10 @@ text with the true previous tokens:
 | Qwen3.6-35B-A3B, Mac (3.3 to 5 GB cache) | 0.96 | 0.98 |
 | Inkling 2 Mini, Mac (6 to 7.8 GB cache) | 0.965-0.973 | 0.966-0.967 |
 
+Qwen3.8-Flash-Next's default mode is closer to `fast` than to `exact`: choosing experts four layers early costs
+0.011 to 0.019 nats of loss against the same weights with every expert in memory (its `--mode exact` costs nothing and
+reads on demand).
+
 On the iPhone the in-memory weights are 4-bit as well. Against the Mac's 8-bit `exact` engine, the phone's weights
 agree on 0.913 of prose and 0.884 of agent-text positions in `exact`, and on 0.891 and 0.881 in `fast`, measured on
 the phone.
@@ -227,7 +256,7 @@ The default build targets Apple M4 (`-DDM_ARCH=...` to change); `-DDM_METAL=OFF`
 ## Limits
 
 - These are retrofits of models that were not built to be read from a drive. A token reads 40 to 270 MB depending on
-  the model, the text and the cache, so the cache size and the drive set the speed.
+  the model, the text and the cache (about 490 MB for the 180B model), so the cache size and the drive set the speed.
 - The 35B's experts are stored at 4-bit and the in-memory weights at 8-bit (4-bit on small iPhones). The numbers above
   are for those weights, not for the released bf16 weights.
 - One request at a time. CPU kernels for Apple Silicon, with a GPU share of prompt prefill on the Mac. Text only.
