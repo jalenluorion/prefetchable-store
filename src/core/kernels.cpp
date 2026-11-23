@@ -35,7 +35,72 @@ static inline int perm_pos(int i) {
   return half + ((j & 1) ? 16 + (j >> 1) : (j >> 1));
 }
 
+// The I16 block with NEON: the same values as the scalar code below (the sum in order; the max is order-free; each
+// product x * id rounded once and converted with ties to even as lrintf; the fp16 conversions round to nearest even
+// as the casts), the perm order by unzipping even and odd elements of each 32-element half
+static void xq_block_i16(XQ& q, int b, const float* x) {
+  float s = 0.f;
+  for (int i = 0; i < XB; i++) s += x[i];
+  q.gsum[b] = s;
+  float32x4_t xv[16], m = vdupq_n_f32(0.f);
+  for (int k = 0; k < 16; k++) {
+    xv[k] = vld1q_f32(x + 4 * k);
+    m = vmaxq_f32(m, vabsq_f32(xv[k]));
+  }
+  const float amax = vmaxvq_f32(m);
+  _Float16 *fp = q.fp + XB * b, *fn = q.fn + XB * b;
+  float16x8_t h[8];
+  for (int k = 0; k < 8; k++) {
+    h[k] = vcombine_f16(vcvt_f16_f32(xv[2 * k]), vcvt_f16_f32(xv[2 * k + 1]));
+    vst1q_f16((float16_t*)fn + 8 * k, h[k]);
+  }
+  for (int half = 0; half < 2; half++) {  // 32 elements = h[4 half .. 4 half + 3]
+    const float16x8_t* g = h + 4 * half;
+    float16_t* o = (float16_t*)fp + 32 * half;
+    vst1q_f16(o, vuzp1q_f16(g[0], g[1]));
+    vst1q_f16(o + 8, vuzp1q_f16(g[2], g[3]));
+    vst1q_f16(o + 16, vuzp2q_f16(g[0], g[1]));
+    vst1q_f16(o + 24, vuzp2q_f16(g[2], g[3]));
+  }
+  const float d = amax / 32384.f, id = d > 0 ? 1.f / d : 0.f;
+  q.d[b] = d;
+  const int32x4_t lim = vdupq_n_s32(32384), nlim = vdupq_n_s32(-32384);
+  int8x16_t hi[4], lo[4];
+  for (int k = 0; k < 4; k++) {  // 16 elements
+    int16x8_t v16[2];
+    for (int u = 0; u < 2; u++) {
+      int32x4_t a0 = vcvtnq_s32_f32(vmulq_n_f32(xv[4 * k + 2 * u], id));
+      int32x4_t a1 = vcvtnq_s32_f32(vmulq_n_f32(xv[4 * k + 2 * u + 1], id));
+      a0 = vmaxq_s32(vminq_s32(a0, lim), nlim);
+      a1 = vmaxq_s32(vminq_s32(a1, lim), nlim);
+      v16[u] = vcombine_s16(vmovn_s32(a0), vmovn_s32(a1));
+    }
+    int16x8_t h0 = vshrq_n_s16(vaddq_s16(v16[0], vdupq_n_s16(128)), 8), h1 = vshrq_n_s16(vaddq_s16(v16[1], vdupq_n_s16(128)), 8);
+    int16x8_t l0 = vsubq_s16(v16[0], vshlq_n_s16(h0, 8)), l1 = vsubq_s16(v16[1], vshlq_n_s16(h1, 8));
+    hi[k] = vcombine_s8(vmovn_s16(h0), vmovn_s16(h1));
+    lo[k] = vcombine_s8(vmovn_s16(l0), vmovn_s16(l1));
+  }
+  int8_t *hp = q.hp + XB * b, *lp = q.lp + XB * b, *hn = q.hn + XB * b, *ln = q.ln + XB * b;
+  for (int k = 0; k < 4; k++) {
+    vst1q_s8(hn + 16 * k, hi[k]);
+    vst1q_s8(ln + 16 * k, lo[k]);
+  }
+  for (int half = 0; half < 2; half++) {
+    vst1q_s8(hp + 32 * half, vuzp1q_s8(hi[2 * half], hi[2 * half + 1]));
+    vst1q_s8(hp + 32 * half + 16, vuzp2q_s8(hi[2 * half], hi[2 * half + 1]));
+    vst1q_s8(lp + 32 * half, vuzp1q_s8(lo[2 * half], lo[2 * half + 1]));
+    vst1q_s8(lp + 32 * half + 16, vuzp2q_s8(lo[2 * half], lo[2 * half + 1]));
+  }
+}
+
+static void xq_block_ref(XQ& q, int b, const float* x);
 void xq_block(XQ& q, int b, const float* x) {
+  if (q.prec == Prec::I16) return xq_block_i16(q, b, x);
+  xq_block_ref(q, b, x);
+}
+
+// the scalar definition (every precision; the I16 path above gives its values)
+static void xq_block_ref(XQ& q, int b, const float* x) {
   float s = 0.f, amax = 0.f;
   for (int i = 0; i < XB; i++) {
     s += x[i];
@@ -126,9 +191,65 @@ static inline float32x4_t dot4_f16(const uint8_t* c, const _Float16* x) {
   return vaddq_f32(a, b);
 }
 
+// I16, two rows at a time: each group's activation planes are loaded once for both rows (the single-row loop loads them
+// per row: 8 of its 24 instructions per 32 code bytes). Per row the same exact int32 group totals and the same float
+// operations in the same order as the single-row loop below, so the outputs are bit-identical.
+static void mv_aff4_i16_pairs(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1,
+                              const XQ& x, float* y) {
+  const int NG = K / XB, rb = K / 2;
+  const uint8x16_t m = vdupq_n_u8(0x0F);
+  for (int r = r0; r + 1 < r1; r += 2) {
+    const uint8_t* c0 = codes + (size_t)r * rb;
+    const uint8_t* c1 = c0 + rb;
+    const _Float16 *s0 = scales + (size_t)r * NG, *s1 = s0 + NG;
+    const _Float16 *b0 = biases + (size_t)r * NG, *b1 = b0 + NG;
+    float32x4_t acc0 = vdupq_n_f32(0), acc1 = acc0;
+    for (int g = 0; g < NG; g += 4) {
+      int32x4_t t0[4], t1[4];
+      for (int q = 0; q < 4; q++) {
+        const int8_t* xh = x.hp + XB * (g + q);
+        const int8_t* xl = x.lp + XB * (g + q);
+        const int8x16_t h0 = vld1q_s8(xh), h1 = vld1q_s8(xh + 16), h2 = vld1q_s8(xh + 32), h3 = vld1q_s8(xh + 48);
+        const int8x16_t l0 = vld1q_s8(xl), l1 = vld1q_s8(xl + 16), l2 = vld1q_s8(xl + 32), l3 = vld1q_s8(xl + 48);
+        for (int rr = 0; rr < 2; rr++) {
+          const uint8_t* c = (rr ? c1 : c0) + 32 * (g + q);
+          const uint8x16_t v0 = vld1q_u8(c), v1 = vld1q_u8(c + 16);
+          const int8x16_t n0 = vreinterpretq_s8_u8(vandq_u8(v0, m)), n1 = vreinterpretq_s8_u8(vshrq_n_u8(v0, 4));
+          const int8x16_t n2 = vreinterpretq_s8_u8(vandq_u8(v1, m)), n3 = vreinterpretq_s8_u8(vshrq_n_u8(v1, 4));
+          int32x4_t a = vdupq_n_s32(0), b = vdupq_n_s32(0);
+          a = vdotq_s32(a, n0, h0);
+          b = vdotq_s32(b, n0, l0);
+          a = vdotq_s32(a, n1, h1);
+          b = vdotq_s32(b, n1, l1);
+          a = vdotq_s32(a, n2, h2);
+          b = vdotq_s32(b, n2, l2);
+          a = vdotq_s32(a, n3, h3);
+          b = vdotq_s32(b, n3, l3);
+          (rr ? t1 : t0)[q] = vaddq_s32(vshlq_n_s32(a, 8), b);
+        }
+      }
+      const float32x4_t xd = vld1q_f32(x.d + g), xg = vld1q_f32(x.gsum + g);
+      const float32x4_t d0 = vcvtq_f32_s32(vpaddq_s32(vpaddq_s32(t0[0], t0[1]), vpaddq_s32(t0[2], t0[3])));
+      acc0 = vfmaq_f32(acc0, d0, vmulq_f32(f16x4_to_f32(s0 + g), xd));
+      acc0 = vfmaq_f32(acc0, f16x4_to_f32(b0 + g), xg);
+      const float32x4_t d1 = vcvtq_f32_s32(vpaddq_s32(vpaddq_s32(t1[0], t1[1]), vpaddq_s32(t1[2], t1[3])));
+      acc1 = vfmaq_f32(acc1, d1, vmulq_f32(f16x4_to_f32(s1 + g), xd));
+      acc1 = vfmaq_f32(acc1, f16x4_to_f32(b1 + g), xg);
+    }
+    y[r - r0] = vaddvq_f32(acc0);
+    y[r + 1 - r0] = vaddvq_f32(acc1);
+  }
+}
+
 void mv_aff4(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQ& x,
              float* y) {
   const int NG = K / XB, rb = K / 2;
+  if (x.prec == Prec::I16 && NG % 4 == 0 && r1 - r0 >= 2) {  // pairs of rows; an odd last row below
+    const int np = (r1 - r0) & ~1;
+    mv_aff4_i16_pairs(codes, scales, biases, K, r0, r0 + np, x, y);
+    r0 += np;
+    y += np;
+  }
   for (int r = r0; r < r1; r++) {
     const uint8_t* c = codes + (size_t)r * rb;
     const _Float16* s = scales + (size_t)r * NG;
@@ -252,6 +373,50 @@ void mv_aff8(const uint8_t* codes, const _Float16* scales, const _Float16* biase
   }
 }
 
+// ------------------------------------------------------------------------------------------------ AFF8, split planes
+// mv_aff8's I16 path with the code bytes rebuilt from the two nibble planes (weights.h, AFF8S; vsli / vsri): every int32
+// lane, and so every float operation after it, is mv_aff8's.
+static inline int32x4_t dot8s_i16(const uint8_t* h, const uint8_t* l, const int8_t* xh, const int8_t* xl) {
+  const uint8x16_t h0 = vld1q_u8(h), h1 = vld1q_u8(h + 16), l0 = vld1q_u8(l), l1 = vld1q_u8(l + 16);
+  const uint8x16_t v[4] = {vsliq_n_u8(l0, h0, 4), vsriq_n_u8(h0, l0, 4), vsliq_n_u8(l1, h1, 4), vsriq_n_u8(h1, l1, 4)};
+  int32x4_t a = vdupq_n_s32(0), b = vdupq_n_s32(0);
+  for (int k = 0; k < 4; k++) {
+    a = vusdotq_s32(a, v[k], vld1q_s8(xh + 16 * k));
+    b = vusdotq_s32(b, v[k], vld1q_s8(xl + 16 * k));
+  }
+  return vaddq_s32(vshlq_n_s32(a, 8), b);
+}
+
+void mv_aff8s_i16(const uint8_t* codes, int rows, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQ& x,
+                  float* y) {
+  const int NG = K / XB;
+  const size_t half = (size_t)K / 2;
+  for (int r = r0; r < r1; r++) {
+    const int b0 = r & ~63, nb = rows - b0 < 64 ? rows - b0 : 64;
+    const uint8_t* ch = codes + (size_t)b0 * K + (size_t)(r & 63) * half;
+    const uint8_t* cl = ch + (size_t)nb * half;
+    const _Float16* s = scales + (size_t)r * NG;
+    const _Float16* bi = biases + (size_t)r * NG;
+    float32x4_t acc = vdupq_n_f32(0);
+    int g = 0;
+    for (; g + 4 <= NG; g += 4) {
+      int32x4_t a0 = dot8s_i16(ch + 32 * g, cl + 32 * g, x.hn + XB * g, x.ln + XB * g);
+      int32x4_t a1 = dot8s_i16(ch + 32 * (g + 1), cl + 32 * (g + 1), x.hn + XB * (g + 1), x.ln + XB * (g + 1));
+      int32x4_t a2 = dot8s_i16(ch + 32 * (g + 2), cl + 32 * (g + 2), x.hn + XB * (g + 2), x.ln + XB * (g + 2));
+      int32x4_t a3 = dot8s_i16(ch + 32 * (g + 3), cl + 32 * (g + 3), x.hn + XB * (g + 3), x.ln + XB * (g + 3));
+      float32x4_t dots = vcvtq_f32_s32(vpaddq_s32(vpaddq_s32(a0, a1), vpaddq_s32(a2, a3)));
+      acc = vfmaq_f32(acc, dots, vmulq_f32(f16x4_to_f32(s + g), vld1q_f32(x.d + g)));
+      acc = vfmaq_f32(acc, f16x4_to_f32(bi + g), vld1q_f32(x.gsum + g));
+    }
+    float t = vaddvq_f32(acc);
+    for (; g < NG; g++) {
+      int32x4_t a = dot8s_i16(ch + 32 * g, cl + 32 * g, x.hn + XB * g, x.ln + XB * g);
+      t += (float)vaddvq_s32(a) * (float)s[g] * x.d[g] + (float)bi[g] * x.gsum[g];
+    }
+    y[r - r0] = t;
+  }
+}
+
 // ------------------------------------------------------------------------------------------------ NVFP4
 // E2M1 nibble -> 2 x value as int8 (0, .5, 1, 1.5, 2, 3, 4, 6 and negatives)
 static const int8_t E2M1X2[16] = {0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12};
@@ -342,11 +507,108 @@ static void nv_rows(const uint8_t* codes, const uint8_t* sc, float post, int K, 
   }
 }
 
+// The I16 rows, cheaper per weight byte (the expert kernel of decode, 44 of Inkling's 48 applications): two rows at a
+// time share the activation planes and block scales; the low plane's SDOTs accumulate into the high plane's sums
+// shifted by 8 (integer: the same (hi << 8) + lo); the scales are converted by a sign-extending shift (exact, as the
+// fp16 route above). Every float operation, its operands and its order are nv_rows<2>'s (bit-identical: checked on
+// random records and inputs, every E4M3 scale code, K = 2304, 1152, 3072, 320, 192, odd row ranges).
+static inline void e4m3x16s(const uint8_t* p, float32x4_t out[4]) {
+  int8x16_t v = vld1q_s8((const int8_t*)p);
+  const int16x8_t m = vdupq_n_s16((int16_t)0xBFFF);
+  float16x8_t a = vreinterpretq_f16_s16(vandq_s16(vshll_n_s8(vget_low_s8(v), 7), m));
+  float16x8_t b = vreinterpretq_f16_s16(vandq_s16(vshll_high_n_s8(v, 7), m));
+  out[0] = vcvt_f32_f16(vget_low_f16(a));
+  out[1] = vcvt_high_f32_f16(a);
+  out[2] = vcvt_f32_f16(vget_low_f16(b));
+  out[3] = vcvt_high_f32_f16(b);
+}
+static inline void e4m3x8(const uint8_t* p, float32x4_t out[2]) {
+  float16x8_t a = vreinterpretq_f16_s16(vandq_s16(vshll_n_s8(vld1_s8((const int8_t*)p), 7), vdupq_n_s16((int16_t)0xBFFF)));
+  out[0] = vcvt_f32_f16(vget_low_f16(a));
+  out[1] = vcvt_high_f32_f16(a);
+}
+static inline float32x4_t e4m3x4s(const uint8_t* p) {
+  uint32_t w;
+  std::memcpy(&w, p, 4);
+  int16x4_t u = vget_low_s16(vshll_n_s8(vreinterpret_s8_u32(vdup_n_u32(w)), 7));
+  return vcvt_f32_f16(vreinterpret_f16_s16(vand_s16(u, vdup_n_s16((int16_t)0xBFFF))));
+}
+// the 4 group dots of one 64 block, I16: the high plane's sums shifted by 8, then the low plane's SDOTs accumulated
+// into them (integer: equal to (hi << 8) + lo)
+static inline int32x4_t blk_i16(const uint8_t* c, const int8x16_t xh[4], const int8x16_t xl[4], int8x16_t lut) {
+  const uint8x16_t m = vdupq_n_u8(0x0F);
+  uint8x16_t v0 = vld1q_u8(c), v1 = vld1q_u8(c + 16);
+  int8x16_t l0 = vqtbl1q_s8(lut, vandq_u8(v0, m)), h0 = vqtbl1q_s8(lut, vshrq_n_u8(v0, 4));
+  int8x16_t l1 = vqtbl1q_s8(lut, vandq_u8(v1, m)), h1 = vqtbl1q_s8(lut, vshrq_n_u8(v1, 4));
+  int32x4_t a = vshlq_n_s32(vdotq_s32(vdotq_s32(vdupq_n_s32(0), l0, xh[0]), h0, xh[1]), 8);
+  int32x4_t b = vshlq_n_s32(vdotq_s32(vdotq_s32(vdupq_n_s32(0), l1, xh[2]), h1, xh[3]), 8);
+  a = vdotq_s32(vdotq_s32(a, l0, xl[0]), h0, xl[1]);
+  b = vdotq_s32(vdotq_s32(b, l1, xl[2]), h1, xl[3]);
+  return vpaddq_s32(a, b);
+}
+// two rows at a time: the activation planes and block scales loaded once for both
+static void nv_rows_i16(const uint8_t* codes, const uint8_t* sc, float post, int K, int r0, int r1, const XQ& x, float* y) {
+  const int NB = K / XB, rb = K / 2, rs = K / 16;
+  const int8x16_t lut = vld1q_s8(E2M1X2);
+  int r = r0;
+  for (; r + 2 <= r1; r += 2) {
+    const uint8_t* cA = codes + (size_t)r * rb;
+    const uint8_t* cB = cA + rb;
+    const uint8_t* sA = sc + (size_t)r * rs;
+    const uint8_t* sB = sA + rs;
+    float32x4_t a0 = vdupq_n_f32(0), a1 = a0, b0 = a0, b1 = a0;
+    int b = 0;
+    auto blk2 = [&](int bb, float32x4_t sa, float32x4_t sb, float32x4_t& accA, float32x4_t& accB) {
+      const int8_t* xh = x.hp + XB * bb;
+      const int8_t* xl = x.lp + XB * bb;
+      int8x16_t H[4] = {vld1q_s8(xh), vld1q_s8(xh + 16), vld1q_s8(xh + 32), vld1q_s8(xh + 48)};
+      int8x16_t L[4] = {vld1q_s8(xl), vld1q_s8(xl + 16), vld1q_s8(xl + 32), vld1q_s8(xl + 48)};
+      const float d = x.d[bb];
+      int32x4_t dA = blk_i16(cA + 32 * bb, H, L, lut), dB = blk_i16(cB + 32 * bb, H, L, lut);
+      accA = vaddq_f32(accA, vmulq_f32(vcvtq_f32_s32(dA), vmulq_n_f32(sa, d)));
+      accB = vaddq_f32(accB, vmulq_f32(vcvtq_f32_s32(dB), vmulq_n_f32(sb, d)));
+    };
+    for (const int nb4 = NB & ~3; b < nb4; b += 2) {  // as mv_nvfp4: blocks 4i, 4i + 2 into the first sums, 4i + 1,
+      float32x4_t sa[2], sb[2];                        // 4i + 3 into the second, the rest into the first; scales
+      e4m3x8(sA + 4 * b, sa);                          // converted 8 at a time (fewer live registers than 16)
+      e4m3x8(sB + 4 * b, sb);
+      blk2(b, sa[0], sb[0], a0, b0);
+      blk2(b + 1, sa[1], sb[1], a1, b1);
+    }
+    for (; b < NB; b++) blk2(b, e4m3x4s(sA + 4 * b), e4m3x4s(sB + 4 * b), a0, b0);
+    y[r - r0] = vaddvq_f32(vaddq_f32(a0, a1)) * post;
+    y[r + 1 - r0] = vaddvq_f32(vaddq_f32(b0, b1)) * post;
+  }
+  for (; r < r1; r++) {
+    const uint8_t* c = codes + (size_t)r * rb;
+    const uint8_t* s = sc + (size_t)r * rs;
+    float32x4_t acc0 = vdupq_n_f32(0), acc1 = acc0;
+    int b = 0;
+    auto blk = [&](int bb, float32x4_t scale) -> float32x4_t {
+      const int8_t* xh = x.hp + XB * bb;
+      const int8_t* xl = x.lp + XB * bb;
+      int8x16_t H[4] = {vld1q_s8(xh), vld1q_s8(xh + 16), vld1q_s8(xh + 32), vld1q_s8(xh + 48)};
+      int8x16_t L[4] = {vld1q_s8(xl), vld1q_s8(xl + 16), vld1q_s8(xl + 32), vld1q_s8(xl + 48)};
+      return vmulq_f32(vcvtq_f32_s32(blk_i16(c + 32 * bb, H, L, lut)), vmulq_n_f32(scale, x.d[bb]));
+    };
+    for (; b + 4 <= NB; b += 4) {
+      float32x4_t sv[4];
+      e4m3x16s(s + 4 * b, sv);
+      acc0 = vaddq_f32(acc0, blk(b, sv[0]));
+      acc1 = vaddq_f32(acc1, blk(b + 1, sv[1]));
+      acc0 = vaddq_f32(acc0, blk(b + 2, sv[2]));
+      acc1 = vaddq_f32(acc1, blk(b + 3, sv[3]));
+    }
+    for (; b < NB; b++) acc0 = vaddq_f32(acc0, blk(b, e4m3x4s(s + 4 * b)));
+    y[r - r0] = vaddvq_f32(vaddq_f32(acc0, acc1)) * post;
+  }
+}
+
 void mv_nvfp4(const uint8_t* codes, const uint8_t* sc, float gmul, int K, int r0, int r1, const XQ& x, float* y) {
   const float post = gmul * 128.f;  // x 0.5 (the table holds 2x) x 256 (the e4m3 conversion returns 2^-8 x)
   if (x.prec == Prec::F16) nv_rows<0>(codes, sc, post, K, r0, r1, x, y);
   else if (x.prec == Prec::I8) nv_rows<1>(codes, sc, post, K, r0, r1, x, y);
-  else nv_rows<2>(codes, sc, post, K, r0, r1, x, y);
+  else nv_rows_i16(codes, sc, post, K, r0, r1, x, y);
 }
 
 // ------------------------------------------------------------------------------------------------ MXFP8

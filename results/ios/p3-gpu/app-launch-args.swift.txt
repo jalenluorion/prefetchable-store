@@ -1,0 +1,21 @@
+// For the phone builder: the app side of the prefill GPU split (phone-store ios/PhoneStoreApp, DmengChatEngine.swift).
+// Not applied by this branch. Insert next to the other launch-argument options in the DmengOptions setup (beside
+// `o.prefillThreads = LaunchArgs.value("-dmengPrefillThreads")...`). The fields come from apps/ios/DmengKit/Dmeng.swift
+// on branch phone-gpu (prefillGpuFrac, prefillGpuExperts, prefillGpuMin, prefillGpuIntKernel); all default to off.
+
+        // P3: the batched prefill split with the GPU (exact: the GPU's rows are the CPU kernels' bits). Off unless asked
+        // for while it is measured on the A16; turn the #if block on once the 472-token row is measured.
+        o.prefillGpuFrac = LaunchArgs.value("-dmengGpuFrac").flatMap { Double($0) } ?? 0         // attention projections
+        o.prefillGpuExperts = LaunchArgs.value("-dmengGpuExperts").flatMap { Double($0) } ?? 0   // experts (slab + shared)
+        o.prefillGpuMin = LaunchArgs.value("-dmengGpuMin").flatMap { Int($0) } ?? 0              // 0: 256 positions
+        o.prefillGpuIntKernel = LaunchArgs.value("-dmengGpuKernel") == "integer"
+        // #if os(iOS) && !targetEnvironment(macCatalyst)
+        // if LaunchArgs.value("-dmengGpuFrac") == nil && LaunchArgs.value("-dmengGpuExperts") == nil {
+        //     o.prefillGpuFrac = <measured>; o.prefillGpuExperts = <measured>
+        // }
+        // #endif
+
+// The prefill log line the app already writes ("DMENG PREFILL " + m.lastPrefillJSON) then carries, under
+// detail.gpu, per part (attn / experts): frac, gmac_gpu, gmac_cpu, wait_ms (the CPU waiting for the GPU's rows after
+// its own), stage_ms, sets, failed (sets the GPU did not complete, e.g. in the background: their rows were computed on
+// the CPU), and the kernel ("matrix" or "integer"). The open log line shows "prefill GPU split on (... GB wrapped)".

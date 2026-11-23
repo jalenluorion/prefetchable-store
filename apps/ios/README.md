@@ -12,7 +12,7 @@ phone yet). Results: `results/ios/p0/P0.md` (measurements), `results/ios/p1/P1.m
 | app sources | phone-store repo, `ios/PhoneStoreApp` (`DmengChatEngine.swift`, `-engine dmeng`) | the app (UI, tokenizer and chat template, tool loop, the MLX engine beside it) still lives there |
 | text codec | phone-store `native/Sources/PhoneStore/DmengSupport.swift` (`TextCodec`) | the tokenizer is swift-transformers, already a dependency of the app's `PhoneStore` package |
 
-How they connect: phone-store's `native/dmeng` is a symbolic link to this repo's checkout (the `port-ios` worktree
+How they connect: phone-store's `native/dmeng` is a symbolic link to this repo's checkout (a checkout of the `port-ios` branch
 today); `native/Package.swift` depends on it with `.package(path: "dmeng")` and links the `DmengKit` product into
 `PhoneStore`, which re-exports it (`@_exported import DmengKit`), so the app target needs no project change beyond
 the new source file. Point the link at another checkout to build against it.

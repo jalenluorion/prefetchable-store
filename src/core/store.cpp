@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <mach/mach.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <mach/vm_map.h>
 #include <pthread.h>
 #include <pthread/qos.h>
@@ -88,6 +89,27 @@ void Readers::stop() {
   th_.clear();
 }
 
+void Readers::tick_(int64_t t) {
+  if (dt_last_) dt_ns_[dt_state_] += (uint64_t)std::max<int64_t>(0, t - dt_last_);
+  dt_last_ = t;
+  const int inf = inflight_[0] + inflight_[1] + inflight_[2];
+  const int s = inf > 0 ? 1 + std::min(inf, 4) : (urgent_.empty() && normal_.empty() && bg_.empty() ? 0 : 1);
+  if (s >= 2 && dt_state_ < 2) dt_ns_[6]++;
+  dt_state_ = s;
+}
+
+void Readers::depth_times(uint64_t out[7]) {
+  std::lock_guard<std::mutex> lk(mu_);
+  const int64_t t = now_ns();
+  for (int i = 0; i < 7; i++) out[i] = dt_ns_[i];
+  if (dt_last_) out[dt_state_] += (uint64_t)std::max<int64_t>(0, t - dt_last_);
+}
+
+bool Readers::saturated() {
+  std::lock_guard<std::mutex> lk(mu_);
+  return inflight_[0] + inflight_[1] + inflight_[2] >= (int)th_.size() && !(urgent_.empty() && normal_.empty());
+}
+
 uint64_t Readers::busy_wall() {
   std::lock_guard<std::mutex> lk(mu_);
   return busy_wall_ns_;
@@ -99,6 +121,7 @@ void Readers::submit_cls(const Job& j, int cls) {
     auto& q = cls == 0 ? urgent_ : cls == 1 ? normal_ : bg_;
     q.push_back(j);
     q.back().t_sub = now_ns();
+    tick_(q.back().t_sub);
   }
   cv_.notify_one();
 }
@@ -117,6 +140,7 @@ bool Readers::promote(int pool, int slot) {
         ++it;
       }
     }
+  if (moved) tick_(now_ns());
   if (moved) cv_.notify_all();  // an urgent job may start even where the speculative limits hold readers back
   return moved;
 }
@@ -129,6 +153,7 @@ bool Readers::cancel(int pool, int slot) {
   if (q == 0 || q != pending_[pool][slot].load(std::memory_order_acquire)) return false;  // a part has started
   for (auto* d : {&normal_, &bg_})
     for (auto it = d->begin(); it != d->end();) it = it->pool == pool && it->slot == slot ? d->erase(it) : it + 1;
+  tick_(now_ns());
   return true;
 }
 
@@ -150,6 +175,7 @@ void Readers::cancel_stale(long step, std::vector<std::pair<int, int>>& out) {
   for (auto* d : {&normal_, &bg_})
     for (auto it = d->begin(); it != d->end();)
       it = std::find(out.begin(), out.end(), std::make_pair(it->pool, it->slot)) != out.end() ? d->erase(it) : it + 1;
+  tick_(now_ns());
 }
 
 bool Readers::can_spec() const {
@@ -183,6 +209,11 @@ void Readers::loop() {
                                                                                                               : QOS_CLASS_USER_INITIATED;
   }
   pthread_set_qos_class_self_np((qos_class_t)q, 0);
+  // io_low (CoreOpts::reader_io_low; default on iOS only): the readers' disk I/O one tier below the threads' own
+  // (IOPOL_STANDARD; the CPU QoS above is kept). iOS (P2): at the app's tier, the main thread's page-ins waited behind the
+  // queued 1.77 MB records for seconds. Off on the Mac: there the readers are the critical path, and a lower tier is
+  // throttled whenever another process touches the drive.
+  if (io_low) setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_THREAD, IOPOL_STANDARD);
   std::vector<uint8_t> scratch;  // Mem::FILE: the pread's destination (the pages stay in the file cache)
   for (;;) {
     Job j;
@@ -213,6 +244,7 @@ void Readers::loop() {
       t0 = now_ns();
       if (inflight_[0] + inflight_[1] + inflight_[2] == 0) busy_t0_ = t0;
       inflight_[cls]++;
+      tick_(t0);
     }
     q_ns[cls].fetch_add((uint64_t)std::max<int64_t>(0, t0 - j.t_sub), std::memory_order_relaxed);
     bool skip_piece = skip_;
@@ -255,6 +287,7 @@ void Readers::loop() {
       std::lock_guard<std::mutex> lk(mu_);
       inflight_[cls]--;
       if (inflight_[0] + inflight_[1] + inflight_[2] == 0) busy_wall_ns_ += (uint64_t)(t1 - busy_t0_);
+      tick_(t1);
       wake = ((max_spec < (1 << 30) || excl) && !normal_.empty()) || !bg_.empty();
     }
     if (wake) cv_.notify_all();
@@ -324,7 +357,7 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
   char buf[4096];
   for (int L = 0; L < NL; L++) {
     snprintf(buf, sizeof buf, layer_file.c_str(), L);
-    std::string p = dir + "/" + buf;
+    std::string p = dir + "/" + (L < (int)layer_paths.size() ? layer_paths[L] : std::string(buf));
     int fd = open(p.c_str(), O_RDONLY);
     if (fd < 0) {
       err = "cannot open " + p;
@@ -712,7 +745,7 @@ void Cache::use(int L, int slot, long t_use, long step) {
   x.pf_unused = false;
 }
 
-int Cache::name(int L, int e, long step) {
+int Cache::name(int L, int e, long step, int reserve) {
   SlotPool& S = pool(L);
   int sl = tab[(size_t)L * NE + e];
   if (sl >= 0) {
@@ -721,7 +754,7 @@ int Cache::name(int L, int e, long step) {
     return sl;
   }
   evict_pf_ctx = true;
-  int v = victim(L, 2 * K + extra_reserve[layer_pool[L]]);  // a name leaves the slots the misses and holds need
+  int v = victim(L, reserve >= 0 ? reserve : 2 * K + extra_reserve[layer_pool[L]]);  // a name leaves the slots the misses and holds need
   evict_pf_ctx = false;
   if (v < 0) {
     st.n_pf_dropped++;

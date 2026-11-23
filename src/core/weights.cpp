@@ -47,7 +47,8 @@ Mem mem_of(const std::string& s) {
 // ---------------------------------------------------------------------------------------------- weights
 size_t Weight::bytes() const {
   switch (kind) {
-    case AFF8: return (size_t)rows * cols + (size_t)rows * (cols / 64) * 4;
+    case AFF8:
+    case AFF8S: return (size_t)rows * cols + (size_t)rows * (cols / 64) * 4;
     case AFF4: return (size_t)rows * cols / 2 + (size_t)rows * (cols / 64) * 4;
     case NVFP4: return (size_t)rows * cols / 2 + (size_t)rows * (cols / 16);
     case MXFP8: return (size_t)rows * cols + (size_t)rows * (cols / 32);
@@ -60,6 +61,15 @@ size_t Weight::bytes() const {
 void mv(const Weight& w, int r0, int r1, const XQ* xq, const float* xf, float* y, bool ref) {
   switch (w.kind) {
     case Weight::AFF4: mv_aff4(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *xq, y); break;
+    case Weight::AFF8S:
+      if (!ref && xq && xq->prec == Prec::I16) {
+        mv_aff8s_i16(w.c, w.srows, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *xq, y);
+      } else {  // other precisions and the reference path: the AFF8 bytes of these rows, rebuilt, through the AFF8 kernels
+        static thread_local std::vector<uint8_t> buf;
+        const Weight v = aff8s_view(w, r0, r1, buf);
+        mv(v, 0, r1 - r0, xq, xf, y, ref);
+      }
+      break;
     case Weight::AFF8:
       if (ref && xf) kref_aff8(w, r0, r1, xf, y);
       else mv_aff8(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *xq, y);
@@ -78,6 +88,70 @@ void mv(const Weight& w, int r0, int r1, const XQ* xq, const float* xf, float* y
     case Weight::F32: mv_f32((const float*)w.w, w.cols, r0, r1, xf, y); break;
     default: fprintf(stderr, "mv: empty weight\n"); abort();
   }
+}
+
+// ---------------------------------------------------------------------------------------------- AFF8S (split planes)
+namespace {
+// one 64-group of AFF8 bytes (64 elements) <-> its 32 high-plane and 32 low-plane bytes
+inline void split_group(const uint8_t* c, uint8_t* h, uint8_t* l) {
+  for (int j = 0; j < 16; j++) {
+    for (int part = 0; part < 2; part++) {
+      const uint8_t a = c[32 * part + j], b = c[32 * part + 16 + j];
+      h[16 * part + j] = (uint8_t)((a >> 4) | (b & 0xF0));
+      l[16 * part + j] = (uint8_t)((a & 0x0F) | (b << 4));
+    }
+  }
+}
+inline void join_group(const uint8_t* h, const uint8_t* l, uint8_t* c) {  // (mv_aff8s_i16's rebuild)
+  const uint8x16_t h0 = vld1q_u8(h), h1 = vld1q_u8(h + 16), l0 = vld1q_u8(l), l1 = vld1q_u8(l + 16);
+  vst1q_u8(c, vsliq_n_u8(l0, h0, 4));
+  vst1q_u8(c + 16, vsriq_n_u8(h0, l0, 4));
+  vst1q_u8(c + 32, vsliq_n_u8(l1, h1, 4));
+  vst1q_u8(c + 48, vsriq_n_u8(h1, l1, 4));
+}
+}  // namespace
+
+bool aff8s_split(Weight& w, Pool& pool, std::string& err) {
+  if (w.kind != Weight::AFF8 || w.cols % XB) {
+    err = "aff8s_split: needs an 8-bit matrix with whole 64-groups";
+    return false;
+  }
+  const int K = w.cols, nblk = (w.rows + 63) / 64, NG = K / XB;
+  const size_t half = (size_t)K / 2;
+  uint8_t* base = const_cast<uint8_t*>(w.c);
+  parallel_for(pool, nblk, [&](int b) {
+    static thread_local std::vector<uint8_t> tmp;
+    const int r0 = b * 64, nb = std::min(64, w.rows - r0);
+    uint8_t* blk = base + (size_t)r0 * K;
+    tmp.assign(blk, blk + (size_t)nb * K);
+    uint8_t *hp = blk, *lp = blk + (size_t)nb * half;
+    for (int i = 0; i < nb; i++)
+      for (int g = 0; g < NG; g++)
+        split_group(tmp.data() + (size_t)i * K + (size_t)g * XB, hp + (size_t)i * half + 32 * g, lp + (size_t)i * half + 32 * g);
+  });
+  w.kind = Weight::AFF8S;
+  w.srows = w.rows;
+  return true;
+}
+
+void aff8s_rows(const Weight& w, int r0, int r1, uint8_t* out) {
+  const int K = w.cols, NG = K / XB;
+  for (int r = r0; r < r1; r++) {
+    const uint8_t *h = aff8s_hi(w, r), *l = aff8s_lo(w, r);
+    for (int g = 0; g < NG; g++) join_group(h + 32 * g, l + 32 * g, out + (size_t)(r - r0) * K + (size_t)g * XB);
+  }
+}
+
+Weight aff8s_view(const Weight& w, int r0, int r1, std::vector<uint8_t>& buf) {
+  buf.resize((size_t)(r1 - r0) * w.cols);
+  aff8s_rows(w, r0, r1, buf.data());
+  Weight v = w;
+  v.kind = Weight::AFF8;
+  v.rows = r1 - r0;
+  v.c = buf.data();
+  v.s = (const _Float16*)w.s + (size_t)r0 * (w.cols / XB);
+  v.b = (const _Float16*)w.b + (size_t)r0 * (w.cols / XB);
+  return v;
 }
 
 XBuf::~XBuf() { std::free(mem); }
@@ -297,22 +371,61 @@ EmbedRows::~EmbedRows() {
 
 // ---------------------------------------------------------------------------------------------- row phases
 namespace {
+// The claim schedule of the row phases. The rows of the jobs, in order, are cut into units of chunk / 4 rows (each job's
+// last unit may be shorter); claims take 4 units while more than 4 units per thread remain, then single units, so the
+// last claims are short and a slow core (an efficiency core) holds the join for a quarter of a chunk instead of a whole
+// one. Every row is still computed by one mv call on one thread: the rows' bits do not depend on the schedule.
+struct RowSched {
+  int ur = 1, nb = 0, claims = 0;
+  const int* ustart = nullptr;  // [n + 1] unit prefix over the jobs
+  int n = 0;
+  void init(const Job* jobs, int nj, int chunk, int nthreads, int* us) {
+    ur = std::max(1, chunk / 4);
+    n = nj;
+    ustart = us;
+    us[0] = 0;
+    for (int i = 0; i < nj; i++) us[i + 1] = us[i] + (jobs[i].w->rows + ur - 1) / ur;
+    const int U = us[nj], tail = 4 * nthreads;
+    nb = U > tail ? (U - tail) / 4 : 0;
+    claims = nb + (U - 4 * nb);
+  }
+  // claim i -> units [u0, u1)
+  void units(int i, int& u0, int& u1) const {
+    if (i < nb) u0 = 4 * i, u1 = u0 + 4;
+    else u0 = 4 * nb + (i - nb), u1 = u0 + 1;
+  }
+};
+// rows of units [u0, u1): one mv call per job they cover
+inline void run_units(const Job* jobs, const RowSched& S, int u0, int u1, bool ref) {
+  int i = 0;
+  while (u0 >= S.ustart[i + 1]) i++;
+  while (u0 < u1) {
+    const int e = std::min(u1, S.ustart[i + 1]);
+    const Job& J = jobs[i];
+    const int r0 = (u0 - S.ustart[i]) * S.ur, r1 = std::min(J.w->rows, (e - S.ustart[i]) * S.ur);
+    mv(*J.w, r0, r1, J.xq, J.xf, J.out + r0, ref);
+    u0 = e;
+    i++;
+  }
+}
+
+}  // namespace
+std::atomic<const std::atomic<int>*> g_rows_stop{nullptr};
+namespace {
+
 struct RowsCtx {
   const Job* j;
-  int n, chunk;
   bool ref;
-  int* start;
+  RowSched S;
   alignas(128) std::atomic<int> next{0};
 };
 void phase_rows(void* p, int, int) {
   RowsCtx& C = *(RowsCtx*)p;
-  const int total = C.start[C.n];
-  for (int ch; (ch = C.next.fetch_add(1, std::memory_order_relaxed)) < total;) {
-    int i = 0;
-    while (ch >= C.start[i + 1]) i++;
-    const Job& J = C.j[i];
-    int r0 = (ch - C.start[i]) * C.chunk, r1 = std::min(J.w->rows, r0 + C.chunk);
-    mv(*J.w, r0, r1, J.xq, J.xf, J.out + r0, C.ref);
+  for (int ch; (ch = C.next.fetch_add(1, std::memory_order_relaxed)) < C.S.claims;) {
+    if (rows_stop()) break;
+    int u0, u1;
+    C.S.units(ch, u0, u1);
+    run_units(C.j, C.S, u0, u1, C.ref);
   }
 }
 }  // namespace
@@ -320,52 +433,55 @@ void phase_rows(void* p, int, int) {
 void run_rows(Pool& pool, const Job* jobs, int n, int chunk, bool ref, double* bytes) {
   RowsCtx C;
   C.j = jobs;
-  C.n = n;
-  C.chunk = chunk;
   C.ref = ref;
   int small[65];
   std::vector<int> big;
   if (n > 64) big.resize(n + 1);
-  C.start = n > 64 ? big.data() : small;
-  C.start[0] = 0;
-  for (int i = 0; i < n; i++) {
-    C.start[i + 1] = C.start[i] + (jobs[i].w->rows + chunk - 1) / chunk;
-    if (bytes) *bytes += (double)jobs[i].w->bytes();
-  }
-  pool.run(phase_rows, &C);
+  C.S.init(jobs, n, chunk, pool.size(), n > 64 ? big.data() : small);
+  if (bytes)
+    for (int i = 0; i < n; i++) *bytes += (double)jobs[i].w->bytes();
+  pool.run_any(phase_rows, &C);
 }
 
 namespace {
 struct RowsQCtx {
   const Job* j;
-  int n, chunk;
   bool ref;
-  int* start;
+  RowSched S;
   XBuf* const* qs;
   const float* const* xs;
   int qstart[9];  // block prefix over the inputs
-  std::atomic<int> left{0};
+  const int8_t* jq;  // per job: the input (0..7) its rows wait for, or -1 (an input not quantised in this call)
+  std::atomic<int> left[8];
   alignas(128) std::atomic<int> next{0};
 };
 void phase_rows_q(void* p, int, int) {
   RowsQCtx& C = *(RowsQCtx*)p;
-  const int nqb = C.qstart[8], total = nqb + C.start[C.n];
+  const int nqb = C.qstart[8], total = nqb + C.S.claims;
   for (int ch; (ch = C.next.fetch_add(1, std::memory_order_relaxed)) < total;) {
     if (ch < nqb) {
       int i = 0;
       while (ch >= C.qstart[i + 1]) i++;
       const int b = ch - C.qstart[i];
       xq_block(C.qs[i]->q, b, C.xs[i] + XB * b);
-      C.left.fetch_sub(1, std::memory_order_release);
+      C.left[i].fetch_sub(1, std::memory_order_release);
       continue;
     }
-    while (C.left.load(std::memory_order_acquire) > 0) __builtin_arm_yield();
-    const int c2 = ch - nqb;
+    if (rows_stop()) break;
+    int u0, u1;
+    C.S.units(ch - nqb, u0, u1);
     int i = 0;
-    while (c2 >= C.start[i + 1]) i++;
-    const Job& J = C.j[i];
-    const int r0 = (c2 - C.start[i]) * C.chunk, r1 = std::min(J.w->rows, r0 + C.chunk);
-    mv(*J.w, r0, r1, J.xq, J.xf, J.out + r0, C.ref);
+    while (u0 >= C.S.ustart[i + 1]) i++;
+    while (u0 < u1) {  // run_units, each job's rows after only its own input's blocks
+      const int e = std::min(u1, C.S.ustart[i + 1]);
+      if (C.jq[i] >= 0)  // only this job's own input: the other inputs' blocks may still be in progress
+        while (C.left[C.jq[i]].load(std::memory_order_acquire) > 0) __builtin_arm_yield();
+      const Job& J = C.j[i];
+      const int r0 = (u0 - C.S.ustart[i]) * C.S.ur, r1 = std::min(J.w->rows, (e - C.S.ustart[i]) * C.S.ur);
+      mv(*J.w, r0, r1, J.xq, J.xf, J.out + r0, C.ref);
+      u0 = e;
+      i++;
+    }
   }
 }
 
@@ -396,28 +512,33 @@ void run_rows_q(Pool& pool, const Job* jobs, int n, int chunk, bool ref, double*
   }
   RowsQCtx C;
   C.j = jobs;
-  C.n = n;
-  C.chunk = chunk;
   C.ref = ref;
   C.qs = qs;
   C.xs = xs;
   int small[65];
   std::vector<int> big;
   if (n > 64) big.resize(n + 1);
-  C.start = n > 64 ? big.data() : small;
-  C.start[0] = 0;
-  for (int i = 0; i < n; i++) {
-    C.start[i + 1] = C.start[i] + (jobs[i].w->rows + chunk - 1) / chunk;
-    if (bytes) *bytes += (double)jobs[i].w->bytes();
-  }
+  C.S.init(jobs, n, chunk, pool.size(), n > 64 ? big.data() : small);
+  if (bytes)
+    for (int i = 0; i < n; i++) *bytes += (double)jobs[i].w->bytes();
   C.qstart[0] = 0;
   for (int i = 0; i < 8; i++) {
     const int nb = i < nq ? Ks[i] / XB : 0;
     if (i < nq) qs[i]->q.K = Ks[i];
     C.qstart[i + 1] = C.qstart[i] + nb;
+    C.left[i].store(nb, std::memory_order_relaxed);
   }
-  C.left.store(C.qstart[8], std::memory_order_relaxed);
-  pool.run(phase_rows_q, &C);
+  int8_t jsmall[64];
+  std::vector<int8_t> jbig;
+  if (n > 64) jbig.resize(n);
+  int8_t* jq = n > 64 ? jbig.data() : jsmall;
+  for (int k = 0; k < n; k++) {
+    jq[k] = -1;
+    for (int i = 0; i < nq; i++)
+      if (jobs[k].xq == &qs[i]->q) jq[k] = (int8_t)i;
+  }
+  C.jq = jq;
+  pool.run_any(phase_rows_q, &C);
 }
 
 void run_rows_post(Pool& pool, const Job& job, int chunk, bool ref, double* bytes, void (*post)(void*, int, int), void* ctx) {
@@ -429,7 +550,7 @@ void run_rows_post(Pool& pool, const Job& job, int chunk, bool ref, double* byte
   C.post = post;
   C.ctx = ctx;
   if (bytes) *bytes += (double)job.w->bytes();
-  pool.run(phase_rows_post, &C);
+  pool.run_any(phase_rows_post, &C);
 }
 
 void mv_multi(const Weight& w, int r0, int r1, const XQ* const* xq, const float* const* xf, int n, float* const* y, bool ref) {
@@ -438,7 +559,13 @@ void mv_multi(const Weight& w, int r0, int r1, const XQ* const* xq, const float*
     const int k = std::min(8, n - k0);
     float* ys[8];
     for (int i = 0; i < k; i++) ys[i] = y[k0 + i];
-    if (i16 && w.kind == Weight::AFF8) {
+    if (w.kind == Weight::AFF8S) {  // the rows' AFF8 bytes rebuilt, then the AFF8 paths
+      static thread_local std::vector<uint8_t> buf;
+      const Weight v = aff8s_view(w, r0, r1, buf);
+      const XQ* const* xk = xq ? xq + k0 : nullptr;
+      const float* const* fk = xf ? xf + k0 : nullptr;
+      mv_multi(v, 0, r1 - r0, xk, fk, k, ys, ref);
+    } else if (i16 && w.kind == Weight::AFF8) {
       mv_aff8_multi(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, xq + k0, k, ys);
     } else if (i16 && w.kind == Weight::NVFP4) {
       mv_nvfp4_multi(w.c, (const uint8_t*)w.s, w.gmul, w.cols, r0, r1, xq + k0, k, ys);
@@ -468,10 +595,16 @@ void phase_rows_n(void* p, int, int) {
     while (ch >= C.start[i + 1]) i++;
     const JobN& J = C.j[i];
     const Weight& w = *J.w;
-    const int r0 = (ch - C.start[i]) * C.chunk, r1 = std::min(w.rows, r0 + C.chunk);
-    if (!C.ref && J.xb && w.kind == Weight::AFF8 && !(r0 & 3) && !(r1 & 3) && w.cols % 256 == 0) {
+    const int r0 = J.r0 + (ch - C.start[i]) * C.chunk, r1 = std::min(J.r1 < 0 ? w.rows : J.r1, r0 + C.chunk);
+    if (!C.ref && J.xb && (w.kind == Weight::AFF8 || w.kind == Weight::AFF8S) && !(r0 & 3) && !(r1 & 3) && w.cols % 256 == 0) {
       tmp.resize((size_t)J.n * C.chunk);
-      gemm_aff8_i16(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *J.xb, 0, J.n, tmp.data(), C.chunk);
+      if (w.kind == Weight::AFF8S) {  // the rows' AFF8 bytes rebuilt, then the same gemm
+        static thread_local std::vector<uint8_t> buf;
+        const Weight v = aff8s_view(w, r0, r1, buf);
+        gemm_aff8_i16(v.c, (const _Float16*)v.s, (const _Float16*)v.b, v.cols, 0, r1 - r0, *J.xb, 0, J.n, tmp.data(), C.chunk);
+      } else {
+        gemm_aff8_i16(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *J.xb, 0, J.n, tmp.data(), C.chunk);
+      }
       for (int k = 0; k < J.n; k++) std::memcpy(J.out[k] + r0, tmp.data() + (size_t)k * C.chunk, sizeof(float) * (r1 - r0));
       continue;
     }
@@ -492,10 +625,10 @@ void run_rows_n(Pool& pool, const JobN* jobs, int nj, int chunk, bool ref, doubl
   C.start = start.data();
   C.start[0] = 0;
   for (int i = 0; i < nj; i++) {
-    C.start[i + 1] = C.start[i] + (jobs[i].w->rows + chunk - 1) / chunk;
+    C.start[i + 1] = C.start[i] + (std::max(0, (jobs[i].r1 < 0 ? jobs[i].w->rows : jobs[i].r1) - jobs[i].r0) + chunk - 1) / chunk;
     if (bytes) *bytes += (double)jobs[i].w->bytes();
   }
-  pool.run(phase_rows_n, &C);
+  pool.run_any(phase_rows_n, &C);
 }
 
 // ---------------------------------------------------------------------------------------------- numerics
@@ -581,6 +714,42 @@ void kref_mxfp8(const uint8_t* codes, const uint8_t* sc, int K, int r0, int r1, 
     }
     y[r - r0] = t;
   }
+}
+
+void quant_aff8(Pool& pool, const uint16_t* W, int R, int K, uint8_t* c, _Float16* sc, _Float16* bi) {
+  const int NG = K / 64;
+  parallel_for(pool, R, [&](int r) {
+    for (int g = 0; g < NG; g++) {
+      const uint16_t* w = W + (size_t)r * K + 64 * g;
+      float mn = INFINITY, mx = -INFINITY;
+      for (int i = 0; i < 64; i++) {
+        const float v = bf16_to_f32(w[i]);
+        mn = std::min(mn, v), mx = std::max(mx, v);
+      }
+      const _Float16 b = (_Float16)mn, s = (_Float16)((mx - mn) / 255.f);
+      const float bf = (float)b, sf = (float)s;
+      sc[(size_t)r * NG + g] = s;
+      bi[(size_t)r * NG + g] = b;
+      for (int i = 0; i < 64; i++) {
+        const float q = sf > 0 ? std::round((bf16_to_f32(w[i]) - bf) / sf) : 0.f;
+        c[(size_t)r * K + 64 * g + i] = (uint8_t)std::min(255.f, std::max(0.f, q));
+      }
+    }
+  });
+}
+
+void OwnedAff8::from_bf16(Pool& pool, const uint16_t* bf16, int R, int K) {
+  c.assign((size_t)R * K, 0);
+  s.assign((size_t)R * (K / 64), (_Float16)0);
+  b.assign((size_t)R * (K / 64), (_Float16)0);
+  quant_aff8(pool, bf16, R, K, c.data(), s.data(), b.data());
+  w = Weight();
+  w.kind = Weight::AFF8;
+  w.rows = R;
+  w.cols = K;
+  w.c = c.data();
+  w.s = s.data();
+  w.b = b.data();
 }
 
 }  // namespace dm

@@ -118,6 +118,49 @@ std::string cmp(const Snap& a, const Snap& b, bool& ok) {
 }
 }  // namespace
 
+int check_ckpt(ModelLM& lm, const SessionOptions& so0, const std::vector<int>& L0, int chunk, int span, int stream, int gen) {
+  const int V = lm.info().vocab, n = (int)L0.size(), d = n * 6 / 10;
+  std::vector<int> L(L0);
+  for (int& t : L) t %= V;  // (ids of a larger vocabulary folded into this model's)
+  SessionOptions so = so0;
+  so.disk_dir = "";  // memory checkpoints only
+  std::vector<int> D(L.begin(), L.begin() + d);  // diverges from L at 60% of its length
+  for (int i = d; i < n; i++) D.push_back((L[i] + 1) % V);
+  std::vector<float> lg(V);
+  auto cold = [&](const std::vector<int>& ids, Snap& s) {  // token by token from an empty state
+    lm.reset();
+    set_prefill(lm.model(), 1, 1, stream);
+    lm.prefill(ids.data(), (int)ids.size(), lg.data(), {}, nullptr, nullptr);
+    snap_and_gen(lm, nullptr, lg, gen, s);
+  };
+  Snap rl, rd;
+  cold(L, rl);
+  cold(D, rd);
+  lm.reset();
+  set_prefill(lm.model(), chunk, span, stream);
+  PrefixCache pc(lm, so);
+  bool ok = true;
+  std::ostringstream out;
+  out << "{\"mode\":\"check_ckpt\",\"model\":\"" << lm.info().name << "\",\"n\":" << n << ",\"diverge_at\":" << d << ",\"ckpt_every\":" << so.ckpt_every
+      << ",\"ckpt_min\":" << so.ckpt_min;
+  const char* names[3] = {"long", "identical", "diverging"};
+  const std::vector<int>* reqs[3] = {&L, &L, &D};
+  const Snap* refs[3] = {&rl, &rl, &rd};
+  for (int k = 0; k < 3; k++) {
+    SyncResult r = pc.sync(*reqs[k], {}, lg.data());
+    Snap got;
+    snap_and_gen(lm, &pc, lg, gen, got);  // the reply (moves the live sequence on, as a served request does)
+    const bool restored = k == 0 || (r.reused > 0 && r.reused <= (k == 2 ? d : n));
+    ok = ok && restored;
+    out << ",\"" << names[k] << "\":{\"cmp\":" << cmp(*refs[k], got, ok) << ",\"reused\":" << r.reused << ",\"computed\":" << r.computed
+        << ",\"source\":\"" << r.source << "\",\"restored_from_a_checkpoint\":" << (restored ? "true" : "false") << "}";
+  }
+  out << ",\"session\":" << pc.stats_json() << ",\"passed\":" << (ok ? "true" : "false") << "}";
+  printf("%s\n", out.str().c_str());
+  fflush(stdout);
+  return ok ? 0 : 1;
+}
+
 int check_ahead(ModelLM& lm, const SessionOptions& so0, const std::vector<int>& A, const std::vector<int>& B, int ahead_len, int chunk,
                 int span, int ahead_span, int stream, int gen) {
   const int V = lm.info().vocab;

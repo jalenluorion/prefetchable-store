@@ -38,7 +38,7 @@ static bool exists(const std::string& p) {
 }
 
 bool resolve_model(const std::string& dir, const std::string& resident, Mem res_mem, LoadOpts& lo, std::string& family,
-                   std::string& err, const std::string& derived_dir, const std::string& emb_file) {
+                   std::string& err, const std::string& derived_dir, const std::string& emb_file, const std::string& profile) {
   lo.dir = dir;
   lo.res_mem = res_mem;
   lo.cfg.clear();
@@ -50,6 +50,7 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   ms::Manifest m;
   if (!m.load(dir, err)) return false;
   m.cache_override = derived_dir;
+  if (!m.apply_profile_experts(profile, err)) return false;  // a profile's own record formats / files (phone-small)
   if (!emb_file.empty()) {
     m.emb_file = emb_file;
   } else if (!exists(dir + "/" + m.emb_file) && exists(dir + "/embeddings.safetensors")) {

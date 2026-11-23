@@ -49,6 +49,11 @@ class AheadRunner {
 // generated, ahead() of B's prefix cancelled once inside a span and resumed, then B synced) against B prefilled token by
 // token from an empty state: logits, every fixed-state and KV byte, the greedy continuation. Also the request path
 // without ahead(). Returns 0 only if both are bit-identical to the reference.
+// A long request L, the identical request, then one that diverges from L at 60% of its length, through one prefix cache
+// (each followed by a short greedy reply): logits, fixed state, KV and the reply bit for bit equal to a cold token-by-token
+// computation of the same prompt, and the second and third restored from a checkpoint (reused > 0, at most the shared
+// part). Prints one JSON line; 0 = passed.
+int check_ckpt(ModelLM& lm, const SessionOptions& so, const std::vector<int>& L, int chunk, int span, int stream, int gen);
 int check_ahead(ModelLM& lm, const SessionOptions& so, const std::vector<int>& A, const std::vector<int>& B, int ahead_len,
                 int chunk, int span, int ahead_span, int stream, int gen);
 

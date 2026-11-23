@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <tuple>
 #include <cmath>
 #include <cstring>
 #include <sstream>
@@ -103,6 +104,8 @@ struct GJob {  // one matrix [R, K] bf16 for n packed inputs; Y[s] + r
   int R, K, n;
   const uint16_t* P;
   float* const* Y;
+  const Weight* q = nullptr;  // q8: the matrix as AFF8 (W, P unused)
+  const float* X = nullptr;   // q8: the n inputs, fp32 [n, K]
 };
 struct GCtx {
   const GJob* j;
@@ -129,6 +132,34 @@ static void phase_gemm(void* p, int, int) {
   }
 }
 static void run_gemm(Pool& pool, const GJob* j, int nj, int chunk = 32) {
+  if (j[0].q) {  // q8: the engine's multi-vector rows (inputs quantised once per distinct input)
+    static thread_local std::vector<XBuf> xb;
+    std::vector<std::pair<const float*, int>> seen;
+    std::vector<std::vector<int>> idx(nj);
+    for (int i = 0; i < nj; i++)
+      for (int s = 0; s < j[i].n; s++) {
+        const float* x = j[i].X + (size_t)s * j[i].K;
+        int k = -1;
+        for (int t = 0; t < (int)seen.size(); t++)
+          if (seen[t].first == x && seen[t].second == j[i].K) k = t;
+        if (k < 0) k = (int)seen.size(), seen.push_back({x, j[i].K});
+        idx[i].push_back(k);
+      }
+    if (xb.size() < seen.size()) xb.resize(seen.size());  // (no pointer into xb is taken before this)
+    for (size_t t = 0; t < seen.size(); t++) {
+      if (xb[t].cap < seen[t].second) xb[t].init(seen[t].second, Prec::I16);
+      xb[t].reset(seen[t].second);
+      xb[t].prep(seen[t].first, seen[t].second);
+    }
+    std::vector<std::vector<const XQ*>> xq(nj);
+    std::vector<JobN> jn(nj);
+    for (int i = 0; i < nj; i++) {
+      for (int k : idx[i]) xq[i].push_back(&xb[k].q);
+      jn[i] = {j[i].q, j[i].n, xq[i].data(), nullptr, j[i].Y, nullptr};
+    }
+    run_rows_n(pool, jn.data(), nj, chunk);
+    return;
+  }
   GCtx C;
   C.j = j;
   C.nj = nj;
@@ -139,8 +170,52 @@ static void run_gemm(Pool& pool, const GJob* j, int nj, int chunk = 32) {
   pool.run(phase_gemm, &C);
 }
 
+// ------------------------------------------------------------------------------------------------ 8-bit (AFF8)
+// q8: one region for the block's 27 matrices and the fold F in AFF8, laid out before anything is read; each matrix is
+// quantised from a bf16 buffer of its own as it is read, so the released bf16 weights are never all held at once
+bool InkDraft::layout_q8(std::string& err) {
+  const int KVD = NKV_ * HD_, QD = NH_ * HD_;
+  std::vector<std::tuple<Weight*, int, int>> ms;
+  for (int i = 0; i < 3; i++) {
+    const int R[9] = {QD, KVD, KVD, H_, I_, I_, H_, KVD, KVD}, K[9] = {H_, H_, H_, QD, H_, H_, I_, H_, H_};
+    for (int m = 0; m < 9; m++) ms.push_back({&L_[i].wq[m], R[m], K[m]});
+  }
+  ms.push_back({&F_, VU_, MR_});
+  auto al = [](size_t n) { return (n + 63) / 64 * 64; };
+  size_t tot = 0;
+  for (auto& [w, R, K] : ms) {
+    if (K % 64) return (err = "draft head q8: a matrix width is not a multiple of 64"), false;
+    tot += al((size_t)R * K) + 2 * al((size_t)R * (K / 64) * 2);
+  }
+  qreg_bytes_ = tot;
+  qreg_ = alloc_region(tot, o_.mem, &err);
+  if (!qreg_) return false;
+  size_t off = 0;
+  for (auto& [w, R, K] : ms) {
+    *w = Weight();
+    w->kind = Weight::AFF8;
+    w->rows = R;
+    w->cols = K;
+    w->c = qreg_ + off;
+    off += al((size_t)R * K);
+    w->s = qreg_ + off;
+    off += al((size_t)R * (K / 64) * 2);
+    w->b = qreg_ + off;
+    off += al((size_t)R * (K / 64) * 2);
+  }
+  latq_.init(MR_, o_.prec);
+  return true;
+}
+
+// rows [r0, r0 + n) of an AFF8 matrix from bf16 rows
+static void quant_rows(Pool& pool, const Weight& w, const uint16_t* src, int r0, int n) {
+  const int NG = w.cols / 64;
+  quant_aff8(pool, src, n, w.cols, (uint8_t*)w.c + (size_t)r0 * w.cols, (_Float16*)w.s + (size_t)r0 * NG, (_Float16*)w.b + (size_t)r0 * NG);
+}
+
 // ------------------------------------------------------------------------------------------------ load
 InkDraft::~InkDraft() {
+  free_region(qreg_, qreg_bytes_);
   free_region(wreg_, wreg_bytes_);
   free_region(freg_, freg_bytes_);
   for (int i = 0; i < 3; i++) {
@@ -162,6 +237,8 @@ bool InkDraft::load(const InkDraftOpts& o, Pool* pool, std::string& err) {
   pool_ = pool;
   H_ = o.H;
   VU_ = o.VU;
+  q8_ = o.q8 && !o.exact;
+  if (q8_ && !layout_q8(err)) return false;
   if (!read_all(err)) return false;
   if (o.exact) {  // the released bf16 unembedding, mapped
     ms::SafeTensors st;
@@ -228,7 +305,29 @@ bool InkDraft::read_all(std::string& err) {
     if (!t || t->dtype != "BF16") return (err = "mtp.safetensors: missing bf16 " + m.name), false;
     tot += (t->end - t->begin + 63) / 64 * 64;
   }
-  wreg_bytes_ = tot;
+  if (q8_) {  // each layer matrix through one bf16 buffer into its AFF8 slot; the RNN and hidden_out kept as bf16
+    std::vector<uint16_t> buf;
+    for (size_t k = 0; k < mats.size(); k++) {
+      const ms::StTensor* t = st.find(mats[k].name);
+      if (k < 27) {
+        const Weight& w = L_[k / 9].wq[k % 9];
+        if ((size_t)t->numel() != (size_t)w.rows * w.cols) return (err = "mtp.safetensors: bad shape " + mats[k].name), false;
+        buf.resize((size_t)t->numel());
+        if (!st.read(*t, buf.data(), err)) return false;
+        quant_rows(*pool_, w, buf.data(), 0, w.rows);
+      } else {
+        std::vector<uint16_t>& v = mats[k].dst == &rnn_w_ ? rnn_wv_ : ho_wv_;
+        v.resize((size_t)t->numel());
+        if (!st.read(*t, v.data(), err)) return false;
+        *mats[k].dst = v.data();
+        (mats[k].dst == &rnn_w_ ? rnn_n_ : ho_n_) = v.size();
+      }
+    }
+    std::vector<uint16_t>().swap(buf);
+    wbytes_ = qreg_bytes_ + 2 * (rnn_wv_.size() + ho_wv_.size());
+  }
+  wreg_bytes_ = q8_ ? 0 : tot;
+  if (!q8_) {
   wreg_ = alloc_region(tot, o_.mem, &err);
   if (!wreg_) return false;
   size_t off = 0;
@@ -236,9 +335,12 @@ bool InkDraft::read_all(std::string& err) {
     const ms::StTensor* t = st.find(m.name);
     if (!st.read(*t, wreg_ + off, err)) return false;
     *m.dst = (const uint16_t*)(wreg_ + off);
+    if (m.dst == &rnn_w_) rnn_n_ = (size_t)t->numel();
+    if (m.dst == &ho_w_) ho_n_ = (size_t)t->numel();
     off += (t->end - t->begin + 63) / 64 * 64;
   }
   wbytes_ = off;
+  }
   auto vec = [&](const std::string& n, size_t want, std::vector<float>& out) {
     const ms::StTensor* t = st.find(n);
     if (!t || t->dtype != "BF16" || (size_t)t->numel() != want) return (err = "mtp.safetensors: bad " + n), false;
@@ -284,14 +386,27 @@ bool InkDraft::make_fold(std::string& err) {
   if (stat(o_.mtp.c_str(), &s1) || stat(o_.resident.c_str(), &s2)) return (err = "stat mtp / resident"), false;
   const uint64_t key[4] = {0x31444c4f464b4e49ull /* INKFOLD1 */, ((uint64_t)VU_ << 32) | (uint64_t)MR_, (uint64_t)s1.st_size, (uint64_t)s2.st_size};
   const size_t fb = (size_t)VU_ * MR_ * 2;
-  freg_bytes_ = (fb + 63) / 64 * 64;
-  freg_ = alloc_region(freg_bytes_, o_.mem, &err);
-  if (!freg_) return false;
+  const int RB = 8192;  // rows per pass
+  std::vector<uint16_t> fblk;  // q8: one block of F's bf16 rows
+  if (!q8_) {
+    freg_bytes_ = (fb + 63) / 64 * 64;
+    freg_ = alloc_region(freg_bytes_, o_.mem, &err);
+    if (!freg_) return false;
+  } else {
+    fblk.resize((size_t)RB * MR_);
+  }
   fc_.resize(VU_);
   bool have = false;
   if (FILE* f = fopen(o_.fold.c_str(), "rb")) {
     uint64_t k[4];
-    have = fread(k, 8, 4, f) == 4 && !std::memcmp(k, key, sizeof k) && fread(freg_, 1, fb, f) == fb && fread(fc_.data(), 4, VU_, f) == (size_t)VU_;
+    have = fread(k, 8, 4, f) == 4 && !std::memcmp(k, key, sizeof k);
+    if (have && !q8_) have = fread(freg_, 1, fb, f) == fb;
+    for (int r0 = 0; have && q8_ && r0 < VU_; r0 += RB) {  // q8: block by block into F's AFF8 rows
+      const int nr = std::min(RB, VU_ - r0);
+      have = fread(fblk.data(), 2, (size_t)nr * MR_, f) == (size_t)nr * MR_;
+      if (have) quant_rows(*pool_, F_, fblk.data(), r0, nr);
+    }
+    have = have && fread(fc_.data(), 4, VU_, f) == (size_t)VU_;
     fclose(f);
   }
   if (!have) {
@@ -314,10 +429,12 @@ bool InkDraft::make_fold(std::string& err) {
     for (int h = 0; h < H_; h++) X[(size_t)MR_ * H_ + h] = f2bf(ho_b_[h]);
     std::vector<uint16_t> P(packed_elems(n, H_));
     pack_pairs(X.data(), n, H_, P.data());
-    const int RB = 8192;  // rows per pass
     std::vector<float> Yb((size_t)n * RB);
     std::vector<float*> Y(n);
     uint16_t* F = (uint16_t*)freg_;
+    const std::string tmp = o_.fold + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "wb");
+    bool ok = f && fwrite(key, 8, 4, f) == 4;
     for (int r0 = 0; r0 < VU_; r0 += RB) {
       const int nr = std::min(RB, VU_ - r0), nr4 = (nr + 3) / 4 * 4;
       for (int i = 0; i < n; i++) Y[i] = Yb.data() + (size_t)i * RB;
@@ -330,24 +447,28 @@ bool InkDraft::make_fold(std::string& err) {
       }
       GJob j{Wb, nr4, H_, n, P.data(), Y.data()};
       run_gemm(*pool_, &j, 1, 16);
+      uint16_t* Fo = q8_ ? fblk.data() : F + (size_t)r0 * MR_;
       for (int r = 0; r < nr; r++) {
-        for (int m = 0; m < MR_; m++) F[(size_t)(r0 + r) * MR_ + m] = f2bf(Yb[(size_t)m * RB + r]);
+        for (int m = 0; m < MR_; m++) Fo[(size_t)r * MR_ + m] = f2bf(Yb[(size_t)m * RB + r]);
         fc_[r0 + r] = Yb[(size_t)MR_ * RB + r];
       }
+      if (q8_) quant_rows(*pool_, F_, fblk.data(), r0, nr);
+      ok = ok && fwrite(Fo, 2, (size_t)nr * MR_, f) == (size_t)nr * MR_;
     }
     munmap(map, sb.st_size);
-    const std::string tmp = o_.fold + ".tmp";
-    FILE* f = fopen(tmp.c_str(), "wb");
-    bool ok = f && fwrite(key, 8, 4, f) == 4 && fwrite(freg_, 1, fb, f) == fb && fwrite(fc_.data(), 4, VU_, f) == (size_t)VU_;
+    ok = ok && fwrite(fc_.data(), 4, VU_, f) == (size_t)VU_;
     if (f) ok = fclose(f) == 0 && ok;
     if (ok) rename(tmp.c_str(), o_.fold.c_str());
     else fprintf(stderr, "draft head: could not write the fold cache %s (kept in memory)\n", o_.fold.c_str());
   }
-  F_.kind = Weight::BF16;
-  F_.rows = VU_;
-  F_.cols = MR_;
-  F_.w = freg_;
-  wbytes_ += fb + (size_t)VU_ * 4;
+  if (!q8_) {
+    F_.kind = Weight::BF16;
+    F_.rows = VU_;
+    F_.cols = MR_;
+    F_.w = freg_;
+    wbytes_ += fb;
+  }
+  wbytes_ += (size_t)VU_ * 4;
   return true;
 }
 
@@ -406,6 +527,7 @@ void InkDraft::project(int n) {
   const int KVD = NKV_ * HD_;
   const size_t row = (size_t)4 * H_;
   xb_.resize((size_t)3 * n * H_);
+  if (q8_) xfp_.resize((size_t)3 * n * H_);
   std::vector<float> m(H_), hb(H_);
   for (int i = 0; i < 3; i++)
     for (int s = 0; s < n; s++) {  // mix_norm(features, i, dflare_norm_i)
@@ -418,10 +540,13 @@ void InkDraft::project(int n) {
       rms_bf(m.data(), L_[i].dfl.data(), H_, eps_, hb.data());
       uint16_t* d = xb_.data() + ((size_t)i * n + s) * H_;
       for (int h = 0; h < H_; h++) d[h] = f2bf(hb[h]);
+      if (q8_)
+        for (int h = 0; h < H_; h++) xfp_[((size_t)i * n + s) * H_ + h] = bf16_to_f32(d[h]);
     }
   const size_t pe = packed_elems(n, H_);
   pk_.resize(3 * pe);
-  for (int i = 0; i < 3; i++) pack_pairs(xb_.data() + (size_t)i * n * H_, n, H_, pk_.data() + i * pe);
+  if (!qreg_)
+    for (int i = 0; i < 3; i++) pack_pairs(xb_.data() + (size_t)i * n * H_, n, H_, pk_.data() + i * pe);
   std::vector<float> out((size_t)6 * n * KVD);
   std::vector<float*> Y((size_t)6 * n);
   for (int j = 0; j < 6 * n; j++) Y[j] = out.data() + (size_t)j * KVD;
@@ -429,6 +554,10 @@ void InkDraft::project(int n) {
   for (int i = 0; i < 3; i++) {
     jb[2 * i] = {L_[i].kc, KVD, H_, n, pk_.data() + i * pe, Y.data() + (size_t)(2 * i) * n};
     jb[2 * i + 1] = {L_[i].vc, KVD, H_, n, pk_.data() + i * pe, Y.data() + (size_t)(2 * i + 1) * n};
+    if (q8_) {
+      jb[2 * i].q = &L_[i].wq[7], jb[2 * i + 1].q = &L_[i].wq[8];
+      jb[2 * i].X = jb[2 * i + 1].X = xfp_.data() + (size_t)i * n * H_;
+    }
   }
   run_gemm(*pool_, jb, 6);
   for (int i = 0; i < 3; i++)
@@ -554,6 +683,7 @@ void InkDraft::block(int p, const float* emb) {
   static thread_local std::vector<std::vector<float>> scs;
   scs.resize(pool_->size());
   auto packf = [&](const float* x, int n, int K, uint16_t* P) {  // fp32 (bf16 values) [n, K] -> packed
+    if (q8_) return;  // q8: the rows take the fp32 inputs
     xb_.resize((size_t)n * K);
     for (size_t i = 0; i < (size_t)n * K; i++) xb_[i] = f2bf(x[i]);
     pack_pairs(xb_.data(), n, K, P);
@@ -574,6 +704,8 @@ void InkDraft::block(int p, const float* emb) {
     {
       auto yq = ptrs(q_.data(), QD), yk = ptrs(k_.data(), KVD), yv = ptrs(v_.data(), KVD);
       GJob j[3] = {{W.q, QD, H, B, P1.data(), yq.data()}, {W.k, KVD, H, B, P1.data(), yk.data()}, {W.v, KVD, H, B, P1.data(), yv.data()}};
+      if (q8_)
+        for (int m = 0; m < 3; m++) j[m].q = &W.wq[m], j[m].X = hn_.data();
       run_gemm(*pool_, j, 3);
     }
     bfr_n(q_.data(), q_.size());
@@ -609,6 +741,7 @@ void InkDraft::block(int p, const float* emb) {
     {
       auto ya = ptrs(att_.data(), H);
       GJob j{W.o, H, QD, B, P2.data(), ya.data()};
+      if (q8_) j.q = &W.wq[3], j.X = ao_.data();
       run_gemm(*pool_, &j, 1);
     }
     for (size_t i = 0; i < resid_.size(); i++) resid_[i] = bfr(resid_[i] + bfr(att_[i]));
@@ -617,6 +750,7 @@ void InkDraft::block(int p, const float* emb) {
     {
       auto yg = ptrs(gg_.data(), I_), yu = ptrs(uu_.data(), I_);
       GJob j[2] = {{W.g, I_, H, B, P1.data(), yg.data()}, {W.u, I_, H, B, P1.data(), yu.data()}};
+      if (q8_) j[0].q = &W.wq[4], j[1].q = &W.wq[5], j[0].X = j[1].X = hn_.data();
       run_gemm(*pool_, j, 2);
     }
     for (size_t i = 0; i < act_.size(); i++) {
@@ -627,6 +761,7 @@ void InkDraft::block(int p, const float* emb) {
     {
       auto yx = ptrs(x_.data(), H);
       GJob j{W.d, H, I_, B, P2.data(), yx.data()};
+      if (q8_) j.q = &W.wq[6], j.X = act_.data();
       run_gemm(*pool_, &j, 1);
     }
     bfr_n(x_.data(), x_.size());
@@ -791,7 +926,8 @@ int InkDraft::draft(int32_t tok, const float* emb, int max, float thr, int32_t* 
         nb = j - 1 + n;
         if (n > 1) n_head_batched++;
       }
-      Job jf{&F_, nullptr, lat.data(), lg};
+      if (q8_) latq_.prep(lat.data(), MR_);
+      Job jf{&F_, qreg_ ? &latq_.q : nullptr, lat.data(), lg};
       run_rows(*pool_, &jf, 1, 512);
     }
     int32_t id;

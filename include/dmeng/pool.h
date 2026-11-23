@@ -21,16 +21,23 @@ class Pool {
   int size() const { return n_; }
   // Runs fn(ctx, tid, n) on all n threads (tid 0 = the caller) and returns when every thread is done.
   void run(TaskFn fn, void* ctx);
+  // For fn whose work is claimed from shared counters (any thread may do any part, a thread may do none, and a part
+  // only ever waits for parts claimed before it): the caller runs fn too and returns once it has left fn and every
+  // worker that entered has left; a worker that arrives after that skips the run. A slow, sleeping or descheduled
+  // worker costs only the part it claimed, never a wait at the join. Which thread computes a part changes, not how.
+  void run_any(TaskFn fn, void* ctx);
   // Idle workers stop spinning and sleep until the next run() (the caller is about to wait on something slow: an
   // expert read). The next run() wakes them (a condition-variable notify instead of a spin hand-off).
   void park() { park_.store(true, std::memory_order_relaxed); }
 
  private:
   void worker(int tid);
+  void dispatch(TaskFn fn, void* ctx, bool any);
   int n_, spin_us_, qos_;
   std::vector<std::thread> th_;
   alignas(128) std::atomic<uint64_t> gen_{0};
   alignas(128) std::atomic<int> done_{0};
+  alignas(128) std::atomic<uint64_t> st_{0};  // the current run's tag, kind, closed bit and workers inside (pool.cpp)
   alignas(128) std::atomic<int> sleeping_{0};
   TaskFn fn_ = nullptr;
   void* ctx_ = nullptr;
@@ -56,7 +63,7 @@ void parallel_for(Pool& pool, int n, const F& f) {
     int n;
     alignas(128) std::atomic<int> next{0};
   } c{&f, n};
-  pool.run(
+  pool.run_any(
       [](void* p, int, int) {
         Ctx& c = *(Ctx*)p;
         for (int i; (i = c.next.fetch_add(1, std::memory_order_relaxed)) < c.n;) (*c.f)(i);
@@ -68,7 +75,7 @@ void parallel_for(Pool& pool, int n, const F& f) {
 // and the pool work it dispatches are summed per stage and printed at exit ("DMSTAGE ..."). A no-op in any other build.
 enum Stage {
   ST_OTHER, ST_EMBED, ST_DEPTH, ST_GATES, ST_NORMQ, ST_ATTN_PROJ, ST_KV_PREP, ST_ATTN_CORE, ST_ATTN_OUT, ST_CONV,
-  ST_MOE_ROUTER, ST_MOE_CACHE, ST_MOE_EXPERTS, ST_MOE_COMBINE, ST_HEAD, ST_SPAN, ST_N
+  ST_MOE_ROUTER, ST_MOE_CACHE, ST_MOE_EXPERTS, ST_MOE_COMBINE, ST_HEAD, ST_SPAN, ST_PREFETCH, ST_N
 };
 #if DM_COUNTERS
 void stage_mark(int s);

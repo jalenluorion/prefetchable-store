@@ -29,6 +29,7 @@ struct PrefixCache::Parked {
   std::vector<int> toks;
   std::vector<uint8_t> fixed, posd;
   std::vector<float> logits;
+  int logits_k = 0;                       // the head k they were computed with (LM::set_head_k; 0 = every logit)
   std::vector<std::unique_ptr<Ckpt>> ck;  // the live sequence's checkpoints, moved with it
   uint64_t used = 0;
   bool from_ahead = false;  // parked by ahead() (the tail a predicted next prompt replaces)
@@ -129,7 +130,7 @@ void PrefixCache::checkpoint(int p, bool pinned) {
 }
 
 void PrefixCache::trim_checkpoints() {
-  const size_t cap = (size_t)(o_.ckpt_gb * 1e9), each = m_.info().fixed_bytes;
+  const size_t each = m_.info().fixed_bytes, cap = std::max((size_t)(o_.ckpt_gb * 1e9), (size_t)std::max(0, o_.ckpt_min) * each);
   while (ck_.size() * each > cap && !ck_.empty()) {
     int best = -1;  // least recently used unpinned, never the newest position (the end of the last prompt)
     for (int i = 0; i < (int)ck_.size(); i++) {
@@ -153,7 +154,7 @@ void PrefixCache::park_live(int keep_upto) {
   m_.save_fixed(pk->fixed.data());
   pk->posd.resize(live_.size() * m_.info().pos_bytes);
   m_.save_pos(0, (int)live_.size(), pk->posd.data());
-  if (live_logits_ok_) pk->logits = live_logits_;
+  if (live_logits_ok_) pk->logits = live_logits_, pk->logits_k = live_k_;
   // checkpoints past the point the live sequence resumes from go with it (so a return to this conversation can resume
   // inside it, e.g. at the end of its last prompt when its re-rendered last turn differs from what was generated)
   for (auto& c : ck_)
@@ -175,13 +176,21 @@ void PrefixCache::park_live(int keep_upto) {
 }
 
 // ------------------------------------------------------------------------------------------------ disk
-std::string PrefixCache::disk_path(const std::vector<int>& ids, int p) const {
+std::string PrefixCache::disk_path(const std::vector<int>& ids, int p, bool pin) const {
   char name[64];
-  snprintf(name, sizeof name, "/prefix_%016llx.bin", (unsigned long long)fnv(ids.data(), p));
+  snprintf(name, sizeof name, pin ? "/prefix_%016llx.pin.bin" : "/prefix_%016llx.bin", (unsigned long long)fnv(ids.data(), p));
   return o_.disk_dir + name;
 }
+std::string PrefixCache::disk_existing(const std::vector<int>& ids, int p) const {
+  struct stat sb;
+  for (bool pin : {true, false}) {
+    std::string q = disk_path(ids, p, pin);
+    if (stat(q.c_str(), &sb) == 0) return q;
+  }
+  return "";
+}
 
-int PrefixCache::best_disk(const std::vector<int>& ids, std::string& path) const {
+int PrefixCache::best_disk(const std::vector<int>& ids, std::string& path, int cut) const {
   if (o_.disk_dir.empty()) return 0;
   DIR* d = opendir(o_.disk_dir.c_str());
   if (!d) return 0;
@@ -194,7 +203,7 @@ int PrefixCache::best_disk(const std::vector<int>& ids, std::string& path) const
     if (fd < 0) continue;
     DiskHdr h;
     if (read_hdr(fd, h)) {  // rank a file by the checkpoint it can resume from, not by the raw shared prefix
-      const int k = std::min(lcp(h.toks, ids), (int)ids.size() - 1);
+      const int k = std::min(lcp(h.toks, ids), (int)ids.size() - cut);
       int u = 0;
       for (int q : h.ck)
         if (q <= k) u = std::max(u, q);
@@ -209,9 +218,9 @@ int PrefixCache::best_disk(const std::vector<int>& ids, std::string& path) const
   return best;
 }
 
-bool PrefixCache::load_disk(const std::vector<int>& ids, int& got, double& ms_preload, int& npre) {
+bool PrefixCache::load_disk(const std::vector<int>& ids, int& got, double& ms_preload, int& npre, int cut) {
   std::string path;
-  int k = best_disk(ids, path);
+  int k = best_disk(ids, path, cut);
   got = 0;
   if (k <= 0) return false;
   int fd = open(path.c_str(), O_RDONLY);
@@ -221,7 +230,7 @@ bool PrefixCache::load_disk(const std::vector<int>& ids, int& got, double& ms_pr
     close(fd);
     return false;
   }
-  const int lim = std::min(k, (int)ids.size() - 1);  // the request's last token must be computed (its logits)
+  const int lim = std::min(k, (int)ids.size() - cut);  // the request's last token must be computed (its logits) unless cut 0
   int ci = -1;
   for (int i = 0; i < h.nck; i++)
     if (h.ck[i] <= lim && (ci < 0 || h.ck[i] > h.ck[ci])) ci = i;
@@ -268,9 +277,8 @@ void PrefixCache::begin_disk(const std::vector<int>& ids, int p, int start) {
     unlink(pend_tmp_.c_str());
     pend_fd_ = -1;
   }
-  pend_path_ = disk_path(ids, p);
-  struct stat sb;
-  if (stat(pend_path_.c_str(), &sb) == 0) return;  // already on disk
+  pend_path_ = disk_path(ids, p, true);  // the first marked prefix: the system boundary, pinned
+  if (!disk_existing(ids, p).empty()) return;  // already on disk
   DiskHdr h;
   h.n = p;
   h.fb = m_.info().fixed_bytes;
@@ -314,24 +322,46 @@ void PrefixCache::persist(int p) {
     enforce_disk_cap(pend_path_);
     return;
   }
-  // otherwise: a file from the in-memory checkpoints at or before p (needs one at p)
-  std::string path = disk_path(live_, p);
-  struct stat sb;
-  if (stat(path.c_str(), &sb) == 0) {
-    utimes(path.c_str(), nullptr);
-    return;
+  // otherwise: a file from the in-memory checkpoints at or before p (needs one at p; the live end is checkpointed here)
+  {
+    std::string have = disk_existing(live_, p);
+    if (!have.empty()) {
+      const bool pin = have.size() > 8 && have.compare(have.size() - 8, 8, ".pin.bin") == 0;
+      if (pin && o_.refresh_pinned) {  // the expert list sits at the end: write the new one, then its count, then the size
+        int fd = open(have.c_str(), O_RDWR);
+        DiskHdr h;
+        if (fd >= 0 && read_hdr(fd, h)) {
+          std::vector<int32_t> ex = m_.held_experts();
+          if (!ex.empty() && pwrite(fd, ex.data(), 4 * ex.size(), h.exp_off()) == (ssize_t)(4 * ex.size())) {
+            h.nexp = (int)ex.size();
+            if (write_hdr(fd, h)) ftruncate(fd, h.exp_off() + 4L * h.nexp);
+          }
+        }
+        if (fd >= 0) close(fd);
+      }
+      utimes(have.c_str(), nullptr);
+      return;
+    }
   }
   const Ckpt* end = nullptr;
   for (auto& c : ck_)
     if (c->pos == p) end = c.get();
+  if (!end && p == (int)live_.size()) {  // the end of a reply (decode leaves no checkpoint): the state now is exactly p's
+    checkpoint(p, false);
+    for (auto& c : ck_)
+      if (c->pos == p) end = c.get();
+  }
   if (!end) return;
+  const std::string path = disk_path(live_, p, end->pinned);
   DiskHdr h;
   h.n = p;
   h.fb = m_.info().fixed_bytes;
   h.pb = m_.info().pos_bytes;
+  // the end and the pinned (system boundary) states only: a restore resumes at the end, an edit near the start from the
+  // boundary (P2: every checkpoint <= p was 63 MB each and 3.9 s of flash writes per reply on the phone)
   std::vector<const Ckpt*> cs;
   for (auto& c : ck_)
-    if (c->pos <= p) {
+    if (c->pos <= p && (c->pos == p || c->pinned)) {
       cs.push_back(c.get());
       h.ck.push_back(c->pos);
     }
@@ -374,54 +404,69 @@ void PrefixCache::enforce_disk_cap(const std::string& keep) {
   }
   closedir(d);
   std::sort(files.begin(), files.end());
-  for (auto& fl : files) {
-    if (tot <= (long)(o_.disk_gb * 1e9) || fl.second.first == keep) continue;
-    unlink(fl.second.first.c_str());
-    tot -= fl.second.second;
-  }
+  // pinned files (the system boundary's, "*.pin.bin") stay while they total at most half of the cap
+  auto pinned = [](const std::string& f) { return f.size() > 8 && f.compare(f.size() - 8, 8, ".pin.bin") == 0; };
+  long pin_tot = 0;
+  for (auto& fl : files)
+    if (pinned(fl.second.first)) pin_tot += fl.second.second;
+  for (int pass = 0; pass < 2; pass++)
+    for (auto& fl : files) {
+      if (tot <= (long)(o_.disk_gb * 1e9) || fl.second.first == keep || fl.second.second < 0) continue;
+      const bool pn = pinned(fl.second.first);
+      if (pn && (pass == 0 || pin_tot <= (long)(o_.disk_gb * 0.5e9))) continue;
+      unlink(fl.second.first.c_str());
+      tot -= fl.second.second;
+      if (pn) pin_tot -= fl.second.second;
+      fl.second.second = -1;
+    }
 }
 
 // ------------------------------------------------------------------------------------------------ sync
-SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>& marks, float* logits) {
+SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>& marks, float* logits, bool want_logits) {
   SyncResult R;
   if (!no_park_) {  // a request (not ahead() itself)
     n_req_++;
     ahead_seen(ids);
   }
   const int n = (int)ids.size();
+  const int cut = want_logits ? 1 : 0;  // state only: a checkpoint at n itself is enough
   auto t0 = sclk::now();
   const int k = lcp(live_, ids);
   R.lcp_live = k;
   R.live_len = (int)live_.size();
   int u_live = 0;
+  // stored logits serve this request when they were complete, or screened for at least the top k it needs
+  const int need_k = m_.head_k();
+  auto fits = [&](int lk) { return lk == 0 || (need_k > 0 && lk >= need_k); };
+  if (live_logits_ok_ && !fits(live_k_)) live_logits_ok_ = false;
   bool exact_live = k == n && n == (int)live_.size() && live_logits_ok_;
-  if (exact_live) {
+  if (exact_live || (!want_logits && k == n && n == (int)live_.size())) {
     u_live = n;
   } else if (k == (int)live_.size() && k < n) {
     u_live = k;
   } else {
     for (auto& c : ck_)
-      if (c->pos <= std::min(k, n - 1)) u_live = std::max(u_live, c->pos);
+      if (c->pos <= std::min(k, n - cut)) u_live = std::max(u_live, c->pos);
   }
   int u_park = 0, ip = -1;
   for (int i = 0; i < (int)parked_.size(); i++) {
     const Parked& p = *parked_[i];
     int kp = lcp(p.toks, ids), u = 0;
-    if (kp == (int)p.toks.size() && (kp < n || (kp == n && !p.logits.empty()))) u = kp;
+    if (kp == (int)p.toks.size() && (kp < n || (kp == n && ((!p.logits.empty() && fits(p.logits_k)) || !want_logits)))) u = kp;
     for (auto& c : p.ck)
-      if (c->pos <= std::min(kp, n - 1)) u = std::max(u, c->pos);
+      if (c->pos <= std::min(kp, n - cut)) u = std::max(u, c->pos);
     if (u > u_park) {
       u_park = u;
       ip = i;
     }
   }
   std::string dpath;
-  const int k_disk = best_disk(ids, dpath);
+  const int k_disk = best_disk(ids, dpath, cut);
   R.lcp_disk = k_disk;
   int start = u_live;
   R.source = u_live == 0 ? "cold" : (u_live == (int)live_.size() ? "live" : "checkpoint");
   const bool use_park = ip >= 0 && u_park > u_live;
-  bool use_disk = !use_park && k_disk > u_live + 256;  // k_disk: the best resumable disk checkpoint; a load costs ~0.1-0.2 s
+  bool use_disk = !use_park && k_disk > u_live + o_.disk_gain;  // k_disk: the best resumable disk checkpoint; a load costs ~0.1-0.2 s
   std::unique_ptr<Parked> up;
   if (use_park) {  // take it out first: parking the live sequence below must not evict it
     up = std::move(parked_[ip]);
@@ -440,8 +485,8 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
     ck_.clear();
     if (u == (int)p.toks.size()) {
       m_.load_fixed(p.fixed.data(), u);
-      live_logits_ok_ = !p.logits.empty();
-      if (live_logits_ok_) live_logits_ = p.logits;
+      live_logits_ok_ = !p.logits.empty() && fits(p.logits_k);
+      if (live_logits_ok_) live_logits_ = p.logits, live_k_ = p.logits_k;
     } else {
       for (auto& c : p.ck)
         if (c->pos == u) m_.load_fixed(c->fixed.data(), u);
@@ -458,7 +503,7 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
     n_unparks_++;
   } else if (use_disk) {
     int got = 0;
-    if (load_disk(ids, got, R.ms_preload, R.preloaded) && got > u_live) {
+    if (load_disk(ids, got, R.ms_preload, R.preloaded, cut) && got > u_live) {
       start = got;
       R.source = "disk";
     } else {
@@ -483,8 +528,8 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
   }
   R.ms_restore = ms_from(t0);
   R.reused = start;
-  if (start == n && live_logits_ok_) {
-    if (logits) std::memcpy(logits, live_logits_.data(), live_logits_.size() * 4);
+  if (start == n && (live_logits_ok_ || !want_logits)) {
+    if (logits && live_logits_ok_) std::memcpy(logits, live_logits_.data(), live_logits_.size() * 4);
     n_reused_ += n;
     return R;
   }
@@ -544,6 +589,7 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
     return R;
   }
   live_logits_ok_ = true;
+  live_k_ = 0;
   if (logits) std::memcpy(logits, live_logits_.data(), live_logits_.size() * 4);
   R.computed = n - base;
   n_reused_ += base;
@@ -555,6 +601,7 @@ void PrefixCache::step(int id, float* logits) {
   m_.step(id, live_logits_.data());
   live_.push_back(id);
   live_logits_ok_ = true;
+  live_k_ = m_.head_k();
   if (logits) std::memcpy(logits, live_logits_.data(), live_logits_.size() * 4);
 }
 
@@ -570,6 +617,7 @@ void PrefixCache::commit(int a) {
   live_.insert(live_.end(), ver_ids_.begin(), ver_ids_.begin() + a);
   std::memcpy(live_logits_.data(), m_.logits_at(a - 1), live_logits_.size() * 4);
   live_logits_ok_ = true;
+  live_k_ = 0;
 }
 
 std::string PrefixCache::stats_json() const {

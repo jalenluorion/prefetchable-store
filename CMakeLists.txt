@@ -20,18 +20,20 @@ add_library(msfmt STATIC src/format/json.cpp src/format/files.cpp src/format/man
 target_compile_options(msfmt PRIVATE -O2 -ffp-contract=off -fno-fast-math -Wall -Wno-deprecated-declarations)
 
 add_library(dmengcore STATIC
-  src/core/kernels.cpp src/core/pool.cpp src/core/weights.cpp src/core/store.cpp src/core/moe.cpp src/core/moe_chunk.cpp src/core/greedy_head.cpp
+  src/core/kernels.cpp src/core/pool.cpp src/core/weights.cpp src/core/store.cpp src/core/moe.cpp src/core/moe_chunk.cpp src/core/greedy_head.cpp src/core/screen_head.cpp
   src/core/address.cpp src/core/planner.cpp src/core/presets.cpp src/core/sampler.cpp src/core/draft.cpp src/core/model_lm.cpp src/core/kernels_batch.cpp src/core/kernels_sme.cpp
+  src/core/gpu_check.cpp src/core/gpu_split.cpp
   src/models/registry.cpp src/models/qwen3_5_moe/qwen3_5_moe.cpp src/models/qwen3_5_moe/prefill.cpp src/models/qwen3_5_moe/verify.cpp
   src/models/inkling2_loop/inkling2_loop.cpp src/models/inkling2_loop/ink_draft.cpp)
 target_include_directories(dmengcore PUBLIC include)
 target_link_libraries(dmengcore PUBLIC msfmt)
 target_include_directories(dmengcore PRIVATE src/format)
 target_compile_options(dmengcore PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall -Wno-unused-function)
-# The GPU half of the batched prefill's 8-bit products (src/core/gpu_gemm.mm, Metal; exact, see gpu_gemm.h). Built on Apple
-# platforms by default; the code path stays off unless a run asks for it (prefill_gpu_frac > 0, dmserve --gpu-frac).
+# The GPU share of the batched prefill's products (src/core/gpu_gemm.mm, Metal; 8- and 4-bit; exact, see gpu_gemm.h). Built
+# on Apple platforms by default; the code path stays off unless a run asks for it (prefill_gpu_frac / prefill_gpu_experts
+# > 0, dmserve --gpu-frac / --gpu-experts).
 if(APPLE)
-  option(DM_METAL "build the Metal split of the 8-bit prefill products" ON)
+  option(DM_METAL "build the Metal split of the prefill products" ON)
 else()
   set(DM_METAL OFF)
 endif()
@@ -43,6 +45,10 @@ if(DM_METAL)
   set_source_files_properties(src/core/gpu_gemm.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_compile_definitions(dmengcore PRIVATE DM_METAL=1)
   target_link_libraries(dmengcore PUBLIC "-framework Metal" "-framework Foundation")
+  # the GPU kernels against the CPU kernels, bit for bit, on random data (no model): tests/kernels/gpu_gemm_check.cpp
+  add_executable(gpu_gemm_check tests/kernels/gpu_gemm_check.cpp)
+  target_link_libraries(gpu_gemm_check PRIVATE dmengcore)
+  target_compile_options(gpu_gemm_check PRIVATE ${DM_ARCH})
 endif()
 # A counting build: per-thread instructions and cycles of the pool's work, the main thread's serial work and its
 # spin-waits (macOS thread_selfcounts), printed to stderr at exit when DM_COUNTS is set (see bench/README.md).
@@ -50,6 +56,12 @@ endif()
 option(DM_COUNTERS "count instructions and cycles per phase (bench builds only)" OFF)
 if(DM_COUNTERS)
   target_compile_definitions(dmengcore PRIVATE DM_COUNTERS=1)
+endif()
+# A join-trace build: per phase function, each thread's entry, exit and clock and the join's waits ("DMJOIN" lines at
+# exit, src/core/pool.cpp). OFF compiles to exactly the default engine.
+option(DM_POOLTRACE "trace every fork-join's threads (diagnostic builds only)" OFF)
+if(DM_POOLTRACE)
+  target_compile_definitions(dmengcore PRIVATE DM_POOLTRACE=1)
 endif()
 
 add_executable(dmeng tools/dmeng.cpp)
@@ -91,3 +103,25 @@ target_compile_options(sme_split PRIVATE ${DM_ARCH} -Wall)
 add_executable(expert_users tests/kernels/expert_users.cpp)
 target_link_libraries(expert_users PRIVATE dmengcore)
 target_compile_options(expert_users PRIVATE ${DM_ARCH} -Wall)
+
+# the one-vector NVFP4 I16 kernel against the v1 kernel it replaced, bit for bit (tests/kernels/nv_i16_check.cpp)
+add_executable(nv_i16_check tests/kernels/nv_i16_check.cpp)
+target_link_libraries(nv_i16_check PRIVATE dmengcore)
+target_compile_options(nv_i16_check PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
+
+# one decode position of the 35B's 4-bit expert kernel: NEON against streaming SVE on the SME units, alone and together
+add_executable(spinner tests/kernels/spinner.cpp)  # a co-runner for load tests
+
+# the engine's expert step on real records, its losses against streaming taken out one at a time (tests/kernels/bench_kmulti_step.cpp)
+add_executable(bench_kmulti_step tests/kernels/bench_kmulti_step.cpp)
+target_link_libraries(bench_kmulti_step PRIVATE dmengcore)
+target_compile_options(bench_kmulti_step PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
+
+# Inkling's decode expert kernels and candidate rewrites on real records (tests/kernels/bench_kmulti_nv.cpp)
+add_executable(bench_kmulti_nv tests/kernels/bench_kmulti_nv.cpp)
+target_link_libraries(bench_kmulti_nv PRIVATE dmengcore)
+target_compile_options(bench_kmulti_nv PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
+
+add_executable(bench_kmulti_sme4 tests/kernels/bench_kmulti_sme4.cpp)
+target_link_libraries(bench_kmulti_sme4 PRIVATE dmengcore)
+target_compile_options(bench_kmulti_sme4 PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)

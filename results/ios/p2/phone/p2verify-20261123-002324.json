@@ -1,0 +1,349 @@
+{
+  "manifest_bytes" : 20352447020,
+  "not_ok" : 2,
+  "ok_bytes" : 19335316453,
+  "parts" : [
+    {
+      "at" : "dmeng-model\/config.json",
+      "bytes" : 3686,
+      "path" : "config.json",
+      "sha256" : "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/generation_config.json",
+      "bytes" : 202,
+      "path" : "generation_config.json",
+      "sha256" : "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/tokenizer.json",
+      "bytes" : 12807982,
+      "path" : "tokenizer.json",
+      "sha256" : "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/tokenizer_config.json",
+      "bytes" : 9983,
+      "path" : "tokenizer_config.json",
+      "sha256" : "a39230de929388c748904265340616449f3bdeeb324d99385c6243d0577f98ed",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/chat_template.jinja",
+      "bytes" : 7816,
+      "path" : "chat_template.jinja",
+      "sha256" : "1b8361565cc35d47551d342214cff341c0f1a9685ce529c7ce31de0ed3616248",
+      "status" : "ok"
+    },
+    {
+      "path" : "LICENSE",
+      "status" : "missing"
+    },
+    {
+      "at" : "model\/embeddings.safetensors",
+      "bytes" : 1017119000,
+      "path" : "embeddings.safetensors",
+      "sha256" : "",
+      "status" : "size 1017119000 != 1017119224"
+    },
+    {
+      "at" : "dmeng-model\/.dmeng\/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+      "bytes" : 68091904,
+      "path" : "derived\/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+      "sha256" : "97f4e33a03c9d5bb910961cfab6b889b779843554553e5a6f73e5f974a9089d0",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_00.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_00.bin",
+      "sha256" : "f54b63a17b8a8fe2c2c9ce1af5b2b9069f2022f00be404da36c82ff49810ac76",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_01.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_01.bin",
+      "sha256" : "7f7dc3a1945c0239c5ec4b9142b67b7892c9ac3c39333ff76704e55f716492be",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_02.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_02.bin",
+      "sha256" : "5d191f9490a6b57902a70eb9acde2bec5d91615bc6b905a2f93e1dde0e94ad0b",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_03.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_03.bin",
+      "sha256" : "ebfaa43630086845ae9d253cc8bac0bb4e97d930e8359bf5790c54f6c9c26ed4",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_04.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_04.bin",
+      "sha256" : "96b5900c1f405581031b837acfa6c4ae142fc035cbc06984e856118efdffead3",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_05.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_05.bin",
+      "sha256" : "f1145b9ef596aa057c16c3302984c92b127a72a39a970f13fec3a75c5e0649fb",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_06.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_06.bin",
+      "sha256" : "659d8e5cfe338a604641bed211b9b313347d031ea251d1ff4f69005e6d0ec6dc",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_07.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_07.bin",
+      "sha256" : "4f40f04aed09c072e46cc3ea692deef9a7cf9825b0cf1884f873b91b67cc6dac",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_08.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_08.bin",
+      "sha256" : "8415bfef62bed668987fdafc9c180470dea96c14442f3f61293d8e7c7fa09e25",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_09.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_09.bin",
+      "sha256" : "9148ec15ff67e80ab1ad41ded9589965650c5681f8bc689db586feceefe15ae5",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_10.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_10.bin",
+      "sha256" : "27ff3a6aa1a10baf02254b55a1cf116dfbeada17b808269acd7b4fef2f1cade3",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_11.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_11.bin",
+      "sha256" : "a49468bcd0f95284c223c3ff6eed3cc9d91ad20de0cc9bd7aee1fe3ca4c3ad0e",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_12.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_12.bin",
+      "sha256" : "3b277edeb268640305169b53ff39cf01873b8ff0c37887dfa3ff7beabf9a9a9f",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_13.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_13.bin",
+      "sha256" : "64804df79fa9bd64c00f75d443ec4735cbd4bc81fe089ada715f726ba0dea17c",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_14.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_14.bin",
+      "sha256" : "5a21dffe6c164e65d920daff7673c1b2b0bb47b3ea31189bd7036db585ab6bce",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_15.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_15.bin",
+      "sha256" : "8a86d9b3921bedec433e96754a36459c9b8fda119070eccc0d445bbeba3f1e4f",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_16.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_16.bin",
+      "sha256" : "7adbe321dc01354aec2161a44d3f91aeaf45a5c151f1d6eb026a20c0356870bf",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_17.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_17.bin",
+      "sha256" : "a1a31c6d4f88ccf7a4af376280276269ddfb9fb8f56eba805bc0ed41347b503b",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_18.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_18.bin",
+      "sha256" : "1b8f61596e9a85bc14ddce9f163308cb2dc1bb41804cdd00d82950fae1c571f8",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_19.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_19.bin",
+      "sha256" : "0399696d09238745019a5a35b321e05d0ab3f7caf52ca91ec16e398f12234248",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_20.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_20.bin",
+      "sha256" : "e69ab8f2448f7ca11440ffa8d0ff8e05efe2ea89357325ede2ef38d20092136a",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_21.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_21.bin",
+      "sha256" : "3b6eb44bb54e8b5c8008f969b46b20ac2fd1ea2f179443376218742b5a409ff1",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_22.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_22.bin",
+      "sha256" : "026276d97a9550aa14a9a3dd2de3249020b475939fde73ba36de48c20901c7ac",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_23.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_23.bin",
+      "sha256" : "a3820a788421d431ab7c82a151309e725ce46e1f79b93619f20e75c96ef69f02",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_24.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_24.bin",
+      "sha256" : "252c297b7a9176841f5d97dbf6bd295cccb8c750ad088fbe3b9c91c20dcce9e7",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_25.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_25.bin",
+      "sha256" : "550366c3704da07f28a62bac8175fff969c32ddb1eee69b2ea8bf151977d8d3c",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_26.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_26.bin",
+      "sha256" : "175ad4de34219912fc2ee9016fb831d204bdf969074d37bc86d0e969ce8e123d",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_27.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_27.bin",
+      "sha256" : "7fbb326122da01262935896f76c0967319896e2347ee15bccdd9e5e453b4b5a4",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_28.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_28.bin",
+      "sha256" : "7d78a41ea6c273f7957b8ab4a7ae1e7f279310be821bab66917d8854d58b6fa3",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_29.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_29.bin",
+      "sha256" : "fe14bcd5c35d44b9023447fd06c5c9f800f89d34428874ccf341df918d0dc3c9",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_30.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_30.bin",
+      "sha256" : "6a339896e2a9f0c9a1997e6bfe7752a90f2b999f71a49af590613a081005e66b",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_31.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_31.bin",
+      "sha256" : "c427025d3752ef3ec9c1eca79416691b5310af68dbf3eaf67f8d53e974f5f3a1",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_32.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_32.bin",
+      "sha256" : "a413f150351574bdc18885e800a6d6ec27a3e8a12be5528e2637dfdf543a39f8",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_33.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_33.bin",
+      "sha256" : "0a08599e3c79d8a4306ccce3ee34a2005ff86a4e3f38563ab920b9282ffa1533",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_34.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_34.bin",
+      "sha256" : "863001972428b628dfb2428e89f4c8ab84c48a0956f5fe5e9e36d94b958d7cdb",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_35.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_35.bin",
+      "sha256" : "cbdeefc310da8b1fd68b92bded27fc860d7422450a047b8a533089be53a95e42",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_36.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_36.bin",
+      "sha256" : "3b87132f908f1fc0d1f3e971b36a0bedb3c8448a7db5cd22c158bbccaed11b94",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_37.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_37.bin",
+      "sha256" : "44dcc1c5056030270aa78f669c1e7806b6b18c091ae819174d00aacfbd67d8fa",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_38.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_38.bin",
+      "sha256" : "53695a15f90842520205d059cccd6812572b4187559fcdef0986d52f89090c12",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/store\/layer_39.bin",
+      "bytes" : 452984832,
+      "path" : "store\/layer_39.bin",
+      "sha256" : "09e2a245604fa328eb0b2252b9c894545908e26017436bdf51a93a388fb1f461",
+      "status" : "ok"
+    },
+    {
+      "at" : "dmeng-model\/.dmeng\/resident_q4.dmres1.a603e898ddee.bin",
+      "bytes" : 1135001600,
+      "path" : "derived\/resident_q4.dmres1.a603e898ddee.bin",
+      "sha256" : "07d18ccfc459038a393cff498c4821c5133fc0be7d4ed17a91336cb4961c8ba6",
+      "status" : "ok"
+    }
+  ],
+  "profile" : "phone-small",
+  "time" : "2026-11-23T05:23:53Z"
+}

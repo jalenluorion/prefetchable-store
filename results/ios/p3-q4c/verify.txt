@@ -1,0 +1,6 @@
+mapping: 251 of 251, none missing, none extra
+payloads: 753 of 753 tensors (251 x .q4/.s/.b) byte-equal to the export, shapes match
+dequant: 21 matrices (0.qkv, 0.z, 0.o, 1.qkv, 3.q, 3.k, 3.v, 3.o, 20.qkv, 21.o, 23.q, 23.o, 39.q, 39.o, 0.sg, 0.su, 0.sd, 17.sg, 38.su, 39.sd, head), 667,942,912 weights bitwise equal as f32
+others: 361 of 361 non-4-bit tensors bitwise equal to the plain file (753 of 753 4-bit tensors differ from it)
+header: header identical to the plain file's (34 cfg lines incl. resident_bits 4, 1114 tensors); size 1,135,001,600 B = plain
+PASS

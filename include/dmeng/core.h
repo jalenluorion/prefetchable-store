@@ -9,6 +9,12 @@
 // not landed is waited for and a pick that was not named is read on the spot. Every output row is computed by one thread
 // and the experts are combined in pick order, so token ids never depend on the cache size, the routers or the timing.
 #pragma once
+#include <TargetConditionals.h>
+
+#include <atomic>
+#include <functional>
+
+#include "dmeng/expert_step.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,8 +37,13 @@ struct ModelInfo {
   std::vector<int> layer_fmt;                // [layers] index into formats
   std::vector<double> pool_share;            // default budget share per format
   std::string layer_file;                    // printf pattern relative to the model folder, e.g. store/layer_%02d.bin
+  std::vector<std::string> layer_paths;      // per layer, relative to the folder (a profile's own files); empty = layer_file
   int eos = -1;
   bool has_ref_path = false;                 // supports the exact fp32-activation reference path
+  // every multi-position MoE of this model goes through Core::moe_chunk, which runs a union larger than the cache in
+  // batches (phone sizes): the pools' run-time floor (min_cap) is then one step's pins (2K + 2), not a prefill layer's
+  // union (Inkling; the 35B's batched prefill has its own MoE with no batches yet)
+  bool union_batches = false;
 };
 
 // Read-only description of one MoE application, so the core can run the block itself.
@@ -81,10 +92,17 @@ struct Approx {
   static const char* presets_help();
 };
 
+struct GpuGemm;  // src/core/gpu_gemm.h
+
 struct CoreOpts {
   int threads = 8, readers = 4, split = 1;
   int qos = -1, reader_qos = -1;  // QoS class (qos_class_t) of the compute workers / the readers; -1: user-interactive /
                                   // user-initiated (the defaults before these options)
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
+  bool reader_io_low = true;      // the readers' disk I/O one tier below the app's (iOS: the UI's page-ins go first)
+#else
+  bool reader_io_low = false;     // macOS: off (the readers are the critical path; a lower tier is throttled by others' I/O)
+#endif
   Prec prec = Prec::I16;
   bool ref = false;          // exact reference path (fp32 activations, scalar kernels)
   double cache_gb = 5.0, half_life = 8.0;
@@ -130,6 +148,81 @@ class Core {
   // picks of the positions they ran, so a position rolled back by a verify is overwritten when it runs again (a model's
   // own batched prefill, Qwen3.6's, does not write here).
   std::vector<int16_t>* pick_log = nullptr;
+  // RUN-AHEAD (measurement version): when a lossless step is about to wait for a pick's read, the model continues one step
+  // ahead from an approximate state (this step's output from the experts in memory only: ypart) and returns the next
+  // step's predicted picks (best first, at most maxk); the core issues reads for the absent ones (as early names, below
+  // the confirmed reads) and counts, when the real pass reaches that step, how many of its reads were already issued.
+  // Only reads change: the model must leave its state as it was. Off unless the model sets it.
+  std::function<int(int step, const float* ypart, int32_t* picks, int maxk)> run_ahead;
+  std::vector<float> ra_lgv;  // the run-ahead's router logits (the model fills NE): fast mode names by their routing weights
+  std::atomic<int64_t> exp_spin_ns{0};
+  // the expert step's fork-joins in place: per number of jobs in the call (0..MAXK + 1), and split by whether a wait on a
+  // read came between the call and the one before it: calls, ns, weight bytes
+  double xc_calls[2][18] = {}, xc_ns[2][18] = {}, xc_bytes[2][18] = {};  // [after a wait][jobs, 0 .. 17]
+  double xc_wait_seen = 0;
+  // measurement (DMENG_RERUN_AB=1): STEP_RERUN off / on call by call: ns, weight bytes, calls; chunks re-run
+  double rr_ns[2] = {0, 0}, rr_bytes[2] = {0, 0}, rr_calls[2] = {0, 0};
+  std::atomic<int64_t> rr_count{0};
+  std::string xc_json() const;
+  int ra_k = 8;  // predicted picks named per run-ahead
+  // MEASUREMENT of deeper run-ahead (no reads issued): after the run-ahead's step + 1, the model continues to step + d
+  // (d = 2 .. ra_depth) from its approximate state with that step's MoE left out, and returns its top picks; each is scored
+  // when the real pass reaches step + d (top-8 match, the share of its on-demand reads it would have issued)
+  std::function<int(int depth, int32_t* picks, int maxk)> run_ahead_deeper;
+  int ra_depth = 1;
+  bool ra_off = false;
+  // run-ahead limits (engine options a profile sets): speculative ms per token at most ra_budget x the token's compute
+  // (running average; 0 = no limit), at most ra_max_tok run-aheads per token (0 = no limit); ra_sat_skip: none while
+  // every reader is busy and reads are queued behind them (the drive has work: earlier names add no lead). (The next
+  // layer's attention is the run-ahead's cost, and it is needed: the 35B's router on the residual without it matched
+  // 0.79-0.83 of the top 8 and wasted two thirds of its names; PARITY.md.)
+  // the experts' exact CPU + GPU split in moe_chunk (a model's batched prefill sets it for its passes): the GPU computes
+  // the first moe_gpu_frac of each packed NVFP4 expert's gate / up chunks and down rows (gpu_gemm.h add_nvfp4: the CPU
+  // kernel's bits); null = CPU only
+  GpuGemm* moe_gpu = nullptr;
+  double moe_gpu_frac = 0;
+  double moe_gpu_wait_ms = 0, moe_gpu_stage_ms = 0, moe_gpu_macs = 0, moe_cpu_macs = 0;
+  uint64_t moe_gpu_sets = 0, moe_gpu_failed = 0;
+  double ra_budget = 0;
+  int ra_max_tok = 0;
+  bool ra_sat_skip = false;
+  double ra_tok_ms = 0, ra_comp_ema = 0, ra_tok_wait0 = 0;
+  int ra_tok_events = 0;
+  std::chrono::steady_clock::time_point ra_tok_t0{};  // measurement (DMENG_RA_AB=1): run-ahead skipped for this token
+  struct Deep {
+    int step = -1;
+    std::vector<int32_t> pred;
+    std::vector<uint8_t> absent;
+  };
+  std::vector<Deep> ra_deep[4];  // [depth - 1][target step]
+  double deep_top8[4] = {0}, deep_n[4] = {0}, deep_would[4] = {0}, deep_found[4] = {0}, deep_events[4] = {0}, deep_issued[4] = {0}, deep_wasted[4] = {0};
+  // where the remaining wait sits (run-ahead on): at steps the previous step named reads for, or not (a chain's first miss);
+  // steps that never waited (where a run-ahead with no miss would have to start)
+  bool ra_cov = false;
+  double wait_cov_ms = 0, wait_uncov_ms = 0, steps_wait_cov = 0, steps_wait_uncov = 0, steps_no_wait = 0, steps_total = 0;
+  std::string ra_json() const;
+  struct RunAhead {
+    int step = -1;                 // the step predicted (-1: none pending)
+    std::vector<uint8_t> absent;   // [NE] absent from memory when the prediction was made
+    std::vector<int32_t> pred;     // predicted picks
+    std::vector<int> pslot;        // their pinned slots (-1: none had)
+    clk::time_point t;
+    const std::atomic<int>* watch = nullptr;  // the read the step was about to wait for (0: landed)
+    clk::time_point seen;                     // when the model first saw it landed (the overrun starts)
+    bool landed = false;
+    double events = 0, ms = 0, would_read = 0, found = 0, lead_ms = 0, issued = 0, wasted = 0, top8 = 0, top8_n = 0;
+    double aborted = 0, over_ms = 0, refused = 0, withheld = 0, skip_budget = 0, skip_sat = 0;  // withheld: absent, below fast mode's read rule
+  } ra;
+  int ra_reserve = 0;  // slots a run-ahead name leaves free (as a miss: 0; the early routers' names leave 2K + holds)
+  // the model, between its run-ahead sub-stages: true once the awaited read has landed (stop: the work is thrown away)
+  bool ra_stopped() {
+    if (ra.landed) return true;
+    if (ra.watch && ra.watch->load(std::memory_order_acquire) == 0) {
+      ra.landed = true;
+      ra.seen = clk::now();
+    }
+    return ra.landed;
+  }
 
   bool init(const ModelInfo& info, const CoreOpts& opts, const std::string& dir, std::string& err);
   // per token: the model calls token_start before its first MoE step and token_end after its last
@@ -179,6 +272,7 @@ class Core {
   // released picks of position p at `step` into pick_log (when it is kept); a model's own batched prefill calls it
   void log_picks(int p, int step, const int32_t* pk);
   long n_hold_release = 0;  // chunks whose union needed the loop holds' slots (holds released early: no effect on outputs)
+  long n_union_batches = 0; // chunk applications whose union did not fit and ran in batches (Core::moe_chunk; phone sizes)
   struct Chunk;                // the chunk step's buffers (moe_chunk.cpp)
   std::shared_ptr<Chunk> ch_;
   long now(int step) const { return tok_clock * steps + step; }
@@ -188,10 +282,7 @@ class Core {
   void reset_stats();                 // cache, approximate mode, per-step counters, times
 
  private:
-  struct ExpJob {
-    Weight gu, up, dn;
-    int inter, slot_out;
-  };
+  using ExpJob = ExpertJob;
   std::vector<XBuf> act;              // [K + 1] expert activations, quantised (K = shared expert)
   std::vector<float> eout, actf, lg, sc, bz;
   std::vector<int> ord;
@@ -202,6 +293,10 @@ class Core {
   void combine(const MoeView& v, const float* w, const int* rows, int n, float shw, float* y) const;
   void finish_step(int step, const int* slots, int n);
   void lossless(int step, const float* x, float* y, const MoeView& v);
+  // run-ahead from a step about to wait for the read whose pending count is `watch`
+  void ra_predict(int step, const MoeView& v, const bool* done, const float* w, const std::atomic<int>* watch);
+  void ra_where(double wait_ms);  // where this step's wait sits
+  void ra_score(int step, const int32_t* pk);                                     // the real picks of a predicted step
   void approx(int step, const float* x, float* y, const MoeView& v);
   int take_slot(int L, int e, int step);  // a slot for a miss read now (urgent): pins it
   ExpJob shared_job(const MoeView& v) const;

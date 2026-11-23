@@ -59,7 +59,7 @@
     "history" : "live: thinking-off turns keep their empty think block; thinking turns cached at the assistant header",
     "keep" : "31",
     "kernel warm-up" : "batched prefill kernels compiled at load in 1.69 s (dry chunks 128\/37\/64\/27\/5\/1, state discarded)",
-    "kernels" : "mlx.metallib (-fno-fast-math): \/var\/containers\/Bundle\/Application\/E494D795-A69F-495E-962C-54E402FFD983\/PhoneStoreApp.app\/mlx.metallib",
+    "kernels" : "mlx.metallib (-fno-fast-math): <app bundle>\/PhoneStoreApp.app\/mlx.metallib",
     "layout" : "slim",
     "memory plan" : "2.75 GB (resident 1.10 + routers 0.33 + slabs 1.27 + codec staging 0.04)",
     "mode" : "prefetch",

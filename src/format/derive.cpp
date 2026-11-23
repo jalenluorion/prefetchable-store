@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <cstring>
+#include <set>
 #include <vector>
 
 #include "files.h"
@@ -121,12 +122,48 @@ bool put_q_mem(DmWriter& w, DeriveStats& s, const std::string& name, const uint1
   return true;
 }
 
-bool resident_qwen3_5_moe(Ctx& c, const Manifest& m, int bits) {
+// a calibrated 4-bit matrix NAME.q4 / .s / .b copied as stored from a calibrated export (see derive.h); key = the release's
+// tensor, whose shape [R, C] the export's codes [R, C/2], scales and biases [R, C/64] and BASE.shape must match
+bool put_q4_cal(Ctx& c, const SafeTensors& cal, std::set<std::string>& used, const std::string& name, const std::string& key) {
+  const StTensor* t = need(c, key);
+  if (!t) return false;
+  if (t->shape.size() != 2 || t->shape[1] % 64) return fail(c, key + ": not a [R, C % 64 == 0] matrix");
+  const int64_t R = t->shape[0], C = t->shape[1], NG = C / 64;
+  if (key.size() < 8 || key.compare(key.size() - 7, 7, ".weight")) return fail(c, key + ": not a .weight key");
+  const std::string base = key.substr(0, key.size() - 7);
+  const StTensor *q = cal.find(base + ".codes"), *s = cal.find(base + ".scales"), *b = cal.find(base + ".biases"),
+                 *sh = cal.find(base + ".shape");
+  if (!q || !s || !b || !sh) return fail(c, cal.path + ": missing calibrated tensors for " + base);
+  auto is = [](const StTensor* x, const char* dt, std::vector<int64_t> shp) { return x->dtype == dt && x->shape == shp; };
+  if (!is(q, "U8", {R, C / 2}) || !is(s, "F16", {R, NG}) || !is(b, "F16", {R, NG}) || !is(sh, "I64", {2}))
+    return fail(c, cal.path + ": " + base + ": dtype or shape does not match the release's [" + std::to_string(R) + ", " +
+                       std::to_string(C) + "]");
+  int64_t rc[2];
+  if (!cal.read(*sh, rc, c.err)) return false;
+  if (rc[0] != R || rc[1] != C) return fail(c, cal.path + ": " + base + ".shape differs from the release");
+  std::vector<uint8_t> codes(R * C / 2);
+  std::vector<uint16_t> S(R * NG), B(R * NG);
+  if (!cal.read(*q, codes.data(), c.err) || !cal.read(*s, S.data(), c.err) || !cal.read(*b, B.data(), c.err)) return false;
+  if (!c.w.add(name + ".q4", "u8", codes.data(), codes.size(), {R, C / 2}) || !c.w.add(name + ".s", "f16", S.data(), S.size() * 2, {R, NG}) ||
+      !c.w.add(name + ".b", "f16", B.data(), B.size() * 2, {R, NG}))
+    return fail(c, "write failed: " + name);
+  if (!used.insert(base).second) return fail(c, base + ": used twice");
+  c.s.matrices++;
+  c.s.tensors += 3;
+  c.s.calibrated++;
+  return true;
+}
+
+bool resident_qwen3_5_moe(Ctx& c, const Manifest& m, int bits, const SafeTensors* cal = nullptr,
+                          std::set<std::string>* used = nullptr) {
   const std::string P = "model.language_model.";
   const Rule F = Rule::F16;
   const char* qs = bits == 4 ? ".q4" : ".q";
-  // every affine matrix of the 8-bit recipe at `bits` (the call sites below pass bits and the suffix through this)
-  auto put_q = [&](Ctx& cc, const std::string& name, const std::string& key, Rule rule) { return ::ms::put_q(cc, name, key, rule, bits, qs); };
+  // every affine matrix of the 8-bit recipe at `bits` (the call sites below pass bits and the suffix through this);
+  // with a calibrated export, its codes / scales / biases instead of today's quantiser
+  auto put_q = [&](Ctx& cc, const std::string& name, const std::string& key, Rule rule) {
+    return cal ? put_q4_cal(cc, *cal, *used, name, key) : ::ms::put_q(cc, name, key, rule, bits, qs);
+  };
   for (int L = 0; L < m.physical_layers; L++) {
     std::string p = P + "layers." + std::to_string(L) + ".", s = std::to_string(L) + ".";
     if (!put_f32(c, s + "ln_in", p + "input_layernorm.weight", true) || !put_f32(c, s + "ln_post", p + "post_attention_layernorm.weight", true))
@@ -157,9 +194,17 @@ bool resident_qwen3_5_moe(Ctx& c, const Manifest& m, int bits) {
   return put_f32(c, "norm", P + "norm.weight", true) && put_q(c, "head", "lm_head.weight", F);
 }
 
-bool resident_inkling2_loop(Ctx& c, const Manifest& m) {
+bool resident_inkling2_loop(Ctx& c, const Manifest& m, int bits = 8, const SafeTensors* cal = nullptr,
+                            std::set<std::string>* used = nullptr) {
   const std::string P = "model.llm.";
   const Rule B = Rule::BF16;
+  // bits 4 (memory-limited phones, profile phone-small): the same matrices (head and the six attention projections) as
+  // plain affine 4-bit g64 (NAME.q4 / .s / .b); everything the 8-bit file keeps exact stays as it is; with a calibrated
+  // export (jobs/babel/ink_q4c_export.py), its codes / scales / biases instead of today's quantiser
+  const char* qs = bits == 4 ? ".q4" : ".q";
+  auto put_q = [&](Ctx& cc, const std::string& name, const std::string& key, Rule rule) {
+    return cal ? put_q4_cal(cc, *cal, *used, name, key) : ::ms::put_q(cc, name, key, rule, bits, qs);
+  };
   const Json& tc = m.config["text_config"];
   const int CS = (int)tc["loop_config"]["core_start"].i(), CE = (int)tc["loop_config"]["core_end"].i();
   const int H = (int)m.hidden, SC = (int)tc["sconv_kernel_size"].i();
@@ -230,10 +275,20 @@ bool resident_inkling2_loop(Ctx& c, const Manifest& m) {
 
 }  // namespace
 
-bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats& st, std::string& err, int bits) {
+bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats& st, std::string& err, int bits,
+                     const std::string& calibrated) {
   auto t0 = std::chrono::steady_clock::now();
   SafeTensors src;
   if (!src.open(m.dir + "/" + m.raw["resident"]["file"].str_or("resident.safetensors"), err)) return false;
+  SafeTensors cal;
+  std::set<std::string> used;
+  if (!calibrated.empty()) {
+    if (bits != 4 || (m.family != "qwen3_5_moe" && m.family != "inkling2_loop")) {
+      err = "a calibrated resident is defined for qwen3_5_moe and inkling2_loop at 4 bits only";
+      return false;
+    }
+    if (!cal.open(calibrated, err)) return false;
+  }
   Cfg cfg;
   if (!m.engine_cfg(cfg, err)) return false;
   DmWriter w;
@@ -241,16 +296,27 @@ bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats
   for (auto& kv : cfg) w.cfg(kv.first, kv.second);
   Ctx c{src, w, st, err};
   bool ok;
-  if (m.family == "qwen3_5_moe") {
+  if (m.family == "qwen3_5_moe" || m.family == "inkling2_loop") {
     if (bits == 4) w.cfg("resident_bits", "4");
-    ok = resident_qwen3_5_moe(c, m, bits);
-  } else if (m.family == "inkling2_loop") {
-    if (bits != 8) {
-      err = "a 4-bit resident is only defined for qwen3_5_moe";
-      return false;
+    if (m.family == "qwen3_5_moe") {
+      ok = resident_qwen3_5_moe(c, m, bits, calibrated.empty() ? nullptr : &cal, &used);
+    } else {
+      ok = resident_inkling2_loop(c, m, bits, calibrated.empty() ? nullptr : &cal, &used);
+      w.cfg("fp16_inexact", std::to_string(st.q.f16_inexact));
     }
-    ok = resident_inkling2_loop(c, m);
-    w.cfg("fp16_inexact", std::to_string(st.q.f16_inexact));
+    if (ok && !calibrated.empty()) {  // every matrix of the export used, nothing else in it
+      int extra = 0;
+      for (auto& t : cal.tensors) {
+        size_t dot = t.name.rfind('.');
+        std::string base = t.name.substr(0, dot), sfx = dot == std::string::npos ? "" : t.name.substr(dot);
+        if (!used.count(base) || (sfx != ".codes" && sfx != ".scales" && sfx != ".biases" && sfx != ".shape")) extra++;
+      }
+      if (extra || cal.tensors.size() != used.size() * 4) {
+        err = calibrated + ": " + std::to_string(extra) + " tensors not used (" + std::to_string(used.size()) + " matrices used of " +
+              std::to_string(cal.tensors.size()) + " tensors)";
+        ok = false;
+      }
+    }
   } else {
     err = "no resident recipe for family " + m.family;
     return false;

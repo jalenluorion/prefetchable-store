@@ -42,7 +42,8 @@ struct LoadOpts {
 // embeddings.safetensors, the table alone: phone-store make_embeddings.py). Empty: the manifest's file, or, when that
 // file is absent, <dir>/embeddings.safetensors if present (the phone layout, without the 4.9 GB bf16 resident).
 bool resolve_model(const std::string& dir, const std::string& resident, Mem res_mem, LoadOpts& lo, std::string& family,
-                   std::string& err, const std::string& derived_dir = "", const std::string& emb_file = "");
+                   std::string& err, const std::string& derived_dir = "", const std::string& emb_file = "",
+                   const std::string& profile = "");  // profile: its experts override (Manifest::apply_profile_experts)
 
 // Per-sequence state; its layout is private to the model.
 class State {
@@ -61,7 +62,10 @@ struct ModelMem {
 };
 
 // What forward() returns: nothing, the last position's logits, or (EXTENSION, n > 1) every position's.
-enum class Want { NONE, LAST, GREEDY };  // GREEDY: only the argmax of the last position is needed (exact greedy head)
+// GREEDY: only the argmax of the last position is needed (exact greedy head); TOPK: only the exact top-k logits are
+// needed (a top-k sampler; k is the model's head_topk option), the other rows may hold -inf. A family without a screened
+// head treats both as LAST.
+enum class Want { NONE, LAST, GREEDY, TOPK };
 
 class Model {
  public:
@@ -133,6 +137,14 @@ class Model {
   // features from outside (the port check on recorded features): rows [n, 4, hidden] for positions p0 ..
   virtual bool draft_head_feed(const float* rows, int n, int p0) { return false; }
   virtual size_t draft_head_bytes() const { return 0; }  // its weights and state
+
+  // For draft heads trained outside (LightHeadSource, draft.h): the post-norm final hidden state (the output head's input)
+  // of the last step (i < 0) or of position i of the last verify; null when not kept. The raw embedding row of a token
+  // [hidden]. The argmax of the model's own output head over hn (the screened greedy head when the model has one), and
+  // the top-1 softmax probability into *conf.
+  virtual const float* final_hidden(int i) const { return nullptr; }
+  virtual bool embed_row(int32_t tok, float* out) const { return false; }
+  virtual int head_argmax(const float* hn, float* conf) { return -1; }
 
   // EXTENSION: tokenizer and chat formatter (per family), checked against the release.
 };

@@ -19,10 +19,11 @@
 #include <sstream>
 #include <sys/stat.h>
 
-#include "dmeng/greedy_head.h"
+#include "dmeng/screen_head.h"
 #include "dmeng/model.h"
 #include "dmeng/sampler.h"
 #include "ink_draft.h"
+#include "../../core/gpu_split.h"
 
 namespace dm {
 namespace {
@@ -34,6 +35,7 @@ struct ICfg {
   size_t rec[2], gu_c[2], gu_s[2], dn_c[2], dn_s[2];  // [0] nvfp4, [1] mxfp8
   long trailer = -1, emb_off = 0;
   std::string emb_file, layer_file;
+  std::vector<std::string> layer_paths;
   std::vector<std::pair<int, int>> visits;  // (layer, pass) per application
   int NV = 0;
   bool core(int L) const { return L >= CS && L < CE; }
@@ -82,6 +84,14 @@ struct ICfg {
     emb_off = R.geti("emb_off");
     emb_file = R.gets("emb_file");
     layer_file = R.gets("layer_file");
+    layer_paths.clear();
+    if (R.has_cfg("layer_paths"))  // a profile's own record files (Manifest::apply_profile_experts)
+      for (size_t a = 0, b; a <= R.gets("layer_paths").size(); a = b + 1) {
+        const std::string s = R.gets("layer_paths");
+        b = s.find(';', a);
+        if (b == std::string::npos) b = s.size();
+        layer_paths.push_back(s.substr(a, b - a));
+      }
     visits.clear();
     for (int L = 0; L < CS; L++) visits.push_back({L, 0});
     for (int p = 0; p < NP; p++)
@@ -149,8 +159,18 @@ struct Inkling : Model {
   XBuf xa, xb, xc, xe;
   std::vector<float> h, blk, bank, msg, tmp, lgts, emb, embn, full;
   std::vector<float> taps_;  // [4, H] the draft head's features of the last step (empty: not kept)
-  GreedyHead gh;             // the exact greedy head (Want::GREEDY with the fast_head option)
+  std::vector<float> att_sc;  // [NH, n] the grouped decode attention's scores
+  ScreenHead sh;             // the screened head (core): Want::GREEDY / Want::TOPK with the fast_head option
   bool fast_head = false;
+  int head_topk = 0;         // Want::TOPK's k
+  // run-ahead (Core::run_ahead): the application after the one waiting, up to its router, on the approximate state
+  bool ra_mode = false;            // layer() stops before the MoE step and leaves its input in ra_xm
+  float* ra_xm = nullptr;
+  float* cur_res = nullptr;        // the residual of the application in its MoE step (layer() sets it)
+  const float* cur_m4 = nullptr;
+  std::vector<float> ra_tmp, ra_h, ra_conv, ra_blk, ra_lg, ra_c[4];
+  XBuf ra_xq;
+  int run_ahead_step(int v, const float* ypart, int32_t* picks, int maxk);
   int greedy_ = -1;
   double gh_fallback = 0;
   int greedy() const override { return fast_head ? greedy_ : -1; }
@@ -159,6 +179,7 @@ struct Inkling : Model {
   std::unique_ptr<InkDraft> dh;
   std::string dir;
   bool dh_exact = false;
+  bool dh_q8 = true;  // the draft head's matrices in AFF8 (ink_draft.h InkDraftOpts::q8)
   int dh_ctx = 16384;
   std::vector<float> ctaps;  // [n, 4, H] a chunk's features
   std::vector<float> dh_emb, dh_embn;
@@ -174,16 +195,16 @@ struct Inkling : Model {
     std::ostringstream o;
     o << "{";
     if (fast_head) {
-      const double n = std::max(1.0, gh.hd_calls);
-      o << "\"fast_head\":{\"candidates_per_token\":" << gh.hd_cand / n << ",\"coarse_ms\":" << gh.t_head_coarse / n << ",\"exact_ms\":"
-        << gh.t_head_exact / n << ",\"full_head_fallbacks\":" << gh_fallback << "}";
+      const double n = std::max(1.0, sh.n_calls);
+      o << "\"fast_head\":{\"candidates_per_token\":" << sh.n_cand / n << ",\"coarse_ms\":" << sh.ms_coarse / n << ",\"exact_ms\":"
+        << sh.ms_exact / n << ",\"full_head_fallbacks\":" << gh_fallback << "}";
     }
     if (dh) o << (fast_head ? "," : "") << "\"draft_head\":" << dh->stats_json();
     o << "}";
     return o.str();
   }
   void reset_stats() override {
-    gh.reset_stats();
+    sh.reset_stats();
     gh_fallback = 0;
     if (dh) dh->reset_stats();
   }
@@ -204,6 +225,21 @@ struct Inkling : Model {
   const float* router_emb() const override { return embn.data(); }
   bool set_option(const std::string& name, const std::string& value, std::string& err) override;
   const std::vector<float>* taps() const override { return taps_.empty() ? nullptr : &taps_; }
+  // light draft heads (draft.h LightHeadSource): the post-norm final hidden of the last step (i < 0) or of verify position
+  // i, the raw embedding row, the output head's argmax and the top-1 probability after the softcap
+  const float* final_hidden(int i) const override {
+    if (i < 0) return tmp.size() >= (size_t)3 * c.H ? tmp.data() + 2 * (size_t)c.H : nullptr;
+    return (size_t)(i + 1) * c.H <= vhn.size() ? vhn.data() + (size_t)i * c.H : nullptr;
+  }
+  bool embed_row(int32_t tok, float* out) const override {
+    if (tok < 0 || tok >= c.VU) return false;
+    rows.row(tok, out);
+    return true;
+  }
+  int head_argmax(const float* hn, float* conf) override;
+  std::vector<float> vhn;  // the last verify's post-norm final hidden per position
+  XBuf dh_x;
+  std::vector<float> dh_lg;
   void layer(int v, const float* m4);  // one application; m4 = 4 messages [4, H] or null
   // ---- a chunk of positions in one pass (batched prefill; multi-position verify): every application runs for all the
   // chunk's positions before the next; per position the single step's arithmetic (chunk.cpp section below)
@@ -226,6 +262,17 @@ struct Inkling : Model {
   int po_chunk = 256;                    // prefill sub-chunk (1: single steps)
   int po_span = 8192;                    // positions per application-major span
   bool po_names = true;                  // name the next application's experts while one runs (spans of several sub-chunks)
+  // the batched projections' exact CPU + GPU split (src/core/gpu_split.h): the GPU's share of each packed 8-bit
+  // projection's rows in sub-chunks of at least po_gpu_min positions; 0 = CPU only. The experts (NVFP4 / MXFP8) stay
+  // on the CPU (no exact GPU kernel for them).
+  std::unique_ptr<GpuGemm> gpu;
+  double po_gpu = 0;
+  double po_gpu_exp = 0;    // the experts' GPU share (NVFP4 experts in moe_chunk; MXFP8 layers stay on the CPU)
+  bool slab_wrapped = false;
+  int po_gpu_min = 256, po_gpu_kernel = 1;
+  bool po_release = false;
+  GpuSplitAcct gacct;
+  bool set_gpu_frac(double f, std::string& err, bool experts = false);
   long n_chunks = 0;
   std::vector<uint8_t> span_snap, ring_tmp;  // the fixed state at a span's start (a cancel inside it); a ring slice
   struct SpanRun {                            // what a prefill span reports and watches
@@ -271,22 +318,61 @@ inline float dotf(const float* a, const float* b, int n) {
 }
 
 // depth attention (BlockAttentionResidual): sources src[0..n) (the block states, then the partial state), learned
-// queries q [Q, H]; weights = softmax over sources of src . q / sqrt(H); out [Q, H] = weighted sum of the sources
+// queries q [Q, H]; weights = softmax over sources of src . q / sqrt(H); out [Q, H] = weighted sum of the sources.
+// Per output the arithmetic of the single loops this replaced, bit for bit: each source's score is dotf's two chains
+// (four sources at once, the query loaded once), each output element the chain t = fma(w[i], src[i][d], t) over i in
+// order, 16 elements at a time.
 void depth_attn(const float* const* src, int n, const float* q, int Q, int H, float* out) {
   const float scale = 1.f / std::sqrt((float)H);
   for (int j = 0; j < Q; j++) {
     float w[16], mx = -INFINITY;
-    for (int i = 0; i < n; i++) {
-      w[i] = dotf(src[i], q + (size_t)j * H, H) * scale;
-      mx = std::max(mx, w[i]);
+    const float* qj = q + (size_t)j * H;
+    int i = 0;
+    const int H8 = H & ~7;
+    for (; i + 4 <= n; i += 4) {
+      float32x4_t a0 = vdupq_n_f32(0), a1 = a0, b0 = a0, b1 = a0, c0 = a0, c1 = a0, d0 = a0, d1 = a0;
+      const float *s0 = src[i], *s1 = src[i + 1], *s2 = src[i + 2], *s3 = src[i + 3];
+      for (int k = 0; k < H8; k += 8) {
+        const float32x4_t q0 = vld1q_f32(qj + k), q1 = vld1q_f32(qj + k + 4);
+        a0 = vfmaq_f32(a0, vld1q_f32(s0 + k), q0);
+        a1 = vfmaq_f32(a1, vld1q_f32(s0 + k + 4), q1);
+        b0 = vfmaq_f32(b0, vld1q_f32(s1 + k), q0);
+        b1 = vfmaq_f32(b1, vld1q_f32(s1 + k + 4), q1);
+        c0 = vfmaq_f32(c0, vld1q_f32(s2 + k), q0);
+        c1 = vfmaq_f32(c1, vld1q_f32(s2 + k + 4), q1);
+        d0 = vfmaq_f32(d0, vld1q_f32(s3 + k), q0);
+        d1 = vfmaq_f32(d1, vld1q_f32(s3 + k + 4), q1);
+      }
+      float t[4] = {vaddvq_f32(vaddq_f32(a0, a1)), vaddvq_f32(vaddq_f32(b0, b1)), vaddvq_f32(vaddq_f32(c0, c1)), vaddvq_f32(vaddq_f32(d0, d1))};
+      for (int u = 0; u < 4; u++) {
+        for (int k = H8; k < H; k++) t[u] += src[i + u][k] * qj[k];
+        w[i + u] = t[u] * scale;
+      }
     }
+    for (; i < n; i++) w[i] = dotf(src[i], qj, H) * scale;
+    for (i = 0; i < n; i++) mx = std::max(mx, w[i]);
     float z = 0;
-    for (int i = 0; i < n; i++) z += (w[i] = std::exp(w[i] - mx));
-    for (int i = 0; i < n; i++) w[i] /= z;
+    for (i = 0; i < n; i++) z += (w[i] = std::exp(w[i] - mx));
+    for (i = 0; i < n; i++) w[i] /= z;
     float* o = out + (size_t)j * H;
-    for (int d = 0; d < H; d++) {
+    int d = 0;
+    for (; d + 16 <= H; d += 16) {
+      float32x4_t o0 = vdupq_n_f32(0), o1 = o0, o2 = o0, o3 = o0;
+      for (i = 0; i < n; i++) {
+        const float* s = src[i] + d;
+        o0 = vfmaq_n_f32(o0, vld1q_f32(s), w[i]);
+        o1 = vfmaq_n_f32(o1, vld1q_f32(s + 4), w[i]);
+        o2 = vfmaq_n_f32(o2, vld1q_f32(s + 8), w[i]);
+        o3 = vfmaq_n_f32(o3, vld1q_f32(s + 12), w[i]);
+      }
+      vst1q_f32(o + d, o0);
+      vst1q_f32(o + d + 4, o1);
+      vst1q_f32(o + d + 8, o2);
+      vst1q_f32(o + d + 12, o3);
+    }
+    for (; d < H; d++) {
       float t = 0;
-      for (int i = 0; i < n; i++) t += w[i] * src[i][d];
+      for (i = 0; i < n; i++) t = __builtin_fmaf(w[i], src[i][d], t);
       o[d] = t;
     }
   }
@@ -458,8 +544,10 @@ bool Inkling::load(const LoadOpts& op, std::string& err) {
   }
   mi.pool_share = any_mx ? std::vector<double>{0.8, 0.2} : std::vector<double>{1.0, 0.0};
   mi.layer_file = c.layer_file;
+  mi.layer_paths = c.layer_paths;
   mi.eos = c.eos;
   mi.has_ref_path = true;
+  mi.union_batches = true;  // prefill spans and verify passes use Core::moe_chunk only
   views.resize(c.NL);
   for (int L = 0; L < c.NL; L++) {
     MoeView& v = views[L];
@@ -665,6 +753,10 @@ struct AttnCtx {
   float* att = nullptr;
   int o_chunks = 0;
   std::atomic<int> heads_left{0};
+  // the grouped form (phase_attn_kv): the 3 heads' scores and 1 / z of each KV head, written by its score job
+  float* scv = nullptr;  // [NH, n]
+  float iz[64];
+  std::atomic<int> sc_done[16];
   alignas(128) std::atomic<int> next{0};
 };
 void phase_attn(void* p, int, int) {
@@ -792,6 +884,166 @@ void phase_attn(void* p, int, int) {
   }
 }
 
+// The same attention with each key and value row loaded once for the 3 query heads that share it (the prefill's
+// phase_attn_g scheme, here for one position). Jobs, in dependency order: the KV preparation of each KV head (as
+// phase_attn); a score job per KV head (its 3 heads' clips and scaling, relative bias, scores, max, exp and 1 / z); a
+// value job per (KV head, 64 dimensions) once its score job is done (the 3 heads' sums over the keys kept in
+// registers, 32 dimensions per pass, the gate, the activation block's quantisation); then the output projection's chunks
+// once every value job is done. Each head's arithmetic is phase_attn's: the bias in j order, the score as two FMA
+// accumulators over the dimensions then their sum, multiplied by the scale then the bias added (attn_score: not fused,
+// as phase_attn compiles it), max / exp / double sum in key order, each output element one FMA chain over the keys
+// from 0. fp16 K/V, 3 heads per KV head, HD a multiple of 64 (else phase_attn).
+static inline float attn_score1(float dot, float scale, float b) {
+  float m = dot * scale;
+  __asm__("" : "+w"(m));
+  return m + b;
+}
+void phase_attn_kv(void* p, int, int) {
+  constexpr int REP = 3;
+  AttnCtx& X = *(AttnCtx*)p;
+  Inkling& M = *X.M;
+  const ICfg& c = M.c;
+  const int HD = c.HD, pos = X.T - 1, NKV = c.NKV, NHALF = HD / 64;
+  const VState& S = M.S->vs[X.v];
+  const int t0 = X.ring ? std::max(0, pos - c.WIN + 1) : 0, n = pos - t0 + 1;
+  static thread_local std::vector<float> biasv;
+  if ((int)biasv.size() < REP * c.REXT) biasv.resize((size_t)REP * c.REXT);
+  const float scale = 1.f / std::sqrt((float)HD);
+  const int nval = NKV * NHALF, total = 2 * NKV + nval + X.o_chunks;
+  for (int job; (job = X.next.fetch_add(1, std::memory_order_relaxed)) < total;) {
+    if (job >= 2 * NKV + nval) {  // an output-projection chunk: rows [r0, r1), then the convolution of those channels
+      while (X.heads_left.load(std::memory_order_acquire) > 0) __builtin_arm_yield();
+      const int r0 = (job - 2 * NKV - nval) * 32, r1 = std::min(X.wo->rows, r0 + 32);
+      mv(*X.wo, r0, r1, &M.xe.q, X.o, X.att + r0, M.ref);
+      sconv_rng(X.St->conv[2], X.W->aconv, X.att, c.H, c.SC, X.att, r0, r1);
+      continue;
+    }
+    if (job < NKV) {  // KV head j: as phase_attn
+      const int j = job, c0 = j * HD, c1 = c0 + HD, KVD = NKV * HD;
+      const Lw& W = *X.W;
+      VState& St = *X.St;
+      if (W.global) {
+        dconv_rng(St.conv[0], W.kstat, X.dk, X.k, KVD, c.SC, c.HD, X.kc, c0, c1);
+        dconv_rng(St.conv[1], W.vstat, X.dv, X.vv, KVD, c.SC, c.HD, X.vc, c0, c1);
+      } else {
+        sconv_rng(St.conv[0], W.kconv, X.k, KVD, c.SC, X.kc, c0, c1);
+        sconv_rng(St.conv[1], W.vconv, X.vv, KVD, c.SC, X.vc, c0, c1);
+      }
+      float* kh = X.kc + (size_t)j * HD;
+      float* vh = X.vc + (size_t)j * HD;
+      l2clip(kh, nullptr, HD, c.qkclip);
+      rmsnorm(vh, nullptr, HD, c.eps, vh);
+      _Float16* kd = St.K + ((size_t)j * St.cap + X.slot) * HD;
+      _Float16* vd = St.V + ((size_t)j * St.cap + X.slot) * HD;
+      for (int i = 0; i < HD; i++) {
+        kd[i] = (_Float16)kh[i];
+        vd[i] = (_Float16)vh[i];
+      }
+      X.kv_done[j].store(1, std::memory_order_release);
+      continue;
+    }
+    if (job < 2 * NKV) {  // the scores of KV head kvh's 3 heads
+      const int kvh = job - NKV;
+      const Lw& W = *X.W;
+      float* sc[REP];
+      const float* q[REP];
+      float mx[REP];
+      const int nb = std::min(n, c.REXT);
+      for (int g = 0; g < REP; g++) {
+        const int hh = kvh * REP + g;
+        l2clip(X.q + (size_t)hh * HD, W.qclip + (size_t)hh * HD, HD, c.qkclip);
+        l2clip(X.r + (size_t)hh * c.DREL, W.rclip + (size_t)hh * c.DREL, c.DREL, c.relclip);
+        if (W.global) {
+          for (int i = hh * HD; i < (hh + 1) * HD; i++) X.q[i] *= X.tau;
+          for (int i = hh * c.DREL; i < (hh + 1) * c.DREL; i++) X.r[i] *= X.tau;
+        }
+        sc[g] = X.scv + (size_t)hh * n;
+        q[g] = X.q + (size_t)hh * HD;
+        const float* r = X.r + (size_t)hh * c.DREL;
+        float* bs = biasv.data() + (size_t)g * c.REXT;
+        for (int d = 0; d < nb; d++) bs[d] = 0.f;
+        for (int j = 0; j < c.DREL; j++) {
+          const float rj = r[j], *rel = X.rel + (size_t)j * c.REXT;
+          for (int d = 0; d < nb; d++) bs[d] += rj * rel[d];
+        }
+        mx[g] = X.sink[hh];
+      }
+      while (X.kv_done[kvh].load(std::memory_order_acquire) == 0) __builtin_arm_yield();
+      const _Float16* Kb = S.K + (size_t)kvh * S.cap * HD;
+      for (int i = 0; i < n; i++) {
+        const int t = t0 + i, d = pos - t;
+        const int slot = X.ring ? t % S.cap : t;
+        const _Float16* kr = Kb + (size_t)slot * HD;
+        float32x4_t s0[REP], s1[REP];
+        for (int g = 0; g < REP; g++) s0[g] = s1[g] = vdupq_n_f32(0);
+        for (int k = 0; k < HD; k += 8) {
+          float16x8_t kv = vld1q_f16((const float16_t*)kr + k);
+          const float32x4_t lo = vcvt_f32_f16(vget_low_f16(kv)), hi = vcvt_high_f32_f16(kv);
+          for (int g = 0; g < REP; g++) {
+            s0[g] = vfmaq_f32(s0[g], lo, vld1q_f32(q[g] + k));
+            s1[g] = vfmaq_f32(s1[g], hi, vld1q_f32(q[g] + k + 4));
+          }
+        }
+        for (int g = 0; g < REP; g++) {
+          const float dot = vaddvq_f32(vaddq_f32(s0[g], s1[g]));
+          const float sv = attn_score1(dot, scale, d < c.REXT ? biasv[(size_t)g * c.REXT + d] : 0.f);
+          sc[g][i] = sv;
+          mx[g] = std::max(mx[g], sv);
+        }
+      }
+      for (int g = 0; g < REP; g++) {
+        const int hh = kvh * REP + g;
+        double z = std::exp((double)X.sink[hh] - mx[g]);
+        for (int i = 0; i < n; i++) z += (sc[g][i] = std::exp(sc[g][i] - mx[g]));
+        X.iz[hh] = (float)(1.0 / z);
+      }
+      X.sc_done[kvh].store(1, std::memory_order_release);
+      continue;
+    }
+    // values: KV head kvh, dimensions [k0, k0 + 64) of its 3 heads
+    const int vj = job - 2 * NKV, kvh = vj / NHALF, k0 = (vj % NHALF) * 64;
+    while (X.sc_done[kvh].load(std::memory_order_acquire) == 0) __builtin_arm_yield();
+    const _Float16* Vb = S.V + (size_t)kvh * S.cap * HD;
+    float accs[REP][64];
+    const float* sc[REP];
+    float iz[REP];
+    for (int g = 0; g < REP; g++) {
+      sc[g] = X.scv + (size_t)(kvh * REP + g) * n;
+      iz[g] = X.iz[kvh * REP + g];
+    }
+    for (int k1 = k0; k1 < k0 + 64; k1 += 32) {
+      float32x4_t a[REP][8];
+      for (int g = 0; g < REP; g++)
+        for (int u = 0; u < 8; u++) a[g][u] = vdupq_n_f32(0);
+      for (int i = 0; i < n; i++) {
+        const int t = t0 + i;
+        const int slot = X.ring ? t % S.cap : t;
+        const float16_t* vr = (const float16_t*)(Vb + (size_t)slot * HD + k1);
+        float32x4_t vf[8];
+        for (int u = 0; u < 4; u++) {
+          float16x8_t vv = vld1q_f16(vr + 8 * u);
+          vf[2 * u] = vcvt_f32_f16(vget_low_f16(vv));
+          vf[2 * u + 1] = vcvt_high_f32_f16(vv);
+        }
+        for (int g = 0; g < REP; g++) {
+          const float32x4_t pv = vdupq_n_f32(sc[g][i] * iz[g]);
+          for (int u = 0; u < 8; u++) a[g][u] = vfmaq_f32(a[g][u], vf[u], pv);
+        }
+      }
+      for (int g = 0; g < REP; g++)
+        for (int u = 0; u < 8; u++) vst1q_f32(accs[g] + (k1 - k0) + 4 * u, a[g][u]);
+    }
+    for (int g = 0; g < REP; g++) {
+      const int hh = kvh * REP + g;
+      float* o = X.o + (size_t)hh * HD + k0;
+      const float* gt = X.g + (size_t)hh * HD + k0;
+      for (int k = 0; k < 64; k++) o[k] = accs[g][k] * sigm(gt[k]);
+      if (!M.ref && 64 % XB == 0) xq_block(M.xe.q, (hh * HD + k0) / XB, o);
+    }
+    if (X.o_chunks) X.heads_left.fetch_sub(1, std::memory_order_release);
+  }
+}
+
 // message gates: out_i = (1 - tanh(F_i s_i)) * hs_i + tanh(G_i s_i) * msg_i, s_i = D_i [rms(hs_i), rms(msg_i)]
 void gates(Inkling& M, const Gate* const* G, const float* const* hs, const float* const* mg, float* const* out, int n) {
   // One fork-join for the whole gate call, jobs in dependency order: the 2n input norms; gate i's down rows (chunks of 16,
@@ -829,7 +1081,7 @@ void gates(Inkling& M, const Gate* const* G, const float* const* hs, const float
     C.down_left[i].store(C.dch, std::memory_order_relaxed);
     M.T->bytes_res += (double)G[i]->down.bytes() + (double)G[i]->forget.bytes() + (double)G[i]->gain.bytes();
   }
-  M.core->pool->run(
+  M.core->pool->run_any(
       [](void* p, int, int) {
         Comb& C = *(Comb*)p;
         const int per = (C.H + 255) / 256, nn = 2 * C.n, nd = C.dch * C.n, total = nn + nd + per * C.n;
@@ -893,6 +1145,7 @@ void Inkling::layer(int v, const float* m4) {
   float* vc = kc + KVD;
   float* o = vc + KVD;
   auto t0 = clk::now();
+  stage_mark(ST_DEPTH);
   std::memcpy(hres, h.data(), sizeof(float) * H);
   rmsnorm(h.data(), nullptr, H, 1e-6f, nres);
   const int nq = W.global ? 3 : 1;
@@ -913,10 +1166,12 @@ void Inkling::layer(int v, const float* m4) {
     const Gate* G[3] = {&W.mg[0], &W.mg[1], &W.mg[2]};
     const float* mg[3] = {m4, m4 + H, m4 + 2 * H};
     float* out[3] = {gin, gin + H, gin + 2 * H};
+    stage_mark(ST_GATES);
     gates(*this, G, qkv_in, mg, out, 3);
     for (int i = 0; i < 3; i++) qkv_in[i] = gin + (size_t)i * H;
   }
   const bool three = W.global || m4;
+  stage_mark(ST_NORMQ);
   if (W.global) {
     rmsnorm(qkv_in[0], W.lnq, H, c.eps, qn);
     rmsnorm(qkv_in[1], W.lnk, H, c.eps, qn + H);
@@ -941,6 +1196,7 @@ void Inkling::layer(int v, const float* m4) {
   jb[nj++] = {&W.v, xq_v, vi, vv};
   jb[nj++] = {&W.r, xq_q, qi, r};
   jb[nj++] = {&W.sink, nullptr, qi, sk};
+  stage_mark(ST_ATTN_PROJ);
   if (W.global) {
     jb[nj++] = {&W.kwp, nullptr, ki, dk};
     jb[nj++] = {&W.vwp, nullptr, vi, dv};
@@ -995,7 +1251,17 @@ void Inkling::layer(int v, const float* m4) {
     X.heads_left.store(c.NH, std::memory_order_relaxed);
     T->bytes_res += (double)W.o.bytes();
   }
-  core->pool->run(phase_attn, &X);
+  // the grouped form: fp16 K/V, 3 heads per KV head, HD a multiple of 64 (the activation blocks), the output projection fused
+  const bool grouped = !St.Kf && c.NH == 3 * c.NKV && c.HD % 64 == 0 && fuse_o && !ref;
+  if (grouped) {
+    const int n = pos - (St.ring ? std::max(0, pos - c.WIN + 1) : 0) + 1;
+    if (att_sc.size() < (size_t)c.NH * n) att_sc.resize((size_t)c.NH * (n + 1024));
+    X.scv = att_sc.data();
+    for (int j = 0; j < c.NKV; j++) X.sc_done[j].store(0, std::memory_order_relaxed);
+    X.heads_left.store(c.NKV * (c.HD / 64), std::memory_order_relaxed);
+  }
+  stage_mark(ST_ATTN_CORE);
+  core->pool->run_any(grouped ? phase_attn_kv : phase_attn, &X);
   auto t4 = clk::now();
   T->attn_core += ms_between(t3, t4);  // (with the output projection fused: attention and output projection together)
   if (!fuse_o) {
@@ -1007,6 +1273,7 @@ void Inkling::layer(int v, const float* m4) {
   auto t5 = clk::now();
   T->attn_out += ms_between(t4, t5);
   // the attention residual, the mlp input
+  stage_mark(ST_DEPTH);
   if (L % c.BLOCK == 0) {
     std::memcpy(blk.data() + (size_t)nblk * H, nres, sizeof(float) * H);
     nblk++;
@@ -1028,22 +1295,90 @@ void Inkling::layer(int v, const float* m4) {
     const float* hs[1] = {mlp};
     const float* mg[1] = {m4 + 3 * H};
     float* out[1] = {mlp};
+    stage_mark(ST_GATES);
     gates(*this, G, hs, mg, out, 1);
   }
+  stage_mark(ST_NORMQ);
   rmsnorm(mlp, W.mlnorm, H, c.eps, xm);
   T->msg += ms_since(t6);
+  if (ra_mode) {  // run-ahead: the MoE input is all it needs
+    ra_xm = xm;
+    return;
+  }
+  cur_res = res;
   core->moe_step(v, xm, y, views[L]);
   auto t8 = clk::now();
+  stage_mark(ST_CONV);
   sconv(St.conv[3], W.mconv, y, H, c.SC, y2);
   for (int i = 0; i < H; i++) h[i] = res[i] + y2[i];
   T->misc += ms_since(t8);
 }
 
 // ------------------------------------------------------------------------------------------------ one token
+#if DM_COUNTERS
+// Counting builds only: DMENG_PROJ_REPLAY=N runs the decode's 48 attention-projection fork-joins N times before the
+// first step, on the model's own pool, weights and input buffers (stage "span_copies"), so their cycles per byte can be
+// set beside the same calls inside decode (stage "attn_proj"). Passes alternate between the decode's form (inputs
+// quantised inside the fork-join, run_rows_q; stage "span_copies") and inputs quantised by the caller before it
+// (run_rows; stage "embed").
+static void proj_replay(Inkling& M) {
+  static const int N = getenv("DMENG_PROJ_REPLAY") ? atoi(getenv("DMENG_PROJ_REPLAY")) : 0;
+  static bool done = false;
+  if (!N || done) return;
+  done = true;
+  const ICfg& c = M.c;
+  const int H = c.H, QD = c.NH * c.HD, KVD = c.NKV * c.HD, RD = c.NH * c.DREL;
+  std::vector<float> in((size_t)3 * H), out((size_t)2 * QD + 2 * KVD + RD + 256);
+  for (size_t i = 0; i < in.size(); i++) in[i] = std::sin(0.37f * (float)i);
+  for (int rep = 0; rep < 2 * N; rep++) {
+    const bool preq = rep & 1;
+    stage_mark(preq ? ST_EMBED : ST_SPAN);
+    for (int v = 0; v < c.NV; v++) {
+      const int L = c.visits[v].first;
+      const Lw& W = M.lw[L];
+      const bool three = W.global || c.visits[v].second > 0;
+      const float* qi = in.data();
+      const float* ki = three ? qi + H : qi;
+      const float* vi = three ? qi + 2 * H : qi;
+      float* q = out.data();
+      float* g = q + QD;
+      float* k = g + QD;
+      float* vv = k + KVD;
+      float* r = vv + KVD;
+      float* sk = r + RD;
+      Job jb[10];
+      int nj = 0;
+      const XQ* xq_k = three ? &M.xb.q : &M.xa.q;
+      const XQ* xq_v = three ? &M.xc.q : &M.xa.q;
+      jb[nj++] = {&W.q, &M.xa.q, qi, q};
+      jb[nj++] = {&W.g, &M.xa.q, qi, g};
+      jb[nj++] = {&W.k, xq_k, ki, k};
+      jb[nj++] = {&W.v, xq_v, vi, vv};
+      jb[nj++] = {&W.r, &M.xa.q, qi, r};
+      jb[nj++] = {&W.sink, nullptr, qi, sk};
+      XBuf* qs[3] = {&M.xa, &M.xb, &M.xc};
+      const float* xs[3] = {qi, ki, vi};
+      const int ks[3] = {H, H, H};
+      if (preq) {
+        for (int i = 0; i < (three ? 3 : 1); i++) qs[i]->prep(xs[i], H);
+        run_rows(*M.core->pool, jb, nj, 32, false, nullptr);
+      } else {
+        run_rows_q(*M.core->pool, jb, nj, 32, false, nullptr, qs, xs, ks, three ? 3 : 1);
+      }
+    }
+  }
+  stage_mark(ST_OTHER);
+}
+#endif
+
 void Inkling::step(State& s0, int32_t tok, Want want) {
   S = (IState*)&s0;
+#if DM_COUNTERS
+  proj_replay(*this);
+#endif
   const int H = c.H;
   auto t0 = clk::now();
+  stage_mark(ST_EMBED);
   rows.row(tok, emb.data());
   rmsnorm(emb.data(), embed_norm, H, c.eps, h.data());
   embn = h;  // the transformers embed_tokens output: the routers' `emb`
@@ -1065,6 +1400,7 @@ void Inkling::step(State& s0, int32_t tok, Want want) {
   for (int p = 0; p < c.NP; p++) {
     if (p > 0) {
       auto tm = clk::now();
+      stage_mark(ST_DEPTH);
       // the bank: the blocks the previous pass appended after its first one, and rms of its final hidden state
       const float* src[16];
       int nb = 0;
@@ -1080,7 +1416,7 @@ void Inkling::step(State& s0, int32_t tok, Want want) {
         float* out;
         alignas(128) std::atomic<int> next{0};
       } mc{src, nb, H, NC * 4, msgq, msg.data()};
-      core->pool->run(
+      core->pool->run_any(
           [](void* p, int, int) {
             Mc& M = *(Mc*)p;
             for (int r; (r = M.next.fetch_add(1, std::memory_order_relaxed)) < M.rows;)
@@ -1102,6 +1438,7 @@ void Inkling::step(State& s0, int32_t tok, Want want) {
   }
   if (want != Want::NONE || !taps_.empty()) {  // the head's input (and, with taps kept, the draft head's fourth feature)
     auto th = clk::now();
+    stage_mark(ST_HEAD);
     float* nf = tmp.data();
     float* fin = nf + H;
     float* hn = fin + H;
@@ -1117,25 +1454,18 @@ void Inkling::step(State& s0, int32_t tok, Want want) {
   }
   if (want != Want::NONE) {
     auto th = clk::now();
+    stage_mark(ST_HEAD);
     float* hn = tmp.data() + 2 * H;
     if (!ref) xa.prep(hn, H);
-    if (fast_head && want == Want::GREEDY && !ref) {
-      // the argmax of softcap(head . x) = the argmax of the raw logits among the rows that can reach it, unless softcap
-      // makes two of them equal (it rounds to the same float): the capped candidates decide (lowest index on a tie), and
-      // every other row is below lo, so a capped best above softcap(lo) is the full head's argmax; else the full head
-      gh.run(*core->pool, xa.q, full.data());
-      int b = -1;
-      float best = -INFINITY;
-      for (int r : gh.cand) {
-        if (r >= c.VU) continue;
-        const float v = softcap(full[r], c.softcap);
-        if (b < 0 || v > best) b = r, best = v;
-      }
-      if (b >= 0 && softcap(gh.lo, c.softcap) < best) {
-        greedy_ = b;
+    if (fast_head && (want == Want::GREEDY || (want == Want::TOPK && head_topk > 0)) && !ref) {
+      // the screened head with the softcap: the capped logits of every row that can be in the top k (k = 1: the argmax),
+      // -inf for the rest; when the cap makes a row left out equal to the k-th kept one (sh.ok false), the full head
+      greedy_ = sh.run(*core->pool, xa.q, want == Want::GREEDY ? 1 : head_topk, lgts.data(), c.softcap);
+      if (sh.ok) {
         T->head += ms_since(th);
         S->pos++;
         core->token_end();
+        stage_mark(ST_OTHER);
         return;
       }
       gh_fallback++;
@@ -1157,6 +1487,7 @@ void Inkling::step(State& s0, int32_t tok, Want want) {
   }
   S->pos++;
   core->token_end();
+  stage_mark(ST_OTHER);
 }
 
 // ------------------------------------------------------------------------------------------------ a chunk of positions
@@ -1606,7 +1937,8 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
     jb[nj++] = {&W.kwp, n, nullptr, ki.data(), odk.data(), nullptr};
     jb[nj++] = {&W.vwp, n, nullptr, vi.data(), odv.data(), nullptr};
   }
-  run_rows_n(pool, jb, nj, 32, ref, &T->bytes_res);
+  GpuGemm* const G = gpu && po_gpu > 0 && n >= po_gpu_min ? gpu.get() : nullptr;
+  run_rows_n_split(pool, G, po_gpu, jb, nj, 32, ref, &T->bytes_res, &gacct);
   auto t3 = clk::now();
   T->attn_proj += ms_between(t2, t3);
   // the KV preparation of every position (the convolutions in position order per channel block; clips and norms per
@@ -1727,7 +2059,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
       pe = &xqb_e;
     }
     JobN jo = {&W.o, n, xo.data(), fo.data(), oa.data(), pe};
-    run_rows_n(pool, &jo, 1, 32, ref, &T->bytes_res);
+    run_rows_n_split(pool, gpu && po_gpu > 0 && n >= po_gpu_min ? gpu.get() : nullptr, po_gpu, &jo, 1, 32, ref, &T->bytes_res, &gacct);
   }
   stage_mark(ST_CONV);
   if (rb)
@@ -1774,7 +2106,10 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   }
   parallel_for(pool, n, [&](int i) { rmsnorm(P_[i].mlp, W.mlnorm, H, c.eps, P_[i].xm); });
   T->msg += ms_since(t6);
+  core->moe_gpu = gpu && po_gpu_exp > 0 && n >= po_gpu_min ? gpu.get() : nullptr;  // the experts' share (prefill sub-chunks)
+  core->moe_gpu_frac = po_gpu_exp;
   core->moe_chunk(v, n, xm.data(), ym.data(), views[L], nullptr, nullptr, i0);
+  core->moe_gpu = nullptr;
   auto t8 = clk::now();
   stage_mark(ST_CONV);
   if (rb)
@@ -1969,12 +2304,21 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
     }
     JobN jh = {&head, nh, xh.data(), fh.data(), oh.data(), ph};
     run_rows_n(*core->pool, &jh, 1, 64, ref, &T->bytes_res);
+    if (all_logits) vhn.assign(hn.begin(), hn.end());  // (a verify: kept for light draft heads)
+    // the softcaps (a tanh per logit: about 6 M cycles per position on one thread) on the pool, 4,096 logits per job
+    constexpr int SCB = 4096;
+    const int nbk = (c.VU + SCB - 1) / SCB;
     if (all_logits) {
       mlg.resize((size_t)nh * c.VU);
-      for (int k = 0; k < nh; k++)
-        for (int i = 0; i < c.VU; i++) mlg[(size_t)k * c.VU + i] = softcap(fl[(size_t)k * c.V + i], c.softcap);
+      parallel_for(*core->pool, nh * nbk, [&](int j) {
+        const int k = j / nbk, i0 = (j % nbk) * SCB, i1 = std::min(c.VU, i0 + SCB);
+        for (int i = i0; i < i1; i++) mlg[(size_t)k * c.VU + i] = softcap(fl[(size_t)k * c.V + i], c.softcap);
+      });
     }
-    for (int i = 0; i < c.VU; i++) lgts[i] = softcap(fl[(size_t)(nh - 1) * c.V + i], c.softcap);
+    parallel_for(*core->pool, nbk, [&](int j) {
+      const int i0 = j * SCB, i1 = std::min(c.VU, i0 + SCB);
+      for (int i = i0; i < i1; i++) lgts[i] = softcap(fl[(size_t)(nh - 1) * c.V + i], c.softcap);
+    });
     T->head += ms_since(th);
   }
   S->pos += n;
@@ -1984,9 +2328,25 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
   return true;
 }
 
+int Inkling::head_argmax(const float* hn, float* conf) {
+  if (dh_x.cap < c.H) dh_x.init(c.H, prec);
+  dh_x.prep(hn, c.H);
+  dh_lg.resize(c.V);
+  Job jh = {&head, &dh_x.q, hn, dh_lg.data()};
+  run_rows(*core->pool, &jh, 1, 64, ref);
+  int id = 0;
+  for (int r = 1; r < c.VU; r++)
+    if (dh_lg[r] > dh_lg[id]) id = r;  // softcap is increasing: the same argmax
+  const float top = softcap(dh_lg[id], c.softcap);
+  double zs = 0;
+  for (int r = 0; r < c.VU; r++) zs += std::exp((double)(softcap(dh_lg[r], c.softcap) - top));
+  if (conf) *conf = (float)(1.0 / zs);
+  return id;
+}
+
 bool Inkling::verify(State& s0, const int32_t* ids, int n) {
   S = (IState*)&s0;
-  if (n < 1 || n > RING_SLACK + 1 || core->ns.on || (core->force && S->pos < core->force_n)) return false;
+  if (n < 1 || n > RING_SLACK + 1 || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n)) return false;
   forward_chunk(ids, n, false, true, true);
   return true;
 }
@@ -2020,8 +2380,13 @@ void Inkling::commit(State& s0, int a) {
 bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, const std::vector<int>& capture, const LM::StateSink& sink,
                       PrefillStats* st, const std::atomic<bool>* cancel) {
   S = (IState*)&s0;
-  if (po_chunk <= 1 || core->ns.on || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n))
-    return Model::prefill(s0, ids, n, want_logits, capture, sink, st, cancel);  // single steps
+  // with the exact greedy head on, the next token is greedy(): the prompt's last logits are the full head's, so their
+  // argmax (lowest index on a tie) is it (it was left at the previous step's value: -1 after a cold prefill)
+  if (po_chunk <= 1 || core->ns.on || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n)) {
+    const bool r = Model::prefill(s0, ids, n, want_logits, capture, sink, st, cancel);  // single steps
+    if (r && fast_head && want_logits) greedy_ = argmax(lgts.data(), c.VU);
+    return r;
+  }
   std::vector<int> caps(capture);
   std::sort(caps.begin(), caps.end());
   caps.erase(std::unique(caps.begin(), caps.end()), caps.end());
@@ -2029,6 +2394,10 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
   const uint64_t b0 = core->cache.st.bytes_urgent + core->cache.st.bytes_pf;
   const double w0 = core->cache.st.wait_ms, be0 = T->bytes_exp, br0 = T->bytes_res;
   const long c0 = n_chunks;
+  if (gpu) gpu->set_kernel(po_gpu_kernel);
+  const GpuSplitAcct ga0 = gacct;
+  const double me_w0 = core->moe_gpu_wait_ms, me_s0 = core->moe_gpu_stage_ms, me_m0 = core->moe_gpu_macs;
+  const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
   int done = 0, spans = 0;
   const int sub = std::min(po_chunk, CHUNK_MAX), span = std::max(sub, po_span);
   bool ok = true;
@@ -2079,29 +2448,124 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
     // bytes per prompt position: expert records read from the store, expert records and resident matrices the kernels
     // went through (once per sub-chunk each)
     const double np_ = std::max(1, done);
-    o << "{\"chunk\":" << sub << ",\"span\":" << span << ",\"spans\":" << spans << ",\"hold_releases\":" << core->n_hold_release
+    o << "{\"chunk\":" << sub << ",\"span\":" << span << ",\"spans\":" << spans << ",\"hold_releases\":" << core->n_hold_release << ",\"union_batches\":" << core->n_union_batches
       << ",\"mb_read\":" << st->mb_read << ",\"expert_mb_touched\":" << (T->bytes_exp - be0) / 1048576.0
       << ",\"resident_mb_touched\":" << (T->bytes_res - br0) / 1048576.0 << ",\"read_mb_per_pos\":" << st->mb_read / np_
       << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / 1048576.0 / np_
-      << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / 1048576.0 / np_ << ",\"wait_ms\":" << st->ms_wait << "}";
+      << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / 1048576.0 / np_ << ",\"wait_ms\":" << st->ms_wait;
+    if (gpu && (po_gpu > 0 || po_gpu_exp > 0))  // the GPU shares (the 35B's "gpu" account; experts: the NVFP4 layers)
+      o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po_gpu
+        << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9
+        << ",\"wait_ms\":" << gacct.ms_wait - ga0.ms_wait << ",\"stage_ms\":" << gacct.ms_stage - ga0.ms_stage << ",\"sets\":" << gacct.sets - ga0.sets
+        << ",\"failed\":" << gacct.failed - ga0.failed << "},\"experts\":{\"frac\":" << po_gpu_exp << ",\"gmac_gpu\":" << (core->moe_gpu_macs - me_m0) / 1e9
+        << ",\"wait_ms\":" << core->moe_gpu_wait_ms - me_w0 << ",\"stage_ms\":" << core->moe_gpu_stage_ms - me_s0 << ",\"sets\":" << core->moe_gpu_sets - me_n0
+        << ",\"failed\":" << core->moe_gpu_failed - me_f0 << "}}";
+    o << "}";
     st->json = o.str();
   }
+  if (gpu && po_release) gpu->trim();
+  if (ok && fast_head && want_logits) greedy_ = argmax(lgts.data(), c.VU);
   return ok;
 }
 
+// Run-ahead (Core::run_ahead): from application v's approximate MoE output (its experts in memory only), application
+// v + 1 up to its router on the approximate state (layer() in ra_mode), its top picks by the release rule (sigmoid score +
+// bias). Nothing of the state changes: v + 1's convolution states, the block list and the hidden state are put back; its K
+// and V at this position's slot are written again by the real pass before anything reads them; the scratch is its own.
+// Not across a pass restart (v + 1 the first application of a looped pass: its input is rebuilt from the blocks there).
+// Gives up when the awaited read lands (Core::ra_stopped, rows_stop). Approximate by design: it only decides reads.
+int Inkling::run_ahead_step(int v, const float* ypart, int32_t* picks, int maxk) {
+  const int v1 = v + 1, NC = c.CE - c.CS, H = c.H;
+  if (v1 >= c.NV || !cur_res) return 0;
+  if (v1 >= c.CS && v1 < c.CS + c.NP * NC && v1 > c.CS && (v1 - c.CS) % NC == 0) return 0;  // a looped pass restarts
+  const Lw& W = lw[c.visits[v].first];
+  const Times keep = *T;
+  // h for v + 1: the residual + the post-MLP convolution of the approximate output (on a copy of its state)
+  ra_conv = S->vs[v].conv[3];
+  ra_h.resize(H);
+  std::vector<float> y2(H);
+  sconv(ra_conv, W.mconv, ypart, H, c.SC, y2.data());
+  for (int i = 0; i < H; i++) ra_h[i] = cur_res[i] + y2[i];
+  // what layer(v + 1) changes: h, the block list, its convolution states; its scratch swapped for our own
+  std::vector<float> h_keep(h);
+  const int nblk_keep = nblk;
+  ra_blk.assign(blk.begin() + (size_t)nblk * H, blk.begin() + (size_t)std::min<size_t>(blk.size() / H, nblk + 1) * H);
+  VState& St = S->vs[v1];
+  for (int k = 0; k < 4; k++) ra_c[k] = St.conv[k];
+  h = ra_h;
+  if (ra_tmp.size() != tmp.size()) ra_tmp.resize(tmp.size());
+  tmp.swap(ra_tmp);
+  const float* m4 = nullptr;
+  if (v1 >= c.CS + NC && v1 < c.CS + c.NP * NC) m4 = msg.data() + (size_t)((v1 - c.CS) % NC) * 4 * H;
+  ra_mode = true;
+  ra_xm = nullptr;
+  layer(v1, m4);
+  ra_mode = false;
+  int np = 0;
+  if (ra_xm && !core->ra_stopped()) {
+    const MoeView& mv1 = views[c.visits[v1].first];
+    if (ra_xq.cap < H) ra_xq.init(H, prec);
+    ra_xq.prep(ra_xm, H);
+    ra_lg.resize(mv1.router->rows);
+    Job jr = {mv1.router, &ra_xq.q, ra_xm, ra_lg.data()};
+    run_rows(*core->pool, &jr, 1, 16);
+    if (!core->ra_stopped()) {
+      const int NE = c.NE;
+      std::vector<float> key(NE);
+      std::vector<int> idx(NE);
+      for (int e = 0; e < NE; e++) {
+        const float yv = 1.f / (1.f + std::exp(std::fabs(ra_lg[e])));
+        key[e] = (ra_lg[e] < 0 ? yv : 1.f - yv) + mv1.router_bias[e];
+        idx[e] = e;
+      }
+      np = std::min(maxk, NE);
+      std::partial_sort(idx.begin(), idx.begin() + np, idx.end(), [&](int a, int b) { return key[a] > key[b] || (key[a] == key[b] && a < b); });
+      for (int i = 0; i < np; i++) picks[i] = idx[i];
+      core->ra_lgv.assign(ra_lg.begin(), ra_lg.begin() + NE);
+    }
+  }
+  tmp.swap(ra_tmp);
+  h.swap(h_keep);
+  nblk = nblk_keep;
+  std::copy(ra_blk.begin(), ra_blk.end(), blk.begin() + (size_t)nblk * H);
+  for (int k = 0; k < 4; k++) St.conv[k].swap(ra_c[k]);
+  *T = keep;
+  return np;
+}
+
 bool Inkling::set_option(const std::string& name, const std::string& value, std::string& err) {
+  if (name == "run_ahead") {  // >0: run ahead one application while a step waits on reads, naming this many picks
+    const int k = std::stoi(value);
+    if (k <= 0) return (core->run_ahead = nullptr), true;
+    core->ra_k = k;
+    core->run_ahead = [this](int step, const float* yp, int32_t* pk, int maxk) { return run_ahead_step(step, yp, pk, maxk); };
+    return true;
+  }
   if (name == "prefill_chunk") return (po_chunk = std::max(1, std::stoi(value))), true;  // 1: single steps
-  if (name == "fast_head") {  // 1: the exact greedy head (temperature 0)
-    if (std::stoi(value) <= 0) return true;
-    if (!gh.build(*core->pool, head, c.V, c.VU, prec, err)) return false;
+  if (name == "fast_head") {  // 1: the screened head (greedy, and top-k with head_topk)
+    if (std::stoi(value) <= 0 || fast_head) return true;
+    if (prec != Prec::I16 || ref) return (err = "fast_head: needs I16 activations"), false;
+    if (res_mem == Mem::FILE) return (err = "fast_head: the resident weights must be loaded (not mapped) to split the head"), false;
+    if (!sh.build(*core->pool, head, c.V, c.VU, err)) return false;
     fast_head = true;
     return true;
   }
+  if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
   if (name == "prefill_span") return (po_span = std::max(1, std::stoi(value))), true;  // positions per application-major span
   if (name == "prefill_stream") return (po_names = std::stoi(value) != 0), true;  // 0: no early names in a span
   if (name == "prefill_batched_always") return true;                              // the 35B's knob
+  if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), err);       // 0: CPU only
+  if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), err, true);  // NVFP4 experts (MXFP8 on the CPU)
+  if (name == "prefill_gpu_min") return (po_gpu_min = std::max(1, std::stoi(value))), true;
+  if (name == "prefill_gpu_min_wave") return true;  // experts' waves: the 35B's knob
+  if (name == "prefill_gpu_kernel") return (po_gpu_kernel = std::stoi(value) != 0), true;  // 1 matrix units, 0 integer
+  if (name == "prefill_release") {  // 1: give the GPU split's buffers back after each prefill
+    po_release = std::stoi(value) != 0;
+    return true;
+  }
   if (name == "draft_ctx") return (dh_ctx = std::max(16, std::stoi(value))), true;
-  if (name == "draft_exact") return (dh_exact = std::stoi(value) != 0), true;  // the port check's output layer (ink_draft.h)
+  if (name == "draft_exact") return (dh_exact = std::stoi(value) != 0), true;
+  if (name == "draft_q8") return (dh_q8 = std::stoi(value) != 0), true;  // the head in AFF8 (default) or bf16 as released  // the port check's output layer (ink_draft.h)
   if (name == "draft_head") {
     if (!std::stoi(value)) return dh.reset(), true;
     return load_draft_head(err);
@@ -2113,6 +2577,32 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
   }
   err = "unknown option " + name + " for inkling2_loop";
   return false;
+}
+
+bool Inkling::set_gpu_frac(double f, std::string& err, bool experts) {
+  if (!(f >= 0 && f < 1)) return (err = experts ? "prefill_gpu_experts must be in [0, 1)" : "prefill_gpu_frac must be in [0, 1)"), false;
+  if (f > 0 && !gpu) {
+#if defined(DM_METAL)
+    if (!R.base || !core) return (err = "prefill GPU split: load and bind the model first"), false;
+    std::unique_ptr<GpuGemm> g(new GpuGemm());
+    if (!g->init()) return (err = "prefill GPU split: GPU (Metal) init failed"), false;
+    if (!g->wrap(R.base, R.size)) return (err = "prefill GPU split: the resident weights could not be wrapped"), false;
+    fprintf(stderr, "dmeng: prefill GPU split on (Inkling: resident projections wrapped, %.2f GB; experts on the CPU)\n", g->wrapped_bytes() / 1e9);
+    gpu = std::move(g);
+#else
+    return (err = "prefill GPU split: this build has no Metal (DM_METAL off)"), false;
+#endif
+  }
+  if (experts && f > 0 && !slab_wrapped) {  // the expert slab(s) where they are (locked or plain; FILE records stay on the CPU)
+    bool any = false;
+    for (int p = 0; p < core->cache.npools; p++)
+      if (core->cache.P[p].slab) any = gpu->wrap(core->cache.P[p].slab, core->cache.P[p].slab_bytes) || any;
+    if (!any) return (err = "prefill GPU split: the expert slab could not be wrapped"), false;
+    slab_wrapped = true;
+    fprintf(stderr, "dmeng: prefill GPU split: Inkling's NVFP4 experts too (%.2f GB wrapped)\n", gpu->wrapped_bytes() / 1e9);
+  }
+  (experts ? po_gpu_exp : po_gpu) = f;
+  return true;
 }
 
 bool Inkling::load_draft_head(std::string& err) {
@@ -2129,6 +2619,7 @@ bool Inkling::load_draft_head(std::string& err) {
   o.ctx = dh_ctx;
   o.softcap = c.softcap;
   o.exact = dh_exact;
+  o.q8 = dh_q8 && !dh_exact;
   o.prec = prec;
   o.mem = res_mem;
   std::unique_ptr<InkDraft> d(new InkDraft());

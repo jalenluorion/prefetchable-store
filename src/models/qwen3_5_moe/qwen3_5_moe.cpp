@@ -321,7 +321,8 @@ void phase_lin_conv_heads(void* p, int, int) {
   for (int job; (job = X.next.fetch_add(1, std::memory_order_relaxed)) < c.NKH + c.NVH + X.o_chunks;) {
     if (job >= c.NKH + c.NVH) {
       while (X.heads_left.load(std::memory_order_acquire) > 0) __builtin_arm_yield();
-      const int r0 = (job - c.NKH - c.NVH) * 32, r1 = std::min(X.wo->rows, r0 + 32);
+      const int oc = job - c.NKH - c.NVH;
+      const int r0 = oc < X.o_nb ? oc * 32 : X.o_nb * 32 + (oc - X.o_nb) * 8, r1 = std::min(X.wo->rows, r0 + (oc < X.o_nb ? 32 : 8));
       mv(*X.wo, r0, r1, &M.xatt.q, nullptr, X.rout + r0);
       continue;
     }
@@ -353,6 +354,7 @@ void Qwen35::attn_linear(int L, const float* hin, float* rout) {
   float* bb = z + ZD;
   float* aa = bb + c.NVH;
   float* cv = aa + c.NVH;
+  stage_mark(ST_ATTN_PROJ);
   Job jb[4] = {{&W.qkv, &xin.q, hin, qkv}, {&W.z, &xin.q, hin, z}, {&W.wb, &xin.q, hin, bb}, {&W.wa, &xin.q, hin, aa}};
   {  // the input's quantisation inside the projections' fork-join
     XBuf* qs[1] = {&xin};
@@ -362,6 +364,7 @@ void Qwen35::attn_linear(int L, const float* hin, float* rout) {
   }
   auto t1 = clk::now();
   T->attn_proj += ms_between(t0, t1);
+  stage_mark(ST_ATTN_CORE);
   LinCtx X{this, L, qkv, z, bb, aa, cv, o.data(), c.DV % XB == 0, {}};
   if (c.NKH > 64) {
     fprintf(stderr, "more than 64 key heads\n");
@@ -372,7 +375,9 @@ void Qwen35::attn_linear(int L, const float* hin, float* rout) {
   if (X.quant_heads) {  // the output projection in the heads' fork-join
     X.wo = &W.o;
     X.rout = rout;
-    X.o_chunks = (W.o.rows + 31) / 32;
+    const int U = (W.o.rows + 7) / 8, tail = 4 * core->pool->size();
+    X.o_nb = U > tail ? (U - tail) / 4 : 0;
+    X.o_chunks = X.o_nb + (U - 4 * X.o_nb);
     X.heads_left.store(c.NVH, std::memory_order_relaxed);
   }
   core->pool->run(phase_lin_conv_heads, &X);
@@ -534,6 +539,7 @@ void Qwen35::attn_full(int L, const float* hin, float* rout) {
   float* qg = buf.data();
   float* kp = qg + 2 * c.NQ * HD;
   float* vp = kp + c.NKV * HD;
+  stage_mark(ST_ATTN_PROJ);
   Job jb[3] = {{&W.q, &xin.q, nullptr, qg}, {&W.k, &xin.q, nullptr, kp}, {&W.v, &xin.q, nullptr, vp}};
   {  // the input's quantisation inside the projections' fork-join
     XBuf* qs[1] = {&xin};
@@ -543,9 +549,11 @@ void Qwen35::attn_full(int L, const float* hin, float* rout) {
   }
   auto t1 = clk::now();
   T->attn_proj += ms_between(t0, t1);
+  stage_mark(ST_ATTN_CORE);
   attn_full_core(L, S->pos, qg, kp, vp, o.data(), xatt);
   auto t2 = clk::now();
   T->attn_core += ms_between(t1, t2);
+  stage_mark(ST_ATTN_OUT);
   Job jo = {&W.o, &xatt.q, nullptr, rout};
   run_rows(*core->pool, &jo, 1, 32);
   T->attn_out += ms_since(t2);
@@ -732,16 +740,20 @@ void Qwen35::attn_full_multi(int L, int pos0, int n, float* const* qg, float* co
 // ------------------------------------------------------------------------------------------------ one token
 void Qwen35::step(State& s0, int32_t tok, Want want) {
   S = (QState*)&s0;
+  greedy_ = -1;
   auto t0 = clk::now();
+  stage_mark(ST_EMBED);
   rows.row(tok, x.data());
   std::copy(x.begin(), x.end(), emb.begin());
   T->embed += ms_since(t0);
   core->token_start(S->pos, tok, emb.data());
   for (int L = 0; L < c.NL; L++) {
     const Lw& W = lw[L];
+    stage_mark(ST_NORMQ);
     rmsnorm(x.data(), W.ln_in, c.H, c.eps, h.data());
     if (W.full) attn_full(L, h.data(), y.data());
     else attn_linear(L, h.data(), y.data());
+    stage_mark(ST_NORMQ);
     for (int i = 0; i < c.H; i++) x[i] += y[i];
     rmsnorm(x.data(), W.ln_post, c.H, c.eps, hm.data());
     core->moe_step(L, hm.data(), y.data(), views[L]);
@@ -749,17 +761,24 @@ void Qwen35::step(State& s0, int32_t tok, Want want) {
   }
   if (want != Want::NONE) {
     auto th = clk::now();
+    stage_mark(ST_HEAD);
     rmsnorm(x.data(), fnorm, c.H, c.eps, h.data());
     xin.prep(h.data(), c.H);
-    if (fast_head && want == Want::GREEDY) {
-      greedy_ = gh.run(*core->pool, xin.q, lgts.data());
-      if (fast_head_check) {  // the full head as well: its argmax must be the same row
-        Job jh = {&head, &xin.q, nullptr, lgts.data()};
+    if (fast_head && (want == Want::GREEDY || (want == Want::TOPK && head_topk > 0))) {
+      const int k = want == Want::GREEDY ? 1 : head_topk;
+      greedy_ = sh.run(*core->pool, xin.q, k, lgts.data());
+      if (fast_head_check) {  // the full head as well: the same argmax, the same top-k rows with the same bits
+        static std::vector<float> full;
+        full.resize(c.V);
+        Job jh = {&head, &xin.q, nullptr, full.data()};
         run_rows(*core->pool, &jh, 1, 64);
-        int b = 0;
-        for (int i = 1; i < c.V; i++)
-          if (lgts[i] > lgts[b]) b = i;
-        if (b != greedy_) hd_mismatch += 1;
+        std::vector<int> idx(c.V);
+        for (int i = 0; i < c.V; i++) idx[i] = i;
+        std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
+                          [&](int a, int b) { return full[a] > full[b] || (full[a] == full[b] && a < b); });
+        bool ok = idx[0] == greedy_;
+        for (int j = 0; j < k; j++) ok = ok && std::memcmp(&full[idx[j]], &lgts[idx[j]], 4) == 0;
+        if (!ok) hd_mismatch += 1;
       }
     } else {
       Job jh = {&head, &xin.q, nullptr, lgts.data()};
@@ -769,17 +788,161 @@ void Qwen35::step(State& s0, int32_t tok, Want want) {
   }
   S->pos++;
   core->token_end();
+  stage_mark(ST_OTHER);
+}
+
+// Run-ahead (Core::run_ahead): from layer L's approximate output (its experts in memory only), layer L + 1's attention and
+// router on the approximate state, its top picks. Nothing of the state changes: a DeltaNet layer's convolution and
+// recurrence are evaluated without writing their state (attn_linear_ro); a full-attention layer writes its K and V at this
+// position, which the real pass writes again before anything reads them. Between sub-stages (and inside the row phases,
+// rows_stop) it gives up as soon as the read the step waits for lands: the picks of an unfinished run are not used. The
+// stage timers do not count it. Approximate by design (it only decides reads): its arithmetic need not be the real pass's.
+bool Qwen35::attn_linear_ro(int L, const float* hin, float* rout) {
+  const Lw& W = lw[L];
+  const int C = c.conv_dim(), ZD = c.NVH * c.DV, CK = c.CK, DK = c.DK, DV = c.DV, rep = c.NVH / c.NKH;
+  float* qkv = buf.data();
+  float* z = qkv + C;
+  float* bb = z + ZD;
+  float* aa = bb + c.NVH;
+  float* cv = aa + c.NVH;
+  Job jb[4] = {{&W.qkv, &xin.q, hin, qkv}, {&W.z, &xin.q, hin, z}, {&W.wb, &xin.q, hin, bb}, {&W.wa, &xin.q, hin, aa}};
+  {
+    XBuf* qs[1] = {&xin};
+    const float* xs[1] = {hin};
+    const int ks[1] = {c.H};
+    run_rows_q(*core->pool, jb, 4, 32, false, nullptr, qs, xs, ks, 1);
+  }
+  if (core->ra_stopped()) return false;
+  const float* st = S->ls[L].conv.data();
+  for (int ch = 0; ch < C; ch++) {  // the convolution, the state read only
+    float v = qkv[ch] * W.conv[(size_t)ch * CK + CK - 1];
+    for (int k = 0; k < CK - 1; k++) v += st[(size_t)k * C + ch] * W.conv[(size_t)ch * CK + k];
+    cv[ch] = silu(v);
+  }
+  float* ob = o.data();
+  parallel_for(*core->pool, c.NVH, [&](int h) {  // the heads: S_new = g S + k (x) delta, evaluated, not stored
+    const int kh = h / rep;
+    const float* qs = cv + kh * DK;
+    const float* ks = cv + c.NKH * DK + kh * DK;
+    const float* v = cv + 2 * c.NKH * DK + h * DV;
+    float qq = 0, kk = 0;
+    for (int i = 0; i < DK; i++) qq += qs[i] * qs[i], kk += ks[i] * ks[i];
+    const float rq = 1.f / std::sqrt(qq + 1e-6f) / std::sqrt((float)DK), rk = 1.f / std::sqrt(kk + 1e-6f);
+    float q[256], k[256];
+    for (int i = 0; i < DK; i++) q[i] = qs[i] * rq, k[i] = ks[i] * rk;
+    const float beta = sigm(bb[h]), xa = aa[h] + W.dt_bias[h];
+    const float g = std::exp(-std::exp(W.A_log[h]) * (xa > 20.f ? xa : std::log1p(std::exp(xa))));
+    const float* Sh = S->ls[L].S.data() + (size_t)h * DV * DK;
+    float* oh = ob + h * DV;
+    for (int vi = 0; vi < DV; vi++) {
+      const float* s = Sh + (size_t)vi * DK;
+      float32x4_t acc = vdupq_n_f32(0), gv = vdupq_n_f32(g);
+      for (int i = 0; i < DK; i += 4) acc = vfmaq_f32(acc, vmulq_f32(vld1q_f32(s + i), gv), vld1q_f32(k + i));
+      const float32x4_t dv = vdupq_n_f32((v[vi] - vaddvq_f32(acc)) * beta);
+      float32x4_t oa = vdupq_n_f32(0);
+      for (int i = 0; i < DK; i += 4)
+        oa = vfmaq_f32(oa, vfmaq_f32(vmulq_f32(vld1q_f32(s + i), gv), vld1q_f32(k + i), dv), vld1q_f32(q + i));
+      oh[vi] = vaddvq_f32(oa);
+    }
+    float ss = 0;
+    for (int i = 0; i < DV; i++) ss += oh[i] * oh[i];
+    const float r = 1.f / std::sqrt(ss / DV + c.eps);
+    for (int i = 0; i < DV; i++) oh[i] = oh[i] * r * W.gnorm[i] * silu(z[h * DV + i]);
+  });
+  if (core->ra_stopped()) return false;
+  xatt.reset(ZD);
+  xatt.prep(ob, ZD);
+  Job jo = {&W.o, &xatt.q, nullptr, rout};
+  run_rows(*core->pool, &jo, 1, 32);
+  return !core->ra_stopped();
+}
+
+int Qwen35::run_ahead_step(int L, const float* ypart, int32_t* picks, int maxk) {
+  const int L1 = L + 1;
+  if (L1 >= c.NL) return 0;
+  const Times keep = *T;
+  struct Restore {
+    Times* T;
+    Times keep;
+    ~Restore() { *T = keep; }
+  } restore{T, keep};
+  ra_L = -1;
+  ra_x.resize(c.H);
+  ra_h.resize(c.H);
+  ra_y.resize(c.H);
+  for (int i = 0; i < c.H; i++) ra_x[i] = x[i] + ypart[i];
+  rmsnorm(ra_x.data(), lw[L1].ln_in, c.H, c.eps, ra_h.data());
+  if (!lw[L1].full) {
+    if (!attn_linear_ro(L1, ra_h.data(), ra_y.data())) return 0;
+  } else {
+    attn_full(L1, ra_h.data(), ra_y.data());
+    if (core->ra_stopped()) return 0;
+  }
+  for (int i = 0; i < c.H; i++) ra_x[i] += ra_y[i];
+  rmsnorm(ra_x.data(), lw[L1].ln_post, c.H, c.eps, ra_h.data());
+  if (ra_xq.cap < c.H) ra_xq.init(c.H, prec);
+  ra_xq.prep(ra_h.data(), c.H);
+  ra_lg.resize(lw[L1].router.rows);
+  Job jr = {&lw[L1].router, &ra_xq.q, ra_h.data(), ra_lg.data()};
+  run_rows(*core->pool, &jr, 1, 16);
+  if (core->ra_stopped()) return 0;
+  const int NE = c.NE;
+  std::vector<int> idx(NE);
+  for (int e = 0; e < NE; e++) idx[e] = e;
+  const int k = std::min(maxk, NE);
+  std::partial_sort(idx.begin(), idx.begin() + k, idx.end(), [&](int a, int b) { return ra_lg[a] > ra_lg[b] || (ra_lg[a] == ra_lg[b] && a < b); });
+  for (int i = 0; i < k; i++) picks[i] = idx[i];
+  core->ra_lgv.assign(ra_lg.begin(), ra_lg.begin() + NE);
+  ra_L = L1;
+  return k;
+}
+
+// deeper run-ahead (measurement): the layer after ra_L from the run-ahead's state with ra_L's MoE left out
+int Qwen35::run_ahead_deeper_step(int, int32_t* picks, int maxk) {
+  const int L2 = ra_L + 1;
+  if (ra_L < 0 || L2 >= c.NL) return 0;
+  const Times keep = *T;
+  rmsnorm(ra_x.data(), lw[L2].ln_in, c.H, c.eps, ra_h.data());
+  if (!lw[L2].full) attn_linear_ro(L2, ra_h.data(), ra_y.data());
+  else attn_full(L2, ra_h.data(), ra_y.data());
+  for (int i = 0; i < c.H; i++) ra_x[i] += ra_y[i];
+  rmsnorm(ra_x.data(), lw[L2].ln_post, c.H, c.eps, ra_h.data());
+  ra_xq.prep(ra_h.data(), c.H);
+  ra_lg.resize(lw[L2].router.rows);
+  Job jr = {&lw[L2].router, &ra_xq.q, ra_h.data(), ra_lg.data()};
+  run_rows(*core->pool, &jr, 1, 16);
+  std::vector<int> idx(c.NE);
+  for (int e = 0; e < c.NE; e++) idx[e] = e;
+  const int k = std::min(maxk, c.NE);
+  std::partial_sort(idx.begin(), idx.begin() + k, idx.end(), [&](int a, int b) { return ra_lg[a] > ra_lg[b] || (ra_lg[a] == ra_lg[b] && a < b); });
+  for (int i = 0; i < k; i++) picks[i] = idx[i];
+  ra_L = L2;
+  *T = keep;
+  return k;
 }
 
 bool Qwen35::set_option(const std::string& name, const std::string& value, std::string& err) {
+  if (name == "run_ahead") {  // >0: run ahead one layer while a step waits on reads, naming this many predicted picks
+    const int k = std::stoi(value);
+    if (k <= 0) return (core->run_ahead = nullptr), true;
+    core->ra_k = k;
+    core->run_ahead = [this](int step, const float* yp, int32_t* pk, int maxk) { return run_ahead_step(step, yp, pk, maxk); };
+    core->run_ahead_deeper = [this](int d, int32_t* pk, int maxk) { return run_ahead_deeper_step(d, pk, maxk); };
+    return true;
+  }
+  if (name == "run_ahead_depth") return (core->ra_depth = std::max(1, std::min(4, std::stoi(value)))), true;  // measurement
   if (name == "fast_head") {  // 1: exact greedy head (temperature 0); 2: also check it against the full head
     const int v = std::stoi(value);
     if (v <= 0) return true;
-    if (!gh.build(*core->pool, head, c.V, c.V, prec, err)) return false;
+    if (fast_head) return (fast_head_check = v == 2), true;
+    if (prec != Prec::I16 || core->o.ref) return (err = "fast_head: needs I16 activations"), false;
+    if (R.mem == Mem::FILE) return (err = "fast_head: the resident weights must be loaded (not mapped) to split the head"), false;
+    if (!sh.build(*core->pool, head, c.V, c.V, err)) return false;
     fast_head = true;
     fast_head_check = v == 2;
     return true;
   }
+  if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
   if (name == "prefill_chunk") return (po.chunk = std::stoi(value)), true;  // 1: the decode path, one position at a time
   if (name == "prefill_span") return (po.span = std::stoi(value)), true;
   if (name == "prefill_stream") return (po.stream = std::stoi(value)), true;
@@ -790,8 +953,11 @@ bool Qwen35::set_option(const std::string& name, const std::string& value, std::
     return value.empty() || po.record;
   }
   if (name == "prefill_batched_always") return (po.batched_always = std::stoi(value) != 0), true;
-  if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), err);  // 0: CPU only (the default)
+  if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), false, err);  // 0: CPU only (the default)
+  if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), true, err);  // 0: CPU only (the default)
   if (name == "prefill_gpu_min") return (po.gpu_min = std::stoi(value)), true;
+  if (name == "prefill_gpu_min_wave") return (po.gpu_min_wave = std::stoi(value)), true;
+  if (name == "prefill_gpu_kernel") return (po.gpu_kernel = std::stoi(value) != 0), true;  // 1 matrix units, 0 integer
   if (name == "prefill_release") return (po.release = std::stoi(value) != 0), true;  // 1: free the scratch after each prefill
   err = "unknown option " + name + " for qwen3_5_moe";
   return false;
@@ -800,8 +966,8 @@ bool Qwen35::set_option(const std::string& name, const std::string& value, std::
 std::string Qwen35::stats_json(int) const {
   if (!fast_head) return V ? "{\"verify\":" + verify_json() + "}" : "{}";
   std::ostringstream o;
-  const double n = std::max(1.0, gh.hd_calls);
-  o << "{\"fast_head\":{\"candidates_per_token\":" << gh.hd_cand / n << ",\"coarse_ms\":" << gh.t_head_coarse / n << ",\"exact_ms\":" << gh.t_head_exact / n
+  const double n = std::max(1.0, sh.n_calls);
+  o << "{\"fast_head\":{\"candidates_per_token\":" << sh.n_cand / n << ",\"coarse_ms\":" << sh.ms_coarse / n << ",\"exact_ms\":" << sh.ms_exact / n
     << ",\"check\":" << (fast_head_check ? "true" : "false") << ",\"mismatches\":" << hd_mismatch << "}}";
   return o.str();
 }

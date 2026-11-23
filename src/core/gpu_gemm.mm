@@ -1,44 +1,82 @@
-// Exact 8-bit batched matrix products on the GPU (see gpu_gemm.h). Objective-C++ with ARC (-fobjc-arc).
+// Exact batched matrix products on the GPU (see gpu_gemm.h). Objective-C++ with ARC (-fobjc-arc).
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
 #include "gpu_gemm.h"
 
+#include <unistd.h>
+
+#include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
 namespace dm {
 
 // The arithmetic, per (row r, position q) of a matrix of K inputs in groups of 64:
-//   dot_g  = sum over the group of int(code) * int(act), act = hi * 256 + lo (the XQB planes): an exact int32, as the
-//            CPU's USMMLA / USDOT sums (|dot| < 64 * 255 * 32767 < 2^31), in any order
-//   lane   = g mod 4;  a = fma(float(dot_g), float(scale_g) * d_g, a);  a = fma(float(bias_g), gsum_g, a)
+//   dot_g  = sum over the group of int(code) * int(act), act = hi * 256 + lo (the XQB natural-order planes): an exact
+//            int32, as the CPU's USMMLA (8-bit codes) / SMMLA (4-bit codes) sums ((hi sum) << 8 + lo sum), in any order
+//            (|dot| < 64 * 255 * 32767 < 2^31)
+//   lane   = g mod 4;  a = fma(float(dot), float(scale_g) * d_g, a);  a = fma(float(bias_g), gsum_g, a)
 //   y      = (lane0 + lane1) + (lane2 + lane3)
-// which is gemm_tile_loop<8>'s epilogue (vfmaq_f32 per lane, vaddvq_f32 at the end) operation for operation, compiled with
+// which is gemm_tile_loop's epilogue (vfmaq_f32 per lane, vaddvq_f32 at the end) operation for operation, compiled with
 // MTLMathModeSafe so no operation is reassociated, contracted or approximated: the same bits.
+//
+// One dispatch covers many products (a "set"): a tile table maps each threadgroup (16 rows x 16 positions of one
+// product) to its job; a job names its weights (offsets in the weight buffer bound for the dispatch), its staged
+// activations (offsets in the staging buffer), an optional position map (gathered inputs) and its output.
 static const char* GSRC = R"(
 #include <metal_stdlib>
 using namespace metal;
-struct P { ulong co, so, bo; uint R, K, N; };
-// one thread per (row, position): per 64-input group the exact int32 dot of the 8-bit codes with the 15-bit activations,
-// then mv_aff8's epilogue (lane = group mod 4, fma(dot, scale * d), fma(bias, gsum), pairwise sum), IEEE fp32
-kernel void gd(device const uchar* res [[buffer(0)]], device const short* v [[buffer(1)]], device const float* d [[buffer(2)]],
-               device const float* gs [[buffer(3)]], device float* y [[buffer(4)]], constant P& p [[buffer(5)]],
-               uint2 tg [[threadgroup_position_in_grid]], uint2 lt [[thread_position_in_threadgroup]]) {
-  const uint R = p.R, K = p.K, N = p.N, NG = K / 64;
-  device const uchar* codes = res + p.co;
-  device const half* sc = (device const half*)(res + p.so);
-  device const half* bi = (device const half*)(res + p.bo);
-  const uint r = tg.x * 16 + lt.x, q = tg.y * 16 + lt.y;
+struct Job { ulong co, so, bo, xh, xl, xd, xg, xm, y; uint R, K, N, fmt, tr, tbase; };
+kernel void gd(device const uchar* w [[buffer(0)]], device const uchar* st [[buffer(1)]], device const Job* jobs [[buffer(2)]],
+               device const uint* tj [[buffer(3)]], device float* out [[buffer(4)]], constant uint& t0 [[buffer(5)]],
+               uint2 tgi [[threadgroup_position_in_grid]], uint2 lt [[thread_position_in_threadgroup]],
+               uint tid [[thread_index_in_threadgroup]]) {
+  const uint t = t0 + tgi.x;
+  const Job j = jobs[tj[t]];
+  const uint R = j.R, K = j.K, N = j.N, NG = K / 64, KB = K / 8, local = t - j.tbase;
+  const uint rt = local % j.tr, qt = local / j.tr;
+  const ulong rb = j.fmt == 8 ? (ulong)K : (ulong)K / 2;
+  device const uchar* codes = w + j.co;
+  device const half* sc = (device const half*)(w + j.so);
+  device const half* bi = (device const half*)(w + j.bo);
+  device const char* XH = (device const char*)(st + j.xh);
+  device const char* XL = (device const char*)(st + j.xl);
+  device const float* d = (device const float*)(st + j.xd);
+  device const float* gs = (device const float*)(st + j.xg);
+  const bool mapped = j.xm != 0xFFFFFFFFFFFFFFFFul;
+  device const uint* xm = (device const uint*)(st + (mapped ? j.xm : 0ul));
   threadgroup uchar wt[16][64];
   threadgroup short xt[16][64];
+  threadgroup uint src[16];
+  if (tid < 16) {
+    const uint qq = qt * 16 + tid;
+    src[tid] = qq < N ? (mapped ? xm[qq] : qq) : 0u;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint r = rt * 16 + lt.x, q = qt * 16 + lt.y, sq = src[lt.y];
   float4 acc = float4(0.0f);
-  const uint tid = lt.y * 16 + lt.x;
   for (uint g = 0; g < NG; g++) {
     for (uint k = tid; k < 1024; k += 256) {
-      uint rr = k / 64, kk = k % 64;
-      wt[rr][kk] = (tg.x * 16 + rr < R) ? codes[(ulong)(tg.x * 16 + rr) * K + g * 64 + kk] : 0;
-      xt[rr][kk] = (tg.y * 16 + rr < N) ? v[(ulong)(tg.y * 16 + rr) * K + g * 64 + kk] : 0;
+      const uint rr = k / 64, kk = k % 64, row = rt * 16 + rr, pos = qt * 16 + rr;
+      uchar c = 0;
+      if (row < R) {
+        if (j.fmt == 8) {
+          c = codes[(ulong)row * rb + g * 64 + kk];
+        } else {
+          const uchar b = codes[(ulong)row * rb + g * 32 + kk / 2];
+          c = (kk & 1) ? (uchar)(b >> 4) : (uchar)(b & 15);
+        }
+      }
+      wt[rr][kk] = c;
+      short v = 0;
+      if (pos < N) {
+        const uint s = src[rr];
+        const ulong o = ((ulong)(s >> 1) * KB + g * 8 + kk / 8) * 16 + (s & 1) * 8 + (kk & 7);
+        v = (short)(int(XH[o]) * 256 + int(XL[o]));
+      }
+      xt[rr][kk] = v;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     int dot = 0;
@@ -46,166 +84,638 @@ kernel void gd(device const uchar* res [[buffer(0)]], device const short* v [[bu
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (r < R && q < N) {
       const uint lane = g & 3;
-      float m = float(sc[(ulong)r * NG + g]) * d[(ulong)q * NG + g];
+      float m = float(sc[(ulong)r * NG + g]) * d[(ulong)sq * NG + g];
       float a = acc[lane];
       a = fma(float(dot), m, a);
-      a = fma(float(bi[(ulong)r * NG + g]), gs[(ulong)q * NG + g], a);
+      a = fma(float(bi[(ulong)r * NG + g]), gs[(ulong)sq * NG + g], a);
       acc[lane] = a;
     }
   }
-  if (r < R && q < N) y[(ulong)q * R + r] = (acc.x + acc.y) + (acc.z + acc.w);
+  if (r < R && q < N) out[j.y + (ulong)q * R + r] = (acc.x + acc.y) + (acc.z + acc.w);
+}
+
+// The same products through the GPU's fp32 matrix units (simdgroup 8 x 8 multiply-accumulate). Per 64-input group the
+// two plane sums hs = sum code * hi and ls = sum code * lo are formed in fp32 from exact small integers (codes 0..255,
+// hi -126..127, lo -128..127, held exactly in half): every product and every partial sum is an integer of magnitude at
+// most 64 * 255 * 128 < 2^24, so each fp32 multiply / add / fma on them is exact whatever the order or fusion. Then
+// dot = int(hs) * 256 + int(ls) is the CPU's (sum_hi << 8) + sum_lo exactly, and the epilogue is gd's, so the outputs are
+// the same bits. Tile (16 SR) rows x (16 SQ) positions, SR x SQ = 4 simdgroups of 16 x 16 outputs each.
+template <uint SR, uint SQ>
+static void gm_impl(device const uchar* w, device const uchar* st, device const Job* jobs, device const uint* tj, device float* out,
+                    uint t, uint tid, uint sg, uint ln, threadgroup half* wt, threadgroup half* xh, threadgroup half* xl,
+                    threadgroup float* cs, threadgroup uint* src) {
+  constexpr uint TR = 16 * SR, TQ = 16 * SQ, NT = 128;
+  const Job j = jobs[tj[t]];
+  const uint R = j.R, K = j.K, N = j.N, NG = K / 64, KB = K / 8, local = t - j.tbase;
+  const uint rt = local % j.tr, qt = local / j.tr;
+  const ulong rb = j.fmt == 8 ? (ulong)K : (ulong)K / 2;
+  device const uchar* codes = w + j.co;
+  device const half* sc = (device const half*)(w + j.so);
+  device const half* bi = (device const half*)(w + j.bo);
+  device const char* XH = (device const char*)(st + j.xh);
+  device const char* XL = (device const char*)(st + j.xl);
+  device const float* d = (device const float*)(st + j.xd);
+  device const float* gs = (device const float*)(st + j.xg);
+  const bool mapped = j.xm != 0xFFFFFFFFFFFFFFFFul;
+  device const uint* xm = (device const uint*)(st + (mapped ? j.xm : 0ul));
+  for (uint u = tid; u < TQ; u += NT) {
+    const uint qq = qt * TQ + u;
+    src[u] = qq < N ? (mapped ? xm[qq] : qq) : 0u;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint sr = (sg % SR) * 16, sp = (sg / SR) * 16;  // this simdgroup's 16 x 16 block inside the tile
+  threadgroup float* csh = cs + sg * 512;              // its plane sums: hi [16][16], then lo [16][16] (over the tiles)
+  float4 acc[8];
+  for (uint i = 0; i < 8; i++) acc[i] = float4(0.0f);
+  for (uint g = 0; g < NG; g++) {
+    for (uint k = tid; k < TR * 64; k += NT) {  // weights [row][k] (zero past R)
+      const uint rr = k / 64, kk = k % 64, row = rt * TR + rr;
+      uchar c = 0;
+      if (row < R) {
+        if (j.fmt == 8) {
+          c = codes[(ulong)row * rb + g * 64 + kk];
+        } else {
+          const uchar b = codes[(ulong)row * rb + g * 32 + kk / 2];
+          c = (kk & 1) ? (uchar)(b >> 4) : (uchar)(b & 15);
+        }
+      }
+      wt[rr * 64 + kk] = half(c);
+    }
+    for (uint k = tid; k < TQ * 64; k += NT) {  // activations [k][position] (zero past N)
+      const uint pp = k / 64, kk = k % 64, pos = qt * TQ + pp;
+      half vh = 0, vl = 0;
+      if (pos < N) {
+        const uint s = src[pp];
+        const ulong o = ((ulong)(s >> 1) * KB + g * 8 + kk / 8) * 16 + (s & 1) * 8 + (kk & 7);
+        vh = half(XH[o]);
+        vl = half(XL[o]);
+      }
+      xh[kk * TQ + pp] = vh;
+      xl[kk * TQ + pp] = vl;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    simdgroup_float8x8 ch[2][2], cl[2][2];
+    for (uint a = 0; a < 2; a++)
+      for (uint b = 0; b < 2; b++) {
+        ch[a][b] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+        cl[a][b] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+      }
+    for (uint k8 = 0; k8 < 64; k8 += 8) {
+      simdgroup_half8x8 A[2], BH[2], BL[2];
+      for (uint a = 0; a < 2; a++) simdgroup_load(A[a], wt + (sr + 8 * a) * 64 + k8, 64);
+      for (uint b = 0; b < 2; b++) {
+        simdgroup_load(BH[b], xh + k8 * TQ + sp + 8 * b, TQ);
+        simdgroup_load(BL[b], xl + k8 * TQ + sp + 8 * b, TQ);
+      }
+      for (uint a = 0; a < 2; a++)
+        for (uint b = 0; b < 2; b++) {
+          simdgroup_multiply_accumulate(ch[a][b], A[a], BH[b], ch[a][b]);
+          simdgroup_multiply_accumulate(cl[a][b], A[a], BL[b], cl[a][b]);
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);  // every simdgroup done with the tiles: their memory takes the sums
+    for (uint a = 0; a < 2; a++)
+      for (uint b = 0; b < 2; b++) {
+        simdgroup_store(ch[a][b], csh + (8 * a) * 16 + 8 * b, 16);
+        simdgroup_store(cl[a][b], csh + 256 + (8 * a) * 16 + 8 * b, 16);
+      }
+    simdgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint i = 0; i < 8; i++) {  // the thread's 8 outputs of the block: element ln + 32 i = (row e / 16, position e % 16)
+      const uint e = ln + 32 * i, row = rt * TR + sr + e / 16, pl = sp + e % 16, pos = qt * TQ + pl;
+      if (row < R && pos < N) {
+        const int dot = int(csh[e]) * 256 + int(csh[256 + e]);
+        const uint sq = src[pl], lane = g & 3;
+        float m = float(sc[(ulong)row * NG + g]) * d[(ulong)sq * NG + g];
+        float v = acc[i][lane];
+        v = fma(float(dot), m, v);
+        v = fma(float(bi[(ulong)row * NG + g]), gs[(ulong)sq * NG + g], v);
+        acc[i][lane] = v;
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  for (uint i = 0; i < 8; i++) {
+    const uint e = ln + 32 * i, row = rt * TR + sr + e / 16, pos = qt * TQ + sp + e % 16;
+    if (row < R && pos < N) out[j.y + (ulong)pos * R + row] = (acc[i].x + acc[i].y) + (acc[i].z + acc[i].w);
+  }
+}
+#define GM(NAME, SR, SQ)                                                                                                         \
+  kernel void NAME(device const uchar* w [[buffer(0)]], device const uchar* st [[buffer(1)]], device const Job* jobs [[buffer(2)]], \
+                   device const uint* tj [[buffer(3)]], device float* out [[buffer(4)]], constant uint& t0 [[buffer(5)]],          \
+                   uint3 tgi [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]],                          \
+                   uint sg [[simdgroup_index_in_threadgroup]], uint ln [[thread_index_in_simdgroup]]) {                           \
+    /* one area: the weight tile and both activation tiles (half), then (overlaid) the 4 simdgroups' sums (2048 floats) */   \
+    threadgroup float tg[(16 * SR * 64 + 2 * 64 * 16 * SQ) / 2 > 2048 ? (16 * SR * 64 + 2 * 64 * 16 * SQ) / 2 : 2048];               \
+    threadgroup uint src[16 * SQ];                                                                                                 \
+    threadgroup half* th = (threadgroup half*)tg;                                                                                  \
+    gm_impl<SR, SQ>(w, st, jobs, tj, out, t0 + tgi.x, tid, sg, ln, th, th + 16 * SR * 64, th + 16 * SR * 64 + 64 * 16 * SQ, tg, src); \
+  }
+GM(gm2x2, 2, 2)
+GM(gm4x1, 4, 1)
+
+// NVFP4 (Inkling's experts), on the matrix units: per 16-input sub-block s of 64-input block b, the integer dot of the
+// E2M1 codes doubled (small integers, NV_E2M1X2) with hi * 256 + lo, formed as the two plane sums in fp32 (every product
+// and partial sum an integer of magnitude at most 16 * 12 * 128 < 2^24: exact), then gemm_nvfp4_i16's epilogue
+// operation for operation: v = float(dot) * (scale_s * d_b) with the E4M3 scale read as fp16 bits ((c & 0x7F) << 7 |
+// (c & 0x80) << 8, i.e. e4m3 / 256); lane s of accumulator A1 for odd blocks inside a full group of four, else A0;
+// y = ((A0 + A1) summed pairwise) * post, post = gmul * 128 (Job.bo carries its bits). Tile 32 rows x 32 positions.
+constant char NVX2[16] = {0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12};
+kernel void gn(device const uchar* w [[buffer(0)]], device const uchar* st [[buffer(1)]], device const Job* jobs [[buffer(2)]],
+               device const uint* tj [[buffer(3)]], device float* out [[buffer(4)]], constant uint& t0 [[buffer(5)]],
+               uint3 tgi [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]],
+               uint sg [[simdgroup_index_in_threadgroup]], uint ln [[thread_index_in_simdgroup]]) {
+  constexpr uint SR = 2, TR = 32, TQ = 32, NT = 128;
+  threadgroup half wt[TR * 16];
+  threadgroup half xh[16 * TQ];
+  threadgroup half xl[16 * TQ];
+  threadgroup float cs[4 * 512];
+  threadgroup uint src[TQ];
+  const uint t = t0 + tgi.x;
+  const Job j = jobs[tj[t]];
+  const uint R = j.R, K = j.K, N = j.N, NB = K / 64, NS = K / 16, KB = K / 8, local = t - j.tbase;
+  const uint rt = local % j.tr, qt = local / j.tr;
+  const ulong rb = (ulong)K / 2;
+  device const uchar* codes = w + j.co;
+  device const uchar* scl = w + j.so;
+  const float post = as_type<float>((uint)j.bo);
+  device const char* XH = (device const char*)(st + j.xh);
+  device const char* XL = (device const char*)(st + j.xl);
+  device const float* d = (device const float*)(st + j.xd);
+  const bool mapped = j.xm != 0xFFFFFFFFFFFFFFFFul;
+  device const uint* xm = (device const uint*)(st + (mapped ? j.xm : 0ul));
+  for (uint u = tid; u < TQ; u += NT) {
+    const uint qq = qt * TQ + u;
+    src[u] = qq < N ? (mapped ? xm[qq] : qq) : 0u;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint sr = (sg % SR) * 16, sp = (sg / SR) * 16;
+  threadgroup float* csh = cs + sg * 512;
+  float4 a0[8], a1[8];
+  for (uint i = 0; i < 8; i++) a0[i] = a1[i] = float4(0.0f);
+  for (uint b = 0; b < NB; b++) {
+    const bool use1 = (b & ~3u) + 4 <= NB && (b & 1u);
+    for (uint s = 0; s < 4; s++) {
+      const uint e0 = b * 64 + s * 16;
+      for (uint k = tid; k < TR * 16; k += NT) {
+        const uint rr = k / 16, kk = k % 16, row = rt * TR + rr, e = e0 + kk;
+        half c = 0;
+        if (row < R) {
+          const uchar by = codes[(ulong)row * rb + e / 2];
+          c = half(NVX2[(e & 1) ? (by >> 4) : (by & 15)]);
+        }
+        wt[rr * 16 + kk] = c;
+      }
+      for (uint k = tid; k < TQ * 16; k += NT) {
+        const uint pp = k / 16, kk = k % 16, pos = qt * TQ + pp, e = e0 + kk;
+        half vh = 0, vl = 0;
+        if (pos < N) {
+          const uint q = src[pp];
+          const ulong o = ((ulong)(q >> 1) * KB + e / 8) * 16 + (q & 1) * 8 + (e & 7);
+          vh = half(XH[o]);
+          vl = half(XL[o]);
+        }
+        xh[kk * TQ + pp] = vh;
+        xl[kk * TQ + pp] = vl;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      simdgroup_float8x8 ch[2][2], cl[2][2];
+      for (uint a = 0; a < 2; a++)
+        for (uint c2 = 0; c2 < 2; c2++) {
+          ch[a][c2] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+          cl[a][c2] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+        }
+      for (uint k8 = 0; k8 < 16; k8 += 8) {
+        simdgroup_half8x8 A[2], BH[2], BL[2];
+        for (uint a = 0; a < 2; a++) simdgroup_load(A[a], wt + (sr + 8 * a) * 16 + k8, 16);
+        for (uint c2 = 0; c2 < 2; c2++) {
+          simdgroup_load(BH[c2], xh + k8 * TQ + sp + 8 * c2, TQ);
+          simdgroup_load(BL[c2], xl + k8 * TQ + sp + 8 * c2, TQ);
+        }
+        for (uint a = 0; a < 2; a++)
+          for (uint c2 = 0; c2 < 2; c2++) {
+            simdgroup_multiply_accumulate(ch[a][c2], A[a], BH[c2], ch[a][c2]);
+            simdgroup_multiply_accumulate(cl[a][c2], A[a], BL[c2], cl[a][c2]);
+          }
+      }
+      for (uint a = 0; a < 2; a++)
+        for (uint c2 = 0; c2 < 2; c2++) {
+          simdgroup_store(ch[a][c2], csh + (8 * a) * 16 + 8 * c2, 16);
+          simdgroup_store(cl[a][c2], csh + 256 + (8 * a) * 16 + 8 * c2, 16);
+        }
+      simdgroup_barrier(mem_flags::mem_threadgroup);
+      for (uint i = 0; i < 8; i++) {
+        const uint e = ln + 32 * i, row = rt * TR + sr + e / 16, pl = sp + e % 16, pos = qt * TQ + pl;
+        if (row < R && pos < N) {
+          const int dot = int(csh[e]) * 256 + int(csh[256 + e]);
+          const ushort cb = scl[(ulong)row * NS + b * 4 + s];
+          const float sc = float(as_type<half>((ushort)(((cb & 0x7F) << 7) | ((cb & 0x80) << 8))));
+          const float m = sc * d[(ulong)src[pl] * NB + b];
+          if (use1) a1[i][s] = fma(float(dot), m, a1[i][s]);  // (the CPU's vmul + vadd contract to one FMA under -ffp-contract=fast)
+          else a0[i][s] = fma(float(dot), m, a0[i][s]);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+  for (uint i = 0; i < 8; i++) {
+    const uint e = ln + 32 * i, row = rt * TR + sr + e / 16, pos = qt * TQ + sp + e % 16;
+    if (row < R && pos < N) {
+      const float4 tt = a0[i] + a1[i];
+      out[j.y + (ulong)pos * R + row] = ((tt.x + tt.y) + (tt.z + tt.w)) * post;
+    }
+  }
 }
 )";
+
+namespace {
+struct Job {  // the kernel's Job, same layout (9 x 8 + 6 x 4 = 96 bytes)
+  uint64_t co, so, bo, xh, xl, xd, xg, xm, y;
+  uint32_t R, K, N, fmt, tr, tbase;
+};
+static_assert(sizeof(Job) == 96, "Job layout");
+constexpr uint64_t NOMAP = ~0ull;
+}  // namespace
 
 struct GImpl {
   id<MTLDevice> dev;
   id<MTLCommandQueue> q;
-  id<MTLComputePipelineState> ps;
-  id<MTLBuffer> res;
-  const uint8_t* base = nullptr;
-  size_t bytes = 0;
-  struct Slot {
-    id<MTLBuffer> v, d, g;
-    size_t cap = 0;
-    int K = 0, n = 0;
-  } slot[4];
-  struct Out {
-    id<MTLBuffer> y;
-    size_t cap = 0;
-    int R = 0, n = 0;
+  id<MTLComputePipelineState> ps[4];  // gd (int dots, 16 x 16 tiles), gm2x2 (matrix units, 32 x 32), gm4x1 (64 x 16), gn (NVFP4)
+  int kernel = 1;
+  size_t page = 16384, max_len = 0;
+  struct WB {
+    id<MTLBuffer> b;
+    const uint8_t* base;
+    size_t len;
   };
-  std::vector<Out> outs;
-  int nout = 0;
+  std::vector<WB> wb;
+  struct Stage {
+    const XQB* x;
+    size_t oh, ol, od, og;
+  };
+  std::vector<Stage> stages;
+  struct Map {
+    const int* p;
+    int n;
+    size_t off;
+  };
+  std::vector<Map> maps;
+  std::vector<Job> jobs;
+  std::vector<int> job_wb, job_map, job_var;
+  std::vector<uint32_t> tiles;
+  struct Grp {
+    int wb, var;
+    uint32_t t0, nt;
+  };
+  std::vector<Grp> grps;
+  id<MTLBuffer> st = nil, jb = nil, tt = nil, ob = nil;
+  size_t st_cap = 0, jb_cap = 0, tt_cap = 0, ob_cap = 0;
   id<MTLCommandBuffer> cb = nil;
-  id<MTLComputeCommandEncoder> en = nil;
-  std::vector<id<MTLCommandBuffer>> inflight;
+  bool warned = false;
+  bool grow(id<MTLBuffer> __strong& b, size_t& cap, size_t need) {
+    if (need <= cap && b) return true;
+    size_t n = std::max<size_t>(need + need / 4, 1 << 16);
+    b = [dev newBufferWithLength:n options:MTLResourceStorageModeShared];
+    cap = b ? n : 0;
+    return b != nil;
+  }
 };
 
-bool GpuGemm::init(const void* res_base, size_t res_bytes) {
+bool GpuGemm::init() {
   @autoreleasepool {
+    if (impl) return true;
     GImpl* g = new GImpl();
     g->dev = MTLCreateSystemDefaultDevice();
-    if (!g->dev || ((uintptr_t)res_base & 16383)) {
+    if (!g->dev) {
       delete g;
       return false;
     }
     NSError* err = nil;
     MTLCompileOptions* co = [MTLCompileOptions new];
-    co.mathMode = MTLMathModeSafe;
+    if (@available(iOS 18.0, macOS 15.0, *)) {
+      co.mathMode = MTLMathModeSafe;  // no reassociation, contraction or approximation
+    } else {
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+      co.fastMathEnabled = NO;  // (iOS 17: the same rule under its older name)
+#pragma clang diagnostic pop
+    }
     id<MTLLibrary> lib = [g->dev newLibraryWithSource:[NSString stringWithUTF8String:GSRC] options:co error:&err];
     if (!lib) {
+      fprintf(stderr, "gpu_gemm: %s\n", err ? err.localizedDescription.UTF8String : "kernel compile failed");
       delete g;
       return false;
     }
-    g->ps = [g->dev newComputePipelineStateWithFunction:[lib newFunctionWithName:@"gd"] error:&err];
+    NSString* names[4] = {@"gd", @"gm2x2", @"gm4x1", @"gn"};
+    for (int i = 0; i < 4; i++) g->ps[i] = [g->dev newComputePipelineStateWithFunction:[lib newFunctionWithName:names[i]] error:&err];
     g->q = [g->dev newCommandQueue];
-    const size_t pg = 16384;
-    g->base = (const uint8_t*)res_base;
-    g->bytes = (res_bytes + pg - 1) / pg * pg;
-    g->res = [g->dev newBufferWithBytesNoCopy:(void*)res_base length:g->bytes options:MTLResourceStorageModeShared deallocator:nil];
-    if (!g->ps || !g->q || !g->res) {
+    if (!g->ps[0] || !g->q || g->ps[0].maxTotalThreadsPerThreadgroup < 256) {
       delete g;
       return false;
     }
+    if (!g->ps[1] || !g->ps[2] || g->ps[1].maxTotalThreadsPerThreadgroup < 128 || g->ps[2].maxTotalThreadsPerThreadgroup < 128)
+      g->kernel = 0;  // no matrix variant on this device: the integer kernel
+    g->page = (size_t)getpagesize();
+    g->max_len = (size_t)g->dev.maxBufferLength;
     impl = g;
     return true;
   }
 }
 
-GpuGemm::~GpuGemm() { delete (GImpl*)impl; }
+GpuGemm::~GpuGemm() {
+  if (!impl) return;
+  GImpl* g = (GImpl*)impl;
+  if (g->cb) [g->cb waitUntilCompleted];
+  delete g;
+}
 
-bool GpuGemm::holds(const void* p, size_t n) const {
-  if (!impl) return false;
-  const GImpl& g = *(const GImpl*)impl;
+bool GpuGemm::wrap(const void* base, size_t bytes) {
+  @autoreleasepool {
+    if (!impl || !base || !bytes) return false;
+    GImpl& g = *(GImpl*)impl;
+    if ((uintptr_t)base % g.page) return false;
+    const size_t len = (bytes + g.page - 1) / g.page * g.page;
+    // one buffer if the device allows it; else overlapping windows (stride half a window), so any range of up to half
+    // a window lies inside one of them
+    const size_t W = std::min(len, g.max_len / g.page * g.page);
+    if (W < (size_t)64 << 20 && W < len) return false;
+    const size_t stride = W == len ? len : W / 2;
+    bool any = false;
+    for (size_t o = 0; o < len; o += stride) {
+      const size_t l = std::min(W, len - o);
+      id<MTLBuffer> b = [g.dev newBufferWithBytesNoCopy:(void*)((const uint8_t*)base + o) length:l options:MTLResourceStorageModeShared
+                                            deallocator:nil];
+      if (!b) return any;
+      g.wb.push_back({b, (const uint8_t*)base + o, l});
+      any = true;
+      if (o + l >= len) break;
+    }
+    return any;
+  }
+}
+
+static int find_wb(const GImpl& g, const void* p, size_t n) {
   const uint8_t* b = (const uint8_t*)p;
-  return b >= g.base && b + n <= g.base + g.bytes;
+  for (size_t i = 0; i < g.wb.size(); i++)
+    if (b >= g.wb[i].base && b + n <= g.wb[i].base + g.wb[i].len) return (int)i;
+  return -1;
 }
 
-void GpuGemm::stage(const XQB& x, int s) {
+bool GpuGemm::holds(const void* p, size_t n) const { return impl && find_wb(*(const GImpl*)impl, p, n) >= 0; }
+
+size_t GpuGemm::wrapped_bytes() const {
+  if (!impl) return 0;
+  size_t s = 0;
+  for (auto& w : ((const GImpl*)impl)->wb) s += w.len;
+  return s;
+}
+
+void GpuGemm::begin() {
   GImpl& g = *(GImpl*)impl;
-  GImpl::Slot& S = g.slot[s];
-  const int K = x.K, n = x.N, NG = K / 64;
-  const size_t need = (size_t)n * K * 2;
-  if (need > S.cap) {
-    S.v = [g.dev newBufferWithLength:need options:MTLResourceStorageModeShared];
-    S.d = [g.dev newBufferWithLength:(size_t)n * NG * 4 options:MTLResourceStorageModeShared];
-    S.g = [g.dev newBufferWithLength:(size_t)n * NG * 4 options:MTLResourceStorageModeShared];
-    S.cap = need;
-  }
-  // the 15-bit activations hi * 256 + lo in natural order, out of the pair-interleaved planes (kernels_batch.cpp pk_off)
-  int16_t* v = (int16_t*)S.v.contents;
-  for (int i = 0; i < n; i++)
-    for (int k = 0; k < K; k++) {
-      const size_t o = ((size_t)(i >> 1) * (K / 8) + (k >> 3)) * 16 + (i & 1) * 8 + (k & 7);
-      v[(size_t)i * K + k] = (int16_t)(x.hn[o] * 256 + x.ln[o]);
-    }
-  std::memcpy(S.d.contents, x.d, (size_t)n * NG * 4);
-  std::memcpy(S.g.contents, x.gsum, (size_t)n * NG * 4);
-  S.K = K;
-  S.n = n;
+  g.stages.clear();
+  g.maps.clear();
+  g.jobs.clear();
+  g.job_wb.clear();
+  g.job_map.clear();
+  g.job_var.clear();
+  g.tiles.clear();
+  g.grps.clear();
 }
 
-int GpuGemm::enqueue(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r1, int n, int s) {
-  @autoreleasepool {
-    GImpl& g = *(GImpl*)impl;
-    if (!g.cb) {
-      g.cb = [g.q commandBuffer];
-      g.en = [g.cb computeCommandEncoder];
-      [g.en setComputePipelineState:g.ps];
-      g.nout = 0;
-    }
-    if ((int)g.outs.size() <= g.nout) g.outs.resize(g.nout + 1);
-    GImpl::Out& O = g.outs[g.nout];
-    const size_t need = (size_t)n * r1 * 4;
-    if (need > O.cap) {
-      O.y = [g.dev newBufferWithLength:need options:MTLResourceStorageModeShared];
-      O.cap = need;
-    }
-    O.R = r1;
-    O.n = n;
-    struct {
-      uint64_t co, so, bo;
-      uint32_t R, K, N;
-    } p = {(uint64_t)(codes - g.base), (uint64_t)((const uint8_t*)scales - g.base), (uint64_t)((const uint8_t*)biases - g.base), (uint32_t)r1,
-           (uint32_t)K, (uint32_t)n};
-    GImpl::Slot& S = g.slot[s];
-    [g.en setBuffer:g.res offset:0 atIndex:0];
-    [g.en setBuffer:S.v offset:0 atIndex:1];
-    [g.en setBuffer:S.d offset:0 atIndex:2];
-    [g.en setBuffer:S.g offset:0 atIndex:3];
-    [g.en setBuffer:O.y offset:0 atIndex:4];
-    [g.en setBytes:&p length:sizeof(p) atIndex:5];
-    [g.en dispatchThreadgroups:MTLSizeMake((r1 + 15) / 16, (n + 15) / 16, 1) threadsPerThreadgroup:MTLSizeMake(16, 16, 1)];
-    return g.nout++;
-  }
+int GpuGemm::stage(const XQB& x) {
+  GImpl& g = *(GImpl*)impl;
+  for (size_t i = 0; i < g.stages.size(); i++)
+    if (g.stages[i].x == &x) return (int)i;
+  g.stages.push_back({&x, 0, 0, 0, 0});
+  return (int)g.stages.size() - 1;
 }
 
-void GpuGemm::commit() {
+int GpuGemm::add(int fmt, const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int R, int n, int s,
+                 const int* map) {
+  GImpl& g = *(GImpl*)impl;
+  if (R <= 0 || n <= 0 || K % 64 || (fmt != 8 && fmt != 4) || s < 0) return -1;
+  const size_t NG = K / 64, cb = (size_t)R * (fmt == 8 ? K : K / 2), sb = (size_t)R * NG * 2;
+  // one buffer holding all three (the windows overlap, so try each that holds the codes)
+  int w = -1;
+  for (size_t i = 0; i < g.wb.size() && w < 0; i++) {
+    const GImpl::WB& b = g.wb[i];
+    auto in = [&](const void* p, size_t nb) { return (const uint8_t*)p >= b.base && (const uint8_t*)p + nb <= b.base + b.len; };
+    if (in(codes, cb) && in(scales, sb) && in(biases, sb)) w = (int)i;
+  }
+  if (w < 0) return -1;
+  const uint8_t* B = g.wb[w].base;
+  Job j{};
+  j.co = (uint64_t)(codes - B);
+  j.so = (uint64_t)((const uint8_t*)scales - B);
+  j.bo = (uint64_t)((const uint8_t*)biases - B);
+  j.xm = (uint64_t)s;  // the stage index until prepare() writes the offsets
+  j.R = (uint32_t)R;
+  j.K = (uint32_t)K;
+  j.N = (uint32_t)n;
+  j.fmt = (uint32_t)fmt;
+  const int var = g.kernel == 0 ? 0 : n <= 16 ? 2 : 1;
+  static const int TRv[3] = {16, 32, 64};
+  j.tr = (uint32_t)((R + TRv[var] - 1) / TRv[var]);
+  int mi = -1;
+  if (map) {
+    for (size_t i = 0; i < g.maps.size() && mi < 0; i++)
+      if (g.maps[i].p == map && g.maps[i].n == n) mi = (int)i;
+    if (mi < 0) {
+      g.maps.push_back({map, n, 0});
+      mi = (int)g.maps.size() - 1;
+    }
+  }
+  g.job_var.push_back(var);
+  g.jobs.push_back(j);
+  g.job_wb.push_back(w);
+  g.job_map.push_back(mi);
+  return (int)g.jobs.size() - 1;
+}
+
+int GpuGemm::add_nvfp4(const uint8_t* codes, const uint8_t* scales_e4m3, float gmul, int K, int R, int n, int s, const int* map) {
+  GImpl& g = *(GImpl*)impl;
+  if (R <= 0 || n <= 0 || K % 64 || s < 0 || !g.ps[3] || g.ps[3].maxTotalThreadsPerThreadgroup < 128) return -1;
+  const size_t cb = (size_t)R * (K / 2), sb = (size_t)R * (K / 16);
+  int w = -1;
+  for (size_t i = 0; i < g.wb.size() && w < 0; i++) {
+    const GImpl::WB& b = g.wb[i];
+    auto in = [&](const void* p, size_t nb) { return (const uint8_t*)p >= b.base && (const uint8_t*)p + nb <= b.base + b.len; };
+    if (in(codes, cb) && in(scales_e4m3, sb)) w = (int)i;
+  }
+  if (w < 0) return -1;
+  const uint8_t* B = g.wb[w].base;
+  Job j{};
+  j.co = (uint64_t)(codes - B);
+  j.so = (uint64_t)(scales_e4m3 - B);
+  const float post = gmul * 128.f;  // as gemm_nvfp4_i16
+  uint32_t pb;
+  std::memcpy(&pb, &post, 4);
+  j.bo = pb;
+  j.xm = (uint64_t)s;
+  j.R = (uint32_t)R;
+  j.K = (uint32_t)K;
+  j.N = (uint32_t)n;
+  j.fmt = 16;
+  j.tr = (uint32_t)((R + 31) / 32);
+  int mi = -1;
+  if (map) {
+    for (size_t i = 0; i < g.maps.size() && mi < 0; i++)
+      if (g.maps[i].p == map && g.maps[i].n == n) mi = (int)i;
+    if (mi < 0) {
+      g.maps.push_back({map, n, 0});
+      mi = (int)g.maps.size() - 1;
+    }
+  }
+  g.job_var.push_back(3);
+  g.jobs.push_back(j);
+  g.job_wb.push_back(w);
+  g.job_map.push_back(mi);
+  return (int)g.jobs.size() - 1;
+}
+
+int GpuGemm::prepare() {
+  GImpl& g = *(GImpl*)impl;
+  if (g.jobs.empty()) return 0;
+  size_t off = 0;
+  auto take = [&](size_t n) {
+    size_t o = off;
+    off += (n + 255) & ~size_t(255);
+    return o;
+  };
+  for (GImpl::Stage& S : g.stages) {
+    const XQB& x = *S.x;
+    const size_t NG = x.K / 64;
+    S.oh = take((size_t)x.NP * x.K);
+    S.ol = take((size_t)x.NP * x.K);
+    S.od = take((size_t)x.NP * NG * 4);
+    S.og = take((size_t)x.NP * NG * 4);
+  }
+  for (GImpl::Map& m : g.maps) m.off = take((size_t)m.n * 4);
+  const size_t st_need = off;
+  // outputs, then the tile table grouped by weight buffer
+  uint64_t y = 0;
+  std::vector<int> order(g.jobs.size());
+  for (size_t i = 0; i < order.size(); i++) order[i] = (int)i;
+  std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+    return g.job_wb[a] != g.job_wb[b] ? g.job_wb[a] < g.job_wb[b] : g.job_var[a] < g.job_var[b];
+  });
+  static const uint32_t TQv[4] = {16, 32, 16, 32};
+  for (size_t i = 0; i < g.jobs.size(); i++) {
+    Job& j = g.jobs[i];
+    const GImpl::Stage& S = g.stages[(size_t)j.xm];
+    j.xh = S.oh;
+    j.xl = S.ol;
+    j.xd = S.od;
+    j.xg = S.og;
+    j.xm = g.job_map[i] >= 0 ? g.maps[g.job_map[i]].off : NOMAP;
+    j.y = y;
+    y += (uint64_t)j.N * j.R;
+  }
+  for (int i : order) {
+    Job& j = g.jobs[i];
+    const int var = g.job_var[i];
+    const uint32_t nt = j.tr * ((j.N + TQv[var] - 1) / TQv[var]);
+    j.tbase = (uint32_t)g.tiles.size();
+    if (g.grps.empty() || g.grps.back().wb != g.job_wb[i] || g.grps.back().var != var) g.grps.push_back({g.job_wb[i], var, j.tbase, 0});
+    g.grps.back().nt += nt;
+    for (uint32_t t = 0; t < nt; t++) g.tiles.push_back((uint32_t)i);
+  }
+  if (!g.grow(g.st, g.st_cap, st_need) || !g.grow(g.ob, g.ob_cap, y * 4) || !g.grow(g.jb, g.jb_cap, g.jobs.size() * sizeof(Job)) ||
+      !g.grow(g.tt, g.tt_cap, g.tiles.size() * 4)) {
+    g.jobs.clear();
+    return 0;
+  }
+  std::memcpy(g.jb.contents, g.jobs.data(), g.jobs.size() * sizeof(Job));
+  std::memcpy(g.tt.contents, g.tiles.data(), g.tiles.size() * 4);
+  return (int)g.stages.size() + 1;
+}
+
+void GpuGemm::copy(int i) {
+  GImpl& g = *(GImpl*)impl;
+  if (i == (int)g.stages.size()) {  // the position maps (small)
+    for (const GImpl::Map& m : g.maps) {
+      uint32_t* d = (uint32_t*)((uint8_t*)g.st.contents + m.off);
+      for (int t = 0; t < m.n; t++) d[t] = (uint32_t)m.p[t];
+    }
+    return;
+  }
+  const GImpl::Stage& S = g.stages[i];
+  const XQB& x = *S.x;
+  const size_t NG = x.K / 64;
+  uint8_t* d = (uint8_t*)g.st.contents;
+  std::memcpy(d + S.oh, x.hn, (size_t)x.NP * x.K);
+  std::memcpy(d + S.ol, x.ln, (size_t)x.NP * x.K);
+  std::memcpy(d + S.od, x.d, (size_t)x.NP * NG * 4);
+  std::memcpy(d + S.og, x.gsum, (size_t)x.NP * NG * 4);
+}
+
+void GpuGemm::submit() {
   @autoreleasepool {
     GImpl& g = *(GImpl*)impl;
-    if (!g.cb) return;
-    [g.en endEncoding];
+    if (g.jobs.empty()) return;
+    g.cb = [g.q commandBuffer];
+    id<MTLComputeCommandEncoder> en = [g.cb computeCommandEncoder];
+    [en setBuffer:g.st offset:0 atIndex:1];
+    [en setBuffer:g.jb offset:0 atIndex:2];
+    [en setBuffer:g.tt offset:0 atIndex:3];
+    [en setBuffer:g.ob offset:0 atIndex:4];
+    for (const GImpl::Grp& G : g.grps) {
+      [en setComputePipelineState:g.ps[G.var]];
+      [en setBuffer:g.wb[G.wb].b offset:0 atIndex:0];
+      const MTLSize tpg = G.var == 0 ? MTLSizeMake(16, 16, 1) : MTLSizeMake(128, 1, 1);  // (gn: 128 as well)
+      for (uint32_t a = 0; a < G.nt; a += 65535) {
+        const uint32_t t0 = G.t0 + a, nt = std::min<uint32_t>(65535, G.nt - a);
+        [en setBytes:&t0 length:4 atIndex:5];
+        [en dispatchThreadgroups:MTLSizeMake(nt, 1, 1) threadsPerThreadgroup:tpg];
+      }
+    }
+    [en endEncoding];
     [g.cb commit];
-    g.inflight.push_back(g.cb);
-    g.cb = nil;
-    g.en = nil;
   }
 }
 
-void GpuGemm::wait() {
+bool GpuGemm::finish() {
   @autoreleasepool {
     GImpl& g = *(GImpl*)impl;
-    for (auto& c : g.inflight) [c waitUntilCompleted];
-    g.inflight.clear();
+    if (!g.cb) return true;
+    [g.cb waitUntilCompleted];
+    const bool ok = g.cb.status == MTLCommandBufferStatusCompleted;
+    if (!ok && !g.warned) {
+      fprintf(stderr, "gpu_gemm: a set did not complete (%s); its rows are computed on the CPU\n",
+              g.cb.error ? g.cb.error.localizedDescription.UTF8String : "no error given");
+      g.warned = true;
+    }
+    g.cb = nil;
+    return ok;
   }
 }
 
-void GpuGemm::finish(int t, float* Y, size_t ldy) {
-  GImpl& g = *(GImpl*)impl;
-  wait();
-  const GImpl::Out& O = g.outs[t];
-  const float* y = (const float*)O.y.contents;
-  for (int i = 0; i < O.n; i++) std::memcpy(Y + (size_t)i * ldy, y + (size_t)i * O.R, (size_t)O.R * 4);
+const float* GpuGemm::out(int t) const {
+  const GImpl& g = *(const GImpl*)impl;
+  return (const float*)g.ob.contents + g.jobs[t].y;
 }
+
+void GpuGemm::set_kernel(int k) {
+  GImpl& g = *(GImpl*)impl;
+  g.kernel = k != 0 && g.ps[1] && g.ps[2] ? 1 : 0;
+}
+
+int GpuGemm::kernel() const { return impl ? ((const GImpl*)impl)->kernel : -1; }
+
+size_t GpuGemm::buffer_bytes() const {
+  if (!impl) return 0;
+  const GImpl& g = *(const GImpl*)impl;
+  return g.st_cap + g.jb_cap + g.tt_cap + g.ob_cap;
+}
+
+void GpuGemm::trim() {
+  if (!impl) return;
+  GImpl& g = *(GImpl*)impl;
+  if (g.cb) [g.cb waitUntilCompleted];
+  g.cb = nil;
+  g.st = g.jb = g.tt = g.ob = nil;
+  g.st_cap = g.jb_cap = g.tt_cap = g.ob_cap = 0;
+}
+
+int GpuGemm::tickets() const { return impl ? (int)((const GImpl*)impl)->jobs.size() : 0; }
 
 }  // namespace dm

@@ -63,6 +63,11 @@ class LM {
                        PrefillStats* st) = 0;
   // One decode step: append id, logits after it.
   virtual void step(int id, float* logits) = 0;
+  // What step() must deliver from now on: 0 = every logit; k in [1, 64] = only the exact top k (their rows, order and
+  // values; the other rows may hold -inf), which a model with a screened head computes without the full head (k = 1:
+  // the argmax). Returns the k in force (0 when the model has no screened head or k is out of range).
+  virtual int set_head_k(int k) { return 0; }
+  virtual int head_k() const { return 0; }
   // Multi-position verify (draft and verify, include/dmeng/draft.h): ids[0..n) in one pass from the live state, the logits
   // after each position at logits_at(i); commit(a) keeps the first a (the state then equals a single steps'). False: the
   // model has none.

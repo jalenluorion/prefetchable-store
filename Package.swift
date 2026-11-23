@@ -5,8 +5,9 @@
 //
 // Flags: one set for every Apple platform this package builds for, the A16's (-mcpu=apple-a16: dotprod, i8mm, fp16fml,
 // bf16; no SME), so the Mac Catalyst / macOS build of the app runs the phone's code paths (the M4 is a superset). The
-// SME kernels (src/core/kernels_sme.cpp, measurement only, never called) and the Metal prefill split (src/core/gpu_gemm.mm,
-// macOS tools only; CMake's DM_METAL) are left out. -ffp-contract=fast is the
+// SME kernels (src/core/kernels_sme.cpp, measurement only, never called) are left out. The Metal prefill split
+// (src/core/gpu_gemm.mm, exact; off unless dm_open_opts.prefill_gpu_frac / prefill_gpu_experts > 0) is built in, with
+// DM_METAL defined and Metal linked, on iOS and macOS. -ffp-contract=fast is the
 // reference contraction of the core (CMakeLists.txt DM_CONTRACT); the format code (quantiser, derivations) is built
 // with -ffp-contract=off as in CMake, as its own target.
 import PackageDescription
@@ -31,11 +32,11 @@ let package = Package(
       name: "CDmeng",
       dependencies: ["DmengFormat"],
       path: ".",
-      exclude: ["src/core/kernels_sme.cpp", "src/core/gpu_gemm.mm"],
+      exclude: ["src/core/kernels_sme.cpp"],
       sources: ["src/core", "src/models", "src/serving", "bindings/c/dmeng_c.cpp"],
       publicHeadersPath: "bindings/c/public",
-      cxxSettings: core + [.headerSearchPath("src/format")],
-      linkerSettings: [.linkedLibrary("c++")]
+      cxxSettings: core + [.headerSearchPath("src/format"), .define("DM_METAL", to: "1")],
+      linkerSettings: [.linkedLibrary("c++"), .linkedFramework("Metal"), .linkedFramework("Foundation")]
     ),
     .target(name: "DmengKit", dependencies: ["CDmeng"], path: "apps/ios/DmengKit"),
   ],

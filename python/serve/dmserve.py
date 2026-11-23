@@ -2,9 +2,9 @@
 """dmserve: an OpenAI-compatible server (/v1/chat/completions with streaming and tool calls, /v1/models) in front of the
 engine's model worker (build/dmserve: one model process, one request at a time, prefix cache inside).
 
-  python python/serve/dmserve.py --model-dir MODEL                  # the profile's defaults (docs/MANIFEST-PRESETS.md)
-  python python/serve/dmserve.py --model-dir MODEL --mode fast --port 8090
-  python python/serve/dmserve.py --model-dir MODEL -- --cache-gb 5  # everything after "--" goes to the worker
+  python3 python/serve/dmserve.py --model-dir MODEL                  # the profile's defaults (docs/MANIFEST-PRESETS.md)
+  python3 python/serve/dmserve.py --model-dir MODEL --mode fast --port 8090
+  python3 python/serve/dmserve.py --model-dir MODEL -- --cache-gb 5  # everything after "--" goes to the worker
   (tools/dmserve.cpp; a worker flag overrides that one default, `--profile none` drops the profile)
 
 This process owns what is specific to a model folder and to HTTP: the release's tokenizer and chat template (through the

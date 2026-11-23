@@ -63,9 +63,37 @@ struct Qwen35::Ver {
 
 const float* Qwen35::logits_at(int i) const { return V ? V->lg.data() + (size_t)i * c.V : nullptr; }
 
+const float* Qwen35::final_hidden(int i) const {
+  if (i < 0) return h.data();  // the decode step's final rmsnorm output (left in h when the step computed logits)
+  return V && i < TMAX ? V->h.data() + (size_t)i * c.H : nullptr;
+}
+
+bool Qwen35::embed_row(int32_t tok, float* out) const {
+  if (tok < 0 || tok >= c.V) return false;
+  rows.row(tok, out);
+  return true;
+}
+
+int Qwen35::head_argmax(const float* hn, float* conf) {
+  if (dh_x.cap < c.H) dh_x.init(c.H, prec);
+  dh_x.prep(hn, c.H);
+  dh_lg.resize(c.V);
+  const int VO = mi.vocab_out > 0 ? mi.vocab_out : c.V;
+  int id = 0;
+  // the full head (its confidence needs every logit; the screened head, screen_head.h, gives only the exact top rows)
+  Job jh = {&head, &dh_x.q, nullptr, dh_lg.data()};
+  run_rows(*core->pool, &jh, 1, 64);
+  for (int r = 1; r < VO; r++)
+    if (dh_lg[r] > dh_lg[id]) id = r;
+  double zs = 0;
+  for (int r = 0; r < VO; r++) zs += std::exp((double)(dh_lg[r] - dh_lg[id]));
+  if (conf) *conf = (float)(1.0 / zs);
+  return id;
+}
+
 bool Qwen35::verify(State& s0, const int32_t* ids, int n) {
   S = (QState*)&s0;
-  if (n < 1 || n > TMAX || core->ns.on || (core->force && S->pos < core->force_n) || S->pos + n > S->ctx) return false;
+  if (n < 1 || n > TMAX || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n) || S->pos + n > S->ctx) return false;
   const int H = c.H, C = c.conv_dim(), ZD = c.NVH * c.DV, QD = c.NQ * c.HD, KD = c.NKV * c.HD, G = C + ZD + 2 * c.NVH;
   const int FP = 2 * QD + 2 * KD;
   Pool& pool = *core->pool;

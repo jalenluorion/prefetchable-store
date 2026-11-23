@@ -24,8 +24,9 @@
 // write every position's picks per layer, int16 [pos][NL][K]).
 //
 // Prefill memory and speed: the batched prefill's scratch (~0.5 GB) is freed after every prefill (as the earlier serving
-// worker did; --keep-scratch keeps it between prefills); --gpu-frac F computes that share of each 8-bit attention
-// projection's rows on the GPU beside the CPU (macOS builds with DM_METAL; the same bits; default 0 = CPU only).
+// worker did; --keep-scratch keeps it between prefills); --gpu-frac F computes that share of each attention projection's
+// rows on the GPU beside the CPU, --gpu-experts F the same for the experts' products (builds with DM_METAL; the same
+// bits; default 0 = CPU only; --gpu-min N: sub-chunks of at least N positions).
 #include <mach/mach.h>
 #include <unistd.h>
 
@@ -95,14 +96,25 @@ struct Args {
   int check_gen = 16, bench_rep = 1;
   int ref_chunk = 1;
   std::string draft = "none";  // draft and verify for greedy requests: none | lookup (controller) | fixed
-  int draft_max = 7, early = 0, probe_every = 48, verify_names = 1;
-  double gpu_frac = 0;       // prefill: share of each 8-bit attention projection's rows on the GPU (exact); 0 = CPU only
+  int draft_max = 7, early = 0, probe_every = 48, verify_names = 0, draft_gate = 1;
+  double draft_margin = 0.05;
+  double gpu_frac = 0;       // prefill: share of each attention projection's rows on the GPU (exact); 0 = CPU only
+  double gpu_experts = 0;    // prefill: share of the experts' rows on the GPU (exact); 0 = CPU only
+  int gpu_min = 0;           // prefill: GPU for sub-chunks of at least this many positions; 0 = the model's default (256)
+  std::string gpu_kernel;    // prefill: "integer" or "matrix" (default) GPU kernel (the same bits)
+  bool ref_no_gpu = false;   // --check: the reference run with the GPU split off
+  int run_ahead = 0, run_ahead_depth = 1;  // run-ahead while a step waits on reads: picks named (0 = off), depth (profile's)
+  double ra_budget = 0;                     // its limits (Core::ra_budget / ra_max_tok / ra_sat_skip; the profile's)
+  int ra_max = 0, ra_sat = 0;
+  bool gpu_off = false;      // --prefill-gpu off: both shares 0 (the profile's default: mac 0.4 / 0.4)
+  int gpu_min_wave = 0;      // prefill: a wave of landed experts uses the GPU from this many assignments; 0 = 128
   bool keep_scratch = false;  // prefill: keep the scratch between prefills (default: freed after each)
   int ahead_span = 512;       // idle-time prefill: positions per span (a cancel keeps the finished spans); 0 = --span
   bool ahead_park = true;     // idle-time prefill parks the live conversation it replaces
   std::string check_ahead_a, check_ahead_b;
   std::string hotset;         // saved hot set: written at quit, refilled in the background at start ("" = off)
   int check_ahead_len = 0;
+  std::string check_ckpt;  // --check-ckpt IDS: long / identical / diverging requests through the prefix cache vs cold
   bool cache_auto = false;    // --cache-gb auto: the size from the machine (src/serving/memwatch.h), then the watcher
   MemRule mr;                 // --reserve-gb, --cache-min-gb
   int mem_watch = -1;         // follow macOS memory pressure (default: on with --cache-gb auto)
@@ -114,6 +126,7 @@ struct Args {
   // the user-facing surface (include/dmeng/presets.h)
   std::string profile = "auto", mode;
   int drafts = -1;
+  int fast_head = 1;  // the screened head (exact) for greedy and top-k <= 64 requests; 0 = the full head always
   bool print_defaults = false;
   std::set<std::string> given;  // flags on the command line (a profile default fills only the others)
 };
@@ -125,7 +138,9 @@ static const char* HELP_SHORT = R"(usage: dmserve --model DIR [options]   (the m
                          fast: a picked expert that is not in memory and has a small routing weight is left out
   --profile mac|phone|phone-small   default: chosen from the device (macOS: mac)
   --cache-gb G|auto      expert cache size in GB (default auto: from free memory, follows memory pressure)
-  --drafts 0|1           draft and verify for greedy requests, experimental (default 0)
+  --drafts 0|1           draft and verify, greedy and sampled requests, exact and fast mode (default 0)
+  --fast-head 0|1        1 (default): the screened head for greedy and top-k <= 64 requests (exact: the same ids and
+                         top-k logits as the full head); 0: the full head for every request
   --help-advanced        every other option, grouped
 )";
 
@@ -148,12 +163,15 @@ early names (lossless: names only schedule reads)
   --routers F|none --m M --rt-tau T --rt-cand C     the profile's routers and names rule by default
   --xtok F|none --xtok-tau T --rd-prio 0|1   cross-token names (Inkling: source 47 with priority reads by default)
 prompt path
-  --chunk N (512) --span N (8192) --stream N (3) --gpu-frac F --keep-scratch
-  prefix cache: --ckpt-gb G --park-gb G --ckpt-every N --disk DIR|none (default DIR/.dmeng/prefix) --disk-gb G
+  --chunk N (512) --span N (8192) --stream N (3) --gpu-frac F --gpu-experts F (the profile's: mac 0.4 / 0.4)
+  --prefill-gpu off (CPU only) --keep-scratch
+  --run-ahead N (picks named while a step waits; 0 = off; the profile's: mac 8) --run-ahead-depth D (1)
+  --run-ahead-budget X --run-ahead-max N --run-ahead-sat-skip 0|1   its limits (the profile's; built-in: none)
+  prefix cache: --ckpt-gb G --ckpt-min N (4) --park-gb G --ckpt-every N --disk DIR|none (default DIR/.dmeng/prefix) --disk-gb G
                 --disk-every N (Inkling: 1024) --preload | --no-preload
   --ahead-span N (512) --ahead-park 0|1   idle-time prefill (the front end sends the predicted prefix)
   --hotset F|none        saved hot set (default DIR/.dmeng/hotset.bin)
-draft and verify (greedy requests only; the ids are plain decoding's)
+draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed)
   --draft none|lookup|fixed --draft-max N (7) --early N (0) --probe-every N (48) --verify-names 0|1 (default 0)
 measurement
   --check IDS --ref-chunk N --gen N | --prefill-bench IDS --rep N --record-routing F | --check-ahead A B --check-ahead-len N
@@ -227,7 +245,18 @@ static int run_check(ModelLM& lm, const Args& a) {
     }
     return r;
   };
+  // --ref-no-gpu: the reference run with the GPU split off (a batched reference for a long prompt, where single steps
+  // would take too long; the batched path without the split is itself checked against single steps by this mode)
+  std::string e;
+  if (a.ref_no_gpu) {
+    lm.model().set_option("prefill_gpu_frac", "0", e);
+    lm.model().set_option("prefill_gpu_experts", "0", e);
+  }
   Res A = run(a.ref_chunk);
+  if (a.ref_no_gpu) {
+    if (a.gpu_frac > 0) lm.model().set_option("prefill_gpu_frac", std::to_string(a.gpu_frac), e);
+    if (a.gpu_experts > 0) lm.model().set_option("prefill_gpu_experts", std::to_string(a.gpu_experts), e);
+  }
   Res B = run(a.chunk);
   size_t lg_bad = 0, fx_bad = 0, pd_bad = 0;
   long fx_first = -1, pd_first_pos = -1;
@@ -323,6 +352,7 @@ int main(int argc, char** argv) {
     } else if (k == "--profile") a.profile = v();
     else if (k == "--mode") a.mode = v();
     else if (k == "--drafts") a.drafts = std::stoi(v());
+    else if (k == "--fast-head") a.fast_head = std::stoi(v());
     else if (k == "--print-defaults") a.print_defaults = true;
     else if (k == "--model") a.model = v();
     else if (k == "--resident") a.resident = v();
@@ -356,6 +386,7 @@ int main(int argc, char** argv) {
     else if (k == "--routers") a.routers = v();
     else if (k == "--m") a.m = std::stoi(v());
     else if (k == "--ckpt-gb") a.s.ckpt_gb = std::stod(v());
+    else if (k == "--ckpt-min") a.s.ckpt_min = std::stoi(v());
     else if (k == "--park-gb") a.s.park_gb = std::stod(v());
     else if (k == "--ckpt-every") a.s.ckpt_every = std::stoi(v());
     else if (k == "--disk-every") a.s.disk_every = std::stoi(v());
@@ -370,11 +401,24 @@ int main(int argc, char** argv) {
     else if (k == "--rep") a.bench_rep = std::stoi(v());
     else if (k == "--record-routing") a.record = v();
     else if (k == "--gpu-frac") a.gpu_frac = std::stod(v());
+    else if (k == "--gpu-experts") a.gpu_experts = std::stod(v());
+    else if (k == "--prefill-gpu") a.gpu_off = v() == "off";
+    else if (k == "--gpu-min") a.gpu_min = std::stoi(v());
+    else if (k == "--gpu-kernel") a.gpu_kernel = v();
+    else if (k == "--gpu-min-wave") a.gpu_min_wave = std::stoi(v());
+    else if (k == "--run-ahead") a.run_ahead = std::stoi(v());
+    else if (k == "--run-ahead-depth") a.run_ahead_depth = std::stoi(v());
+    else if (k == "--run-ahead-budget") a.ra_budget = std::stod(v());
+    else if (k == "--run-ahead-max") a.ra_max = std::stoi(v());
+    else if (k == "--run-ahead-sat-skip") a.ra_sat = std::stoi(v());
+    else if (k == "--ref-no-gpu") a.ref_no_gpu = true;
     else if (k == "--keep-scratch") a.keep_scratch = true;
     else if (k == "--draft") a.draft = v();
     else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--early") a.early = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
+    else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
+    else if (k == "--draft-margin") a.draft_margin = std::stod(v());
     else if (k == "--probe-every") a.probe_every = std::stoi(v());
     else if (k == "--ahead-span") a.ahead_span = std::stoi(v());
     else if (k == "--ahead-park") a.ahead_park = std::stoi(v()) != 0;
@@ -382,6 +426,7 @@ int main(int argc, char** argv) {
       a.check_ahead_a = v();
       a.check_ahead_b = v();
     } else if (k == "--check-ahead-len") a.check_ahead_len = std::stoi(v());
+    else if (k == "--check-ckpt") a.check_ckpt = v();
     else if (k == "--hotset") a.hotset = v();
     else {
       fprintf(stderr, "unknown flag %s\n", k.c_str());
@@ -393,7 +438,7 @@ int main(int argc, char** argv) {
             "usage: dmserve --model DIR [--resident F] [options]\n"
             "  prefix cache: --ckpt-gb G (checkpoints in memory, default %.2f) --park-gb G (parked sequences, default %.2f)\n"
             "                --disk DIR --disk-gb G (default %.1f)\n"
-            "  draft and verify (greedy requests only; the ids are plain decoding's): --draft none|lookup|fixed (default none),\n"
+            "  draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed): --draft none|lookup|fixed (default none),\n"
             "                --draft-max N (7), --early N (name the copied positions' experts N positions ahead; 0 = off),\n"
             "                --probe-every N (48)\n",
             SessionOptions().ckpt_gb, SessionOptions().park_gb, SessionOptions().disk_gb);
@@ -418,14 +463,21 @@ int main(int argc, char** argv) {
     if (!has("--resident") && !P.resident.empty()) a.resident = P.resident;
     if (!has("--routers") && !has("--xtok")) {
       a.routers = P.routers;
-      if (!has("--m")) a.m = P.m;
-      if (!has("--rt-tau")) a.rt_tau = P.tau;
-      if (!has("--rt-cand")) a.rt_cand = P.cand;
+      // the profile's names rule; an explicit --m / --rt-tau / --rt-cand wins (precedence: presets.h)
+      names_rule(P, true, has("--m"), a.m, has("--rt-tau"), a.rt_tau, has("--rt-cand"), a.rt_cand, a.m, a.rt_tau, a.rt_cand);
       a.xtok = P.xtok;
       if (!has("--xtok-tau")) a.xtok_tau = P.xtok_tau;
       if (!has("--rd-prio") && P.rd_prio) a.rd_prio = 1;
     }
     if (!has("--evict")) a.evict = P.evict;
+    if (!has("--gpu-frac")) a.gpu_frac = P.gpu_frac;
+    if (!has("--run-ahead")) a.run_ahead = P.run_ahead;
+    if (!has("--run-ahead-depth")) a.run_ahead_depth = P.run_ahead_depth;
+    if (!has("--run-ahead-budget")) a.ra_budget = P.ra_budget;
+    if (!has("--readers") && P.readers > 0) a.readers = P.readers;
+    if (!has("--run-ahead-max")) a.ra_max = P.ra_max_tok;
+    if (!has("--run-ahead-sat-skip")) a.ra_sat = P.ra_sat_skip ? 1 : 0;
+    if (!has("--gpu-experts")) a.gpu_experts = P.gpu_experts;
     if (!has("--cache-gb")) a.cache_auto = true;
     if (!has("--disk")) a.s.disk_dir = P.cache_dir + "/prefix";
     if (!has("--disk-every") && P.family == "inkling2_loop") a.s.disk_every = 1024;  // its fixed state is 173 MB
@@ -436,6 +488,8 @@ int main(int argc, char** argv) {
     a.mode = engine_mode_of(a.mode.empty() ? "lossless" : a.mode);
   }
   if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
+  if (a.gpu_off) a.gpu_frac = a.gpu_experts = 0;
+  if (a.drafts > 0 && !has("--early")) a.early = 4;
   if (a.routers == "none") a.routers.clear();
   if (a.xtok == "none") a.xtok.clear();
   if (a.hotset == "none") a.hotset.clear();
@@ -453,7 +507,14 @@ int main(int argc, char** argv) {
   double cache_start = 0;
   if (a.cache_auto) {  // the largest locked cache that leaves the reserve (measured now, the resident weights loaded)
     const ModelInfo& mi0 = M->info();
-    a.cache_gb = auto_cache_gb(a.mr, M->pos_bytes(), a.s.ckpt_gb, store_bytes_gb(a.model, mi0.layer_file, mi0.layers), cache_start, auto_why);
+    size_t fb = 0;  // a checkpoint's size (a fresh state's fixed part; its memory is only reserved, never touched)
+    {
+      std::string e2;
+      auto tmp = M->new_state(a.ctx, e2);
+      if (tmp) fb = M->fixed_bytes(*tmp);
+    }
+    const double ckpt_mem = std::max(a.s.ckpt_gb, a.s.ckpt_min * (double)fb / 1e9);  // the checkpoints' memory
+    a.cache_gb = auto_cache_gb(a.mr, M->pos_bytes(), ckpt_mem, store_bytes_gb(a.model, mi0.layer_file, mi0.layers), cache_start, auto_why);
   }
   CoreOpts co;
   co.threads = a.threads;
@@ -497,6 +558,9 @@ int main(int argc, char** argv) {
     if (C.ns.prio) C.cache.rd.prio = true;
     if (C.ns.cancel) C.cancel_stale = true;
   }
+  C.ra_budget = a.ra_budget;
+  C.ra_max_tok = a.ra_max;
+  C.ra_sat_skip = a.ra_sat != 0;
   if (a.rd_prio >= 0) C.cache.rd.prio = a.rd_prio != 0;  // speculative reads by priority instead of first in, first out
   std::unique_ptr<State> S = M->new_state(a.ctx, err);
   if (!S) {
@@ -507,21 +571,57 @@ int main(int argc, char** argv) {
   {
     std::string e;
     if (!a.keep_scratch) M->set_option("prefill_release", "1", e);  // families without a batched prefill have no scratch
+    if (!a.gpu_kernel.empty() && !M->set_option("prefill_gpu_kernel", a.gpu_kernel == "integer" ? "0" : "1", e)) {
+      fprintf(stderr, "--gpu-kernel: %s\n", e.c_str());
+      return 1;
+    }
+    if (a.gpu_min_wave > 0 && !M->set_option("prefill_gpu_min_wave", std::to_string(a.gpu_min_wave), e)) {
+      fprintf(stderr, "--gpu-min-wave: %s\n", e.c_str());
+      return 1;
+    }
+    if (a.gpu_min > 0 && !M->set_option("prefill_gpu_min", std::to_string(a.gpu_min), e)) {
+      fprintf(stderr, "--gpu-min: %s\n", e.c_str());
+      return 1;
+    }
     if (a.gpu_frac > 0 && !M->set_option("prefill_gpu_frac", std::to_string(a.gpu_frac), e)) {
       fprintf(stderr, "--gpu-frac: %s\n", e.c_str());
+      return 1;
+    }
+    if (a.gpu_experts > 0 && !M->set_option("prefill_gpu_experts", std::to_string(a.gpu_experts), e)) {
+      fprintf(stderr, "--gpu-experts: %s\n", e.c_str());
+      return 1;
+    }
+    if (a.run_ahead > 0 && (!M->set_option("run_ahead", std::to_string(a.run_ahead), e) ||
+                            (a.run_ahead_depth > 1 && !M->set_option("run_ahead_depth", std::to_string(a.run_ahead_depth), e)))) {
+      fprintf(stderr, "--run-ahead: %s\n", e.c_str());
       return 1;
     }
   }
   ModelLM lm(*M, C, *S, a.ctx);
   double load_ms = ms_since2(tl);
+  if (a.given.count("--fast-head") && a.fast_head > 0 && (!a.check.empty() || !a.bench.empty())) {  // the checks on the split head
+    std::string e;
+    if (!lm.enable_screened_head(e)) {
+      fprintf(stderr, "--fast-head: %s\n", e.c_str());
+      return 1;
+    }
+  }
   if (!a.check.empty()) return run_check(lm, a);
   if (!a.bench.empty()) return run_bench(lm, a);
+  if (!a.check_ckpt.empty()) return check_ckpt(lm, a.s, read_ids_file(a.check_ckpt), a.chunk, a.span, a.stream, a.check_gen);
   if (!a.check_ahead_a.empty()) {
     std::vector<int> A = read_ids_file(a.check_ahead_a), B = read_ids_file(a.check_ahead_b);
     const int al = a.check_ahead_len > 0 ? a.check_ahead_len : (int)B.size() - 16;
     return check_ahead(lm, a.s, A, B, al, a.chunk, a.span, a.ahead_span > 0 ? a.ahead_span : a.span, a.stream, a.check_gen);
   }
 
+  // the screened head (Qwen3.6): built once here; each request then asks for the k it needs (a family without it: none)
+  bool screened = false;
+  if (a.fast_head > 0) {
+    std::string e;
+    screened = lm.enable_screened_head(e);
+    if (!screened && a.given.count("--fast-head")) fprintf(stderr, "dmserve: --fast-head: %s (full head)\n", e.c_str());
+  }
   PrefixCache pc(lm, a.s);
   // draft and verify (greedy requests): the shared drafter over the session (prompt + everything generated), plus the
   // request's tool-call fragments; with --early it keeps every position's released picks for early names
@@ -534,6 +634,8 @@ int main(int argc, char** argv) {
   dr.o.max = a.draft_max;
   dr.o.early = a.early;
   dr.o.probe_every = a.probe_every;
+    dr.o.gate = a.draft_gate != 0;
+    dr.o.margin = a.draft_margin;
   dr.init(M->info().family, a.early > 0 && a.draft != "none" ? &C : nullptr);
   dr.reads = &C;
   C.chunk_names = a.verify_names != 0;
@@ -558,7 +660,30 @@ int main(int argc, char** argv) {
       << ",\"cache_gb\":" << a.cache_gb << ",\"chunk\":" << a.chunk << ",\"stream\":" << a.stream
       << ",\"fixed_mb\":" << lm.info().fixed_bytes / 1e6 << ",\"pos_kb\":" << lm.info().pos_bytes / 1e3 << ",\"hotset\":" << (hot_loaded ? hot->size() : 0)
       << ",\"cache_auto\":" << auto_why << ",\"mode\":\"" << a.mode << "\",\"preset\":" << (profiled ? P.json() : std::string("null"))
-      << ",\"mem\":" << lm.mem_json() << "}";
+      << ",\"resolved\":" << [&] {
+           Resolved r;
+           r.profile = profiled ? P.profile : "none";
+           r.mode = a.mode;
+           r.routers = a.routers;
+           r.m = a.m;
+           r.tau = a.rt_tau;
+           r.cand = a.rt_cand;
+           r.xtok = a.xtok;
+           r.cache_gb = a.cache_gb;
+           r.cache_auto = a.cache_auto;
+           r.evict = a.evict;
+           r.drafts = a.draft != "none" ? 1 : 0;
+           r.gpu_frac = a.gpu_frac;
+           r.gpu_experts = a.gpu_experts;
+           r.run_ahead = a.run_ahead > 0 ? a.run_ahead : 0;
+           r.run_ahead_depth = a.run_ahead_depth;
+           r.ra_budget = a.ra_budget;
+           r.ra_max_tok = a.ra_max;
+           r.ra_sat_skip = a.ra_sat != 0;
+           r.readers = a.readers;
+           return r.json();
+         }()
+      << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << "}";
     out(s.str());
   }
   // stdin reader: requests into a queue, cancels applied at once
@@ -695,6 +820,9 @@ int main(int argc, char** argv) {
       out("E " + std::to_string(r.rid) + " cancel {}");
       continue;
     }
+    // the head this request needs: the argmax (greedy without drafting: verify passes keep the full head), the exact top
+    // k (top-k sampling, k <= 64), or every logit (anything else)
+    lm.set_head_k(!screened ? 0 : r.temp <= 0 ? (dr.on() ? 0 : 1) : r.top_k >= 1 && r.top_k <= 64 ? r.top_k : 0);
     SyncResult sr = pc.sync(r.ids, r.marks, lg.data());
     double ttp = ms_since2(t0);
     if (dr.core && sr.source != "live" && sr.source != "checkpoint") {  // picks of restored positions never ran here
@@ -721,7 +849,13 @@ int main(int argc, char** argv) {
     std::string reason = "length";
     auto td = sclk::now();
     double first_ms = 0;
-    const bool drafting = dr.on() && r.temp <= 0;
+    const bool drafting = dr.on();
+    // sampled requests draft too: every produced token takes the draw of its index (the plain loop's one per token)
+    Draws draws(r.seed);
+    if (drafting && r.temp > 0)
+      dr.pick = [&](const float* lgp, int i) { return sample_at(lgp, lm.info().vocab, r.temp, r.top_k, r.top_p, draws, (size_t)ntok + i); };
+    else
+      dr.pick = nullptr;
     std::vector<int32_t> hist;
     std::vector<int> got, gen;
     size_t gi = 0;  // got[gi..] are produced and not yet emitted (all but the last already in the state)

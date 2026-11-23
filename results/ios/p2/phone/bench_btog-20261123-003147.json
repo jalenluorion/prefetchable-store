@@ -1,0 +1,262 @@
+{
+  "app_after" : {
+    "args" : [
+      "--",
+      "-autotest",
+      "-kernelBench",
+      "-p0spec",
+      "cell=1,sustain=0,metal=1,bgthreads=0,batch=0,cases=a4gu,threads=6,btog=20"
+    ],
+    "battery_level" : 1,
+    "battery_state" : "full",
+    "low_power" : false,
+    "machine" : "iPhone15,5",
+    "os" : "Version 27.2 (Build 24B119)",
+    "os_proc_available_memory" : 3462215240,
+    "physical_memory" : 5936922624,
+    "thermal" : "serious",
+    "time" : "2026-11-23T05:33:15Z"
+  },
+  "app_before" : {
+    "args" : [
+      "--",
+      "-autotest",
+      "-kernelBench",
+      "-p0spec",
+      "cell=1,sustain=0,metal=1,bgthreads=0,batch=0,cases=a4gu,threads=6,btog=20"
+    ],
+    "battery_level" : 1,
+    "battery_state" : "full",
+    "low_power" : false,
+    "machine" : "iPhone15,5",
+    "os" : "Version 27.2 (Build 24B119)",
+    "os_proc_available_memory" : 4268439808,
+    "physical_memory" : 5936922624,
+    "thermal" : "nominal",
+    "thermal_wait_s" : 0.00093007087707519531,
+    "time" : "2026-11-23T05:31:48Z"
+  },
+  "result" : {
+    "available_start" : 4268407016,
+    "bandwidth" : [
+      {
+        "gbps" : 46.968000000000004,
+        "qos" : "ui",
+        "thermal" : "nominal",
+        "threads" : 6
+      },
+      {
+        "gbps" : 48.644300000000001,
+        "qos" : "default",
+        "thermal" : "nominal",
+        "threads" : 6
+      }
+    ],
+    "best_threads_experts" : 6,
+    "features" : {
+      "hw.cachelinesize" : 128,
+      "hw.cpufamily" : -2023363094,
+      "hw.l1dcachesize" : 65536,
+      "hw.machine" : "iPhone15,5",
+      "hw.memsize" : 5936922624,
+      "hw.ncpu" : 6,
+      "hw.nperflevels" : 2,
+      "hw.optional.arm.FEAT_BF16" : 1,
+      "hw.optional.arm.FEAT_DotProd" : 1,
+      "hw.optional.arm.FEAT_FHM" : 1,
+      "hw.optional.arm.FEAT_FP16" : 1,
+      "hw.optional.arm.FEAT_I8MM" : 1,
+      "hw.optional.arm.FEAT_SME" : 0,
+      "hw.optional.arm.FEAT_SME2" : 0,
+      "hw.optional.arm.FEAT_SVE" : -1,
+      "hw.pagesize" : 16384,
+      "hw.perflevel0.cpusperl2" : 2,
+      "hw.perflevel0.l2cachesize" : 16777216,
+      "hw.perflevel0.physicalcpu" : 2,
+      "hw.perflevel1.l2cachesize" : 4194304,
+      "hw.perflevel1.physicalcpu" : 4,
+      "kern.osproductversion" : "27.2",
+      "kern.osversion" : "24B119",
+      "machdep.cpu.brand_string" : ""
+    },
+    "footprint_start" : 26560280,
+    "matvec" : [
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 37.777000000000001,
+        "gmacs" : 67.159000000000006,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 94,
+        "qos" : "ui",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 6,
+        "us_per_matrix" : 15.613300000000001,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      },
+      {
+        "case" : "a4gu",
+        "cols" : 2048,
+        "fmt" : "aff4_g64",
+        "gbps" : 30.740200000000002,
+        "gmacs" : 54.6492,
+        "matrix_bytes" : 589824,
+        "nmat" : 682,
+        "passes" : 77,
+        "qos" : "default",
+        "rows" : 512,
+        "thermal_end" : "nominal",
+        "thermal_start" : "nominal",
+        "threads" : 6,
+        "us_per_matrix" : 19.1874,
+        "what" : "routed expert gate\/up 512x2048 aff4 (store record)"
+      }
+    ],
+    "memory_warnings" : 0,
+    "metal" : {
+      "batched" : [
+        {
+          "case" : "a8qkv",
+          "gmacs" : 92.672799999999995,
+          "ms" : 11.586399999999999,
+          "N" : 64
+        },
+        {
+          "case" : "a8qkv",
+          "gmacs" : 93.319699999999997,
+          "ms" : 46.024299999999997,
+          "N" : 256
+        }
+      ],
+      "batched_together" : {
+        "cpu_alone_gmacs" : 123.53100000000001,
+        "cpu_case" : "a4qkv",
+        "cpu_threads" : 6,
+        "cpu_together_gmacs" : 76.686800000000005,
+        "gpu_alone_gmacs" : 87.055700000000002,
+        "gpu_case" : "a8qkv gd",
+        "gpu_together_gmacs" : 72.594300000000004,
+        "N" : 256,
+        "seconds" : 20,
+        "sum_together_gmacs" : 149.28100000000001,
+        "thermal" : "nominal \/ fair \/ fair \/ fair"
+      },
+      "bit_identity" : {
+        "a4dn" : 0,
+        "a4gu" : 0,
+        "a4out" : 0,
+        "a8out" : 0,
+        "a8rt" : 0,
+        "gd_a8_1024x2048_N64" : 0
+      },
+      "device" : "Apple A16 GPU",
+      "matvec" : [
+        {
+          "case" : "a4gu",
+          "gbps_gpu" : 31.842199999999998,
+          "gbps_wall" : 30.324999999999999,
+          "gmacs_wall" : 53.911099999999998,
+          "nmat" : 682,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 18.523399999999999
+        },
+        {
+          "case" : "a4dn",
+          "gbps_gpu" : 32.061199999999999,
+          "gbps_wall" : 30.372,
+          "gmacs_wall" : 53.994599999999998,
+          "nmat" : 682,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 18.396799999999999
+        },
+        {
+          "case" : "a8qkv",
+          "gbps_gpu" : 47.395699999999998,
+          "gbps_wall" : 44.075099999999999,
+          "gmacs_wall" : 41.482399999999998,
+          "nmat" : 22,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 376.10599999999999
+        },
+        {
+          "case" : "a8out",
+          "gbps_gpu" : 43.568199999999997,
+          "gbps_wall" : 40.564300000000003,
+          "gmacs_wall" : 38.178100000000001,
+          "nmat" : 45,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 204.57300000000001
+        },
+        {
+          "case" : "a8rt",
+          "gbps_gpu" : 34.942999999999998,
+          "gbps_wall" : 32.950099999999999,
+          "gmacs_wall" : 31.011900000000001,
+          "nmat" : 722,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 15.941800000000001
+        },
+        {
+          "case" : "a8head",
+          "gbps_gpu" : 47.604500000000002,
+          "gbps_wall" : 44.045499999999997,
+          "gmacs_wall" : 41.454599999999999,
+          "nmat" : 5,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 1497.8199999999999
+        },
+        {
+          "case" : "a4qkv",
+          "gbps_gpu" : 44.433500000000002,
+          "gbps_wall" : 41.293700000000001,
+          "gmacs_wall" : 73.411000000000001,
+          "nmat" : 42,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 212.38900000000001
+        },
+        {
+          "case" : "a4out",
+          "gbps_gpu" : 43.311399999999999,
+          "gbps_wall" : 40.725900000000003,
+          "gmacs_wall" : 72.401600000000002,
+          "nmat" : 85,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 108.946
+        },
+        {
+          "case" : "a4head",
+          "gbps_gpu" : 46.734699999999997,
+          "gbps_wall" : 44.2209,
+          "gmacs_wall" : 78.614900000000006,
+          "nmat" : 10,
+          "thermal" : "nominal",
+          "us_per_matrix_gpu" : 807.72400000000005
+        }
+      ],
+      "max_working_set" : 4294983680,
+      "read_gbps" : 42.006999999999998,
+      "roundtrip_us_p50" : 222.958,
+      "roundtrip_us_p90" : 257.25,
+      "together" : {
+        "case" : "a4gu",
+        "cpu_alone_gbps" : 19.4938,
+        "cpu_threads" : 6,
+        "cpu_together_gbps" : 15.2157,
+        "gpu_alone_gbps" : 28.680700000000002,
+        "gpu_together_gbps" : 16.016500000000001,
+        "seconds" : 2,
+        "sum_together_gbps" : 31.232199999999999,
+        "thermal_end" : "serious"
+      }
+    },
+    "pressure_events" : 0,
+    "seconds_total" : 87.415000000000006,
+    "spec" : "cell=1,sustain=0,metal=1,bgthreads=0,batch=0,cases=a4gu,threads=6,btog=20",
+    "thermal_at_end" : "serious",
+    "thermal_at_start" : "nominal"
+  }
+}

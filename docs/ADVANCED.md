@@ -2,7 +2,7 @@
 
 Everyday use needs only `--model`, a prompt, and perhaps `--mode` or `--profile` (see the README). Everything else is
 here, grouped; the full list with every value is printed by `dmeng --help-advanced` and `dmserve --help-advanced`
-(the C++ worker), and `python python/serve/dmserve.py --help-advanced` (the HTTP front end).
+(the C++ worker), and `python3 python/serve/dmserve.py --help-advanced` (the HTTP front end).
 
 ## How defaults and flags combine
 

@@ -1,0 +1,61 @@
+{
+  "background_session" : false,
+  "cellular" : false,
+  "fake_free_bytes" : -1,
+  "files" : [
+    {
+      "attempts" : 0,
+      "local" : "config.json",
+      "network_bytes" : 0,
+      "resumed_from" : 0,
+      "size" : 3686,
+      "source" : "",
+      "state" : "queued"
+    },
+    {
+      "attempts" : 0,
+      "local" : "generation_config.json",
+      "network_bytes" : 0,
+      "resumed_from" : 0,
+      "size" : 202,
+      "source" : "",
+      "state" : "queued"
+    },
+    {
+      "attempts" : 0,
+      "local" : "tokenizer.json",
+      "network_bytes" : 0,
+      "resumed_from" : 0,
+      "size" : 12807982,
+      "source" : "",
+      "state" : "queued"
+    },
+    {
+      "attempts" : 0,
+      "local" : "derived\/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+      "network_bytes" : 0,
+      "resumed_from" : 0,
+      "size" : 68091904,
+      "source" : "",
+      "state" : "queued"
+    }
+  ],
+  "free_bytes" : 1077248000,
+  "headroom_bytes" : 1000000000,
+  "manifest_url" : "https:\/\/huggingface.co\/jalenluorion\/Qwen3.6-35B-A3B-moved-store\/resolve\/main\/moved-store.json",
+  "mb_per_s_this_launch" : 0,
+  "model_dir" : "<app container>\/Documents\/dl_test",
+  "network_bytes_this_launch" : 0,
+  "only" : [
+    "config.json",
+    "tokenizer.json",
+    "generation_config.json",
+    "derived\/router.linear_k2.q8.dmr1.efd45c78a56b.bin"
+  ],
+  "phase" : "refused(\"Not enough space: the download needs 1.08 GB (0.08 GB of files + 1 GB to spare) and this device has 1.08 GB free. Free up 0.00 GB (Settings > General > iPhone Storage) and try again.\")",
+  "refusal" : "Not enough space: the download needs 1.08 GB (0.08 GB of files + 1 GB to spare) and this device has 1.08 GB free. Free up 0.00 GB (Settings > General > iPhone Storage) and try again.",
+  "seconds_since_start" : 0,
+  "store_complete" : false,
+  "time" : "2026-11-23T05:26:09Z",
+  "total_bytes" : 80903774
+}

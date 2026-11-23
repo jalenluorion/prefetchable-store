@@ -67,6 +67,21 @@ int main(int argc, char** argv) {
   double gb = 3.3, resize_gb = 0;
   const char* policy_probe = NULL;
   const char *resident = NULL, *mode = NULL;  /* --resident FILE (e.g. the 4-bit resident_q4), --mode approx:drop */
+  double gpu_frac = 0, gpu_experts = 0;      /* --gpu-frac F --gpu-experts F: the prefill's exact GPU split */
+  int gpu_min = 0, prefill_threads = 0;      /* --gpu-min N (sub-chunks of at least N positions), --prefill-threads N */
+  int gpu_int = 0;                           /* --gpu-int-kernel: the integer GPU kernel instead of the matrix-unit one */
+  int gpu_wave = 0;                          /* --gpu-min-wave N: expert waves of at least N assignments use the GPU */
+  const char *profile = NULL, *evict = NULL, *routers = NULL;  /* --profile NAME, --evict P, --routers FILE|none */
+  int router_m = 0, router_cand = 0;          /* --m M, --rt-cand C (0: the profile's) */
+  double router_tau = 0;                     /* --rt-tau T (0: the profile's; < 0: a plain top m) */
+  int run_ahead = 0;                         /* --run-ahead N (0: the profile's; < 0: off) */
+  double ra_budget = 0;                      /* --run-ahead-budget X --run-ahead-max N --run-ahead-sat-skip 0|1 */
+  int ra_max = 0, ra_sat = 0;
+  for (int i = 1; i < argc; i++)  /* --gpu-check [SECONDS]: the GPU kernels' self-test (no model), then exit */
+    if (!strcmp(argv[i], "--gpu-check")) {
+      printf("%s\n", dm_gpu_check(0, i + 1 < argc ? atof(argv[i + 1]) : 1.0));
+      return 0;
+    }
   for (int i = 1; i < argc; i++) {
     const char* k = argv[i];
     const char* v = i + 1 < argc ? argv[i + 1] : NULL;
@@ -79,7 +94,17 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--n")) n = atoi(v), i++;
     else if (!strcmp(k, "--threads")) threads = atoi(v), i++;
     else if (!strcmp(k, "--readers")) readers = atoi(v), i++;
-    else if (!strcmp(k, "--cache-gb")) gb = atof(v), i++;
+    else if (!strcmp(k, "--cache-gb")) gb = !strcmp(v, "auto") ? 0 : atof(v), i++;  /* auto: the profile's rule */
+    else if (!strcmp(k, "--profile")) profile = v, i++;
+    else if (!strcmp(k, "--evict")) evict = v, i++;
+    else if (!strcmp(k, "--routers")) routers = v, i++;
+    else if (!strcmp(k, "--m")) router_m = atoi(v), i++;
+    else if (!strcmp(k, "--rt-tau")) router_tau = atof(v), i++;
+    else if (!strcmp(k, "--rt-cand")) router_cand = atoi(v), i++;
+    else if (!strcmp(k, "--run-ahead")) run_ahead = atoi(v), i++;
+    else if (!strcmp(k, "--run-ahead-budget")) ra_budget = atof(v), i++;
+    else if (!strcmp(k, "--run-ahead-max")) ra_max = atoi(v), i++;
+    else if (!strcmp(k, "--run-ahead-sat-skip")) ra_sat = atoi(v) ? 1 : -1, i++;
     else if (!strcmp(k, "--resize-at")) resize_at = atoi(v), i++;
     else if (!strcmp(k, "--resize-gb")) resize_gb = atof(v), i++;
     else if (!strcmp(k, "--cancel-test")) cancel_test = 1;
@@ -90,6 +115,12 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--policy-probe")) policy_probe = v, i++;
     else if (!strcmp(k, "--resident")) resident = v, i++;
     else if (!strcmp(k, "--mode")) mode = v, i++;
+    else if (!strcmp(k, "--gpu-frac")) gpu_frac = atof(v), i++;
+    else if (!strcmp(k, "--gpu-experts")) gpu_experts = atof(v), i++;
+    else if (!strcmp(k, "--gpu-min")) gpu_min = atoi(v), i++;
+    else if (!strcmp(k, "--gpu-int-kernel")) gpu_int = 1;
+    else if (!strcmp(k, "--gpu-min-wave")) gpu_wave = atoi(v), i++;
+    else if (!strcmp(k, "--prefill-threads")) prefill_threads = atoi(v), i++;
     else {
       fprintf(stderr, "unknown flag %s\n", k);
       return 2;
@@ -112,6 +143,16 @@ int main(int argc, char** argv) {
   o.cache_bytes = (int64_t)(gb * 1e9);
   o.memory_mode = !strcmp(mem, "file") ? DM_MEM_FILE : !strcmp(mem, "plain") ? DM_MEM_PLAIN : DM_MEM_MLOCK;
   o.routers_id = rid;
+  o.routers = routers;
+  o.profile = profile;
+  o.evict = evict;
+  o.router_m = router_m;
+  o.router_tau = router_tau;
+  o.router_cand = router_cand;
+  o.run_ahead = run_ahead;
+  o.run_ahead_budget = ra_budget;
+  o.run_ahead_max = ra_max;
+  o.run_ahead_sat_skip = ra_sat;
   o.embeddings = emb;
   o.resident = resident;
   o.mode = mode;
@@ -119,6 +160,12 @@ int main(int argc, char** argv) {
   o.file_min_bytes = (int64_t)(min_gb * 1e9);
   o.file_core_bytes = (int64_t)(core_gb * 1e9);
   o.ctx = 16384;
+  o.prefill_gpu_frac = gpu_frac;
+  o.prefill_gpu_experts = gpu_experts;
+  o.prefill_gpu_min = gpu_min;
+  o.prefill_gpu_int_kernel = gpu_int;
+  o.prefill_gpu_min_wave = gpu_wave;
+  o.prefill_threads = prefill_threads;
   double t0 = now_ms();
   dm_engine* e = dm_open(model, &o);
   if (!e) {
@@ -196,10 +243,11 @@ int main(int argc, char** argv) {
            steps / (dec_ms / 1e3), dec_ms / steps, wait / steps, (dec_ms - wait) / steps, picks ? (double)(c1.hits - c0.hits) / picks : 0,
            (c1.bytes_issued - c0.bytes_issued) / 1e6 / steps, (c1.bytes_read - c0.bytes_read) / 1e6 / steps,
            (unsigned long long)(c1.file_refaults - c0.file_refaults), cancel_ok);
-  printf("%s%s}\n", head, st);
+  const char* pj = dm_last_prefill_json(e);  /* the prefill's account (with the GPU split's, when on) */
+  printf("%s%s,\"prefill\":%s}\n", head, st, pj && *pj ? pj : "{}");
   if (json) {
     FILE* f = fopen(json, "w");
-    fprintf(f, "%s%s}\n", head, st);
+    fprintf(f, "%s%s,\"prefill\":%s}\n", head, st, pj && *pj ? pj : "{}");
     fclose(f);
   }
   if (policy_probe) {  /* the policy the core chose at each budget (dm_set_cache_bytes applies at once when idle) */

@@ -24,17 +24,24 @@ using ms::Json;
 static const char* BUILTIN_Q36 = R"({
  "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
  "profiles": {
-  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto"},
-  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0},
-  "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16}}},
+  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
+          "run_ahead": {"picks": 8, "depth": 1}},
+  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
+  "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
+                  "readers": 8,
+            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
  "defaults": {"routers": ["linear_k2"], "names": {"rule": "top", "m": 8}, "cross_token": null, "eviction": "auto", "drafts": false}})";
 static const char* BUILTIN_INK = R"({
  "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
  "profiles": {
-  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto"},
-  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0},
-  "phone-small": {"mode": "fast", "resident": "resident_q8", "cache": "slab"}},
- "defaults": {"routers": ["mlp_k2_h512"], "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
+  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
+          "run_ahead": {"picks": 8, "depth": 1}},
+  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
+  "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "readers": 8,
+            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
+ "defaults": {"routers": ["linear_k2", "mlp_k2_h512"], "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
   "cross_token": {"routers": ["xtok_s47_h512"], "source": 47, "tau": 0.5, "priority_reads": true}, "eviction": "auto", "drafts": false}})";
 
 static bool exists(const std::string& p) {
@@ -74,6 +81,7 @@ static std::vector<std::string> research_paths(const std::string& family, const 
   if (family == "qwen3_5_moe") {
     if (!(n = num("linear_k", "")).empty()) v.push_back("routers/lin/q36_router_lin_k" + n + ".dmr");
   } else if (family == "inkling2_loop") {
+    if (!(n = num("linear_k", "")).empty()) v.push_back("routers/ink_r_main/ink_router_lin_k" + n + "_b8.dmr");
     if (!(n = num("mlp_k", "_h512")).empty()) {
       v.push_back("routers/ink_r_best/ink_router_full_k" + n + "_h512_b8.dmr");
       v.push_back("routers/ink_r_fast/ink_router_full_k" + n + "_h512_b8.dmr");
@@ -144,12 +152,23 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.cache_dir = man.cache_dir();
     p.family = man.family;
   }
-  if (!m) {  // a folder without a manifest (the tiny test models): no profile, the engine's built-in values
+  if (!m && (profile_req.empty() || profile_req == "auto")) {  // a folder without a manifest (the tiny test models): no
+    // profile unless one is named, the engine's built-in values
     p.profile = "none";
     p.profile_why = "no moved-store.json";
     p.mode = mode_req.empty() ? "exact" : mode_req;
     p.engine_mode = engine_mode_of(p.mode);
     return true;
+  }
+  if (!m) {  // a named profile on a folder without a manifest: the family from config.json, the built-in profile
+    Json cfg;
+    std::string cerr;
+    if (ms::json_load(dir + "/config.json", cfg, cerr)) p.family = cfg["model_type"].str_or("");
+    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop") {
+      err = "profile " + profile_req + ": no moved-store.json and no known model_type in config.json";
+      return false;
+    }
+    p.cache_dir = dir + "/.dmeng";
   }
   Json bi;
   std::string jerr;
@@ -157,7 +176,8 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     err = "built-in presets: " + jerr;
     return false;
   }
-  const Json& raw = m->raw;
+  static const Json none;
+  const Json& raw = m ? m->raw : none;
   // the profile
   const std::string want = profile_req == "auto" ? "" : profile_req;
   if (want.empty()) {
@@ -191,7 +211,10 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   // the in-memory weights
   const Json* pr = prof("resident");
   p.resident_id = pr ? pr->str_or("resident_q8") : "resident_q8";
-  if (p.resident_id != "resident_q8") {
+  if (p.resident_id != "resident_q8" && !m) {
+    p.notes.push_back(p.resident_id + ": no manifest, resident_q8 used");
+    p.resident_id = "resident_q8";
+  } else if (p.resident_id != "resident_q8") {
     const ms::Derived* d = m->derived_of(p.resident_id);
     const ms::Derived* d8 = m->derived_of("resident_q8");
     ms::Derived dd = d ? *d : ms::Derived{p.resident_id, "dmres1", "", d8 ? d8->from : std::vector<std::string>{"resident.safetensors"}, ""};
@@ -239,7 +262,42 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   }
   if (const Json* ev = dflt("eviction")) p.evict = ev->str_or("auto");
   if (const Json* dr = dflt("drafts")) p.drafts = dr->kind == Json::BOOL && dr->b;
+  if (const Json* pg = prof("prefill_gpu"); pg && pg->kind == Json::OBJ) {  // per profile only (the device decides)
+    p.gpu_frac = (*pg)["projections"].f(0);
+    p.gpu_experts = (*pg)["experts"].f(0);
+    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop" && (p.gpu_frac > 0 || p.gpu_experts > 0)) {
+      p.notes.push_back("prefill_gpu: this model's prefill has no GPU split, CPU only");
+      p.gpu_frac = p.gpu_experts = 0;
+    }
+#ifndef DM_METAL
+    if (p.gpu_frac > 0 || p.gpu_experts > 0) p.notes.push_back("prefill_gpu: a build without Metal, CPU only");
+    p.gpu_frac = p.gpu_experts = 0;
+#endif
+  }
+  if (const Json* ra = prof("run_ahead"); ra && ra->kind == Json::OBJ) {  // per profile only (measured per device)
+    p.run_ahead = (int)(*ra)["picks"].i(0);
+    p.run_ahead_depth = (int)(*ra)["depth"].i(1);
+    p.ra_budget = (*ra)["budget"].f(0);
+    p.ra_max_tok = (int)(*ra)["max_tok"].i(0);
+    p.ra_sat_skip = (*ra)["sat_skip"].kind == Json::BOOL && (*ra)["sat_skip"].b;
+    if ((*ra)["modes"].kind == Json::ARR) {  // on only in the listed modes (the phones: exact)
+      bool in = false;
+      for (auto& x : (*ra)["modes"].arr) in |= engine_mode_of(x.s()) == p.engine_mode;
+      if (!in) p.run_ahead = 0;
+    }
+  }
+  if (const Json* rd = prof("readers"); rd && rd->kind == Json::NUM) p.readers = (int)rd->i(0);
   return true;
+}
+
+void names_rule(const Preset& p, bool profiled, bool m_given, int m, bool tau_given, double tau, bool cand_given, int cand, int& m_out,
+                double& tau_out, int& cand_out) {
+  m_out = m_given ? m : profiled ? p.m : m;
+  cand_out = cand_given ? cand : profiled ? p.cand : cand;
+  // tau_out < 0 = a plain top m (Routers::tau: 0 would be the confidence rule with a zero threshold, every candidate)
+  if (tau_given) tau_out = tau > 0 ? tau : -1;             // the confidence rule, or (<= 0) a plain top m
+  else if (m_given) tau_out = -1;                           // an explicit top m is not replaced by the profile's rule
+  else tau_out = profiled && p.tau > 0 ? p.tau : (tau > 0 ? tau : -1);
 }
 
 static std::string q(const std::string& s) {
@@ -258,10 +316,35 @@ std::string Preset::json() const {
     << ",\"names\":" << (tau > 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
-    << ",\"eviction\":" << q(evict) << ",\"drafts\":" << (drafts ? "true" : "false") << ",\"notes\":[";
+    << ",\"eviction\":" << q(evict) << ",\"drafts\":" << (drafts ? "true" : "false") << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
+    << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
+    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers << ",\"notes\":[";
   for (size_t i = 0; i < notes.size(); i++) o << (i ? "," : "") << q(notes[i]);
   o << "]}";
   return o.str();
 }
 
+}  // namespace dm
+
+namespace dm {
+std::string Resolved::json() const {
+  std::ostringstream o;
+  auto qq = [](const std::string& s) {
+    std::string r = "\"";
+    for (char c : s) {
+      if (c == '"' || c == '\\') r += '\\';
+      r += c;
+    }
+    return r + "\"";
+  };
+  o << "{\"profile\":" << qq(profile) << ",\"mode\":" << qq(mode) << ",\"routers\":" << qq(routers) << ",\"names\":"
+    << (routers.empty() ? std::string("null")
+                        : tau >= 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
+                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
+    << ",\"cross_token\":" << qq(xtok) << ",\"cache_gb\":" << cache_gb << ",\"cache_auto\":" << (cache_auto ? "true" : "false")
+    << ",\"eviction\":" << qq(evict) << ",\"drafts\":" << drafts << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
+    << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
+    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers << "}";
+  return o.str();
+}
 }  // namespace dm

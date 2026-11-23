@@ -2,6 +2,7 @@
 // cache (session.h) and the server worker (tools/dmserve.cpp) work unchanged on all of them.
 #pragma once
 #include <atomic>
+#include <string>
 
 #include "dmeng/lm.h"
 #include "dmeng/model.h"
@@ -17,6 +18,10 @@ class ModelLM : public LM {
   bool prefill(const int* ids, int n, float* logits, const std::vector<int>& capture_at, const StateSink& on_state,
                PrefillStats* st) override;
   void step(int id, float* logits) override;
+  int set_head_k(int k) override;
+  int head_k() const override { return head_k_; }
+  // build the model's screened head (option fast_head; once). False: the model has none (the full head stays).
+  bool enable_screened_head(std::string& err);
   bool verify(const int* ids, int n) override;
   const float* logits_at(int i) const override { return m_.logits_at(i); }
   void commit(int a) override;
@@ -40,6 +45,8 @@ class ModelLM : public LM {
   LMInfo inf_;
   std::atomic<bool> cancel_{false};
   long dec_steps_ = 0;
+  bool screened_ = false;
+  int head_k_ = 0;
 };
 
 }  // namespace dm

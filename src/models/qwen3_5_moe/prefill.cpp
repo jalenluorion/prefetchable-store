@@ -64,51 +64,90 @@ void add_gemm(std::vector<GJob>& J, const Weight& m, const XQB& x, int n, float*
   for (int r = 0; r < m.rows; r += RB) J.push_back({&m, &x, r, std::min(m.rows, r + RB), n, Y, ldy});
 }
 
-// A set of products over the same positions, optionally split with the GPU: the GPU takes the first frac of each 8-bit
-// matrix's rows (whole 64-row blocks; the same exact arithmetic, src/core/gpu_gemm.h), the CPU the rest, at the same time.
-// Every (row, position) output is computed once, by one side, with the same bits either way. Without the GPU (gpu null,
-// frac 0, or fewer than gpu_min positions) the jobs are exactly add_gemm's over the items in order.
+// A set of products computed together, optionally split with the GPU: the GPU takes the first frac of each affine (8- or
+// 4-bit) matrix's rows (whole 64-row blocks; the same exact arithmetic, src/core/gpu_gemm.h), the CPU the rest, at the
+// same time. Every (row, position) output is computed once, by one side, with the same bits either way. Without the GPU
+// (gpu null or frac 0) the jobs are exactly add_gemm's over the items in order. An item's GPU input may differ from the
+// CPU's: gx read through gmap (an expert's positions gathered from the layer's MoE input on the GPU, while the CPU reads
+// its own gathered copy; the same quantised values). If the GPU does not complete a set (gpu_gemm.h finish), the CPU
+// computes the GPU's rows too.
 struct GItem {
   const Weight* m;
-  const XQB* x;
+  const XQB* x;  // the CPU's input, positions [0, n)
   float* Y;
   size_t ldy;
+  int n;
+  const XQB* gx = nullptr;  // the GPU's input (default x) ...
+  const int* gmap = nullptr;  // ... at these positions of gx (n of them; default 0..n-1)
 };
-void run_set(Pool& pool, GpuGemm* gpu, double frac, int gpu_min, int n, std::initializer_list<GItem> items, std::vector<GJob>& J,
-             double* gpu_ms) {
+struct GpuAcct {
+  double ms_wait = 0, ms_stage = 0;  // waiting for the GPU's rows after the CPU's; staging copies
+  uint64_t sets = 0, failed = 0;
+  double macs_gpu = 0, macs_cpu = 0;
+};
+void run_split(Pool& pool, GpuGemm* gpu, double frac, const std::vector<GItem>& items, std::vector<GJob>& J, GpuAcct* acct) {
   J.clear();
-  const bool use = gpu && gpu->ok() && frac > 0 && n >= gpu_min;
-  std::vector<std::pair<int, const GItem*>> tickets;
+  const bool use = gpu && gpu->ok() && frac > 0;
+  std::vector<std::pair<int, int>> tk;  // (ticket, item)
+  std::vector<int> rgs(items.size(), 0);
   if (use) {
-    const XQB* staged[4] = {};
-    int ns = 0;
-    for (const GItem& it : items) {
+    auto ts = clk::now();
+    gpu->begin();
+    for (size_t i = 0; i < items.size(); i++) {
+      const GItem& it = items[i];
       const Weight& m = *it.m;
-      const size_t NG = m.cols / 64;
-      int rg = m.kind == Weight::AFF8 ? ((int)(m.rows * frac) / 64) * 64 : 0;
-      if (rg > 0 && !(gpu->holds(m.c, (size_t)m.rows * m.cols) && gpu->holds(m.s, (size_t)m.rows * NG * 2) &&
-                      gpu->holds(m.b, (size_t)m.rows * NG * 2)))
-        rg = 0;  // not inside the wrapped region: the CPU computes the whole matrix
+      int rg = (m.kind == Weight::AFF8 || m.kind == Weight::AFF4) && it.n > 0 ? ((int)(m.rows * frac) / 64) * 64 : 0;
       if (rg > 0) {
-        int slot = 0;
-        while (slot < ns && staged[slot] != it.x) slot++;
-        if (slot == ns) {
-          staged[ns++] = it.x;
-          gpu->stage(*it.x, slot);
-        }
-        tickets.push_back({gpu->enqueue(m.c, (const _Float16*)m.s, (const _Float16*)m.b, m.cols, rg, n, slot), &it});
+        const int s = gpu->stage(it.gx ? *it.gx : *it.x);
+        const int t = gpu->add(m.kind == Weight::AFF8 ? 8 : 4, m.c, (const _Float16*)m.s, (const _Float16*)m.b, m.cols, rg, it.n, s, it.gmap);
+        if (t < 0) rg = 0;  // not inside a wrapped region: the CPU computes the whole matrix
+        else tk.push_back({t, (int)i});
       }
-      for (int r = rg; r < m.rows; r += 64) J.push_back({&m, it.x, r, std::min(m.rows, r + 64), n, it.Y, it.ldy});
+      rgs[i] = rg;
     }
-    gpu->commit();
-  } else {
-    for (const GItem& it : items) add_gemm(J, *it.m, *it.x, n, it.Y, it.ldy);
+    const int nc = gpu->prepare();
+    if (nc == 0 && !tk.empty()) {  // no GPU buffers: everything on the CPU
+      tk.clear();
+      std::fill(rgs.begin(), rgs.end(), 0);
+    }
+    if (!tk.empty()) {
+      pfor(pool, nc, [&](int i) { gpu->copy(i); });
+      gpu->submit();
+    }
+    if (acct) acct->ms_stage += msd(ts);
+  }
+  for (size_t i = 0; i < items.size(); i++) {
+    const GItem& it = items[i];
+    const Weight& m = *it.m;
+    for (int r = rgs[i]; r < m.rows; r += 64) J.push_back({&m, it.x, r, std::min(m.rows, r + 64), it.n, it.Y, it.ldy});
+    if (acct) {
+      acct->macs_gpu += (double)rgs[i] * m.cols * it.n;
+      acct->macs_cpu += (double)(m.rows - rgs[i]) * m.cols * it.n;
+    }
   }
   run_gjobs(pool, J);
-  if (!tickets.empty()) {
-    auto t = clk::now();
-    for (auto& tk : tickets) gpu->finish(tk.first, tk.second->Y, tk.second->ldy);
-    if (gpu_ms) *gpu_ms += std::chrono::duration<double, std::milli>(clk::now() - t).count();
+  if (tk.empty()) return;
+  auto t = clk::now();
+  const bool ok = gpu->finish();
+  if (acct) {
+    acct->ms_wait += msd(t);
+    acct->sets++;
+  }
+  if (ok) {
+    pfor(pool, (int)tk.size(), [&](int u) {
+      const GItem& it = items[tk[u].second];
+      const int rg = rgs[tk[u].second];
+      const float* y = gpu->out(tk[u].first);
+      for (int i = 0; i < it.n; i++) std::memcpy(it.Y + (size_t)i * it.ldy, y + (size_t)i * rg, (size_t)rg * 4);
+    });
+  } else {  // the GPU's rows on the CPU (the same bits)
+    if (acct) acct->failed++;
+    J.clear();
+    for (auto& p : tk) {
+      const GItem& it = items[p.second];
+      for (int r = 0; r < rgs[p.second]; r += 64) J.push_back({it.m, it.x, r, r + 64, it.n, it.Y, it.ldy});
+    }
+    run_gjobs(pool, J);
   }
 }
 
@@ -126,8 +165,11 @@ void xqb_copy(XQB& dst, int di, const XQB& src, int si) {
 
 struct PrefillCounters {
   double ms_embed = 0, ms_attn_proj = 0, ms_attn_core = 0, ms_attn_out = 0, ms_router = 0, ms_experts = 0, ms_wait = 0,
-         ms_cache = 0, ms_head = 0, ms_names = 0, ms_total = 0, ms_conv = 0, ms_heads = 0, ms_full = 0, ms_gpu_wait = 0;
-  bool gpu = false;  // the GPU split was on (then the JSON also reports gpu_wait: time waiting for the GPU's rows)
+         ms_cache = 0, ms_head = 0, ms_names = 0, ms_total = 0, ms_conv = 0, ms_heads = 0, ms_full = 0;
+  bool gpu = false;  // the GPU split was on (then the JSON also reports "gpu": the split's account)
+  GpuAcct ga, ge;    // the split of the attention projections / of the experts (shared + routed)
+  double gpu_frac = 0, gpu_frac_experts = 0;
+  int gpu_kernel = -1;
   uint64_t positions = 0, chunks = 0, layer_units = 0, union_sum = 0, hits = 0, misses = 0, late = 0;
   uint64_t named = 0, named_used = 0, named_unused = 0, used_not_named = 0;  // early names (stream 1, 2) vs the layer's use
   uint64_t bytes_read = 0;
@@ -170,8 +212,19 @@ std::string PrefillCounters::json() const {
     << ",\"ms_by_stage\":{\"embed\":" << ms_embed << ",\"attn_proj\":" << ms_attn_proj << ",\"attn_core\":" << ms_attn_core << ",\"attn_out\":" << ms_attn_out
     << ",\"router\":" << ms_router << ",\"names\":" << ms_names << ",\"experts\":" << ms_experts << ",\"wait\":" << ms_wait << ",\"cache\":" << ms_cache
     << ",\"head\":" << ms_head;
-  if (gpu) s << ",\"gpu_wait\":" << ms_gpu_wait;
-  s << ",\"of_core_conv\":" << ms_conv << ",\"of_core_heads\":" << ms_heads << ",\"of_core_full\":" << ms_full << "}"
+  s << ",\"of_core_conv\":" << ms_conv << ",\"of_core_heads\":" << ms_heads << ",\"of_core_full\":" << ms_full << "}";
+  if (gpu) {  // per part: GPU share of the products' multiply-adds, time waiting for the GPU after the CPU's rows, staging
+    auto one = [&](const char* name, double f, const GpuAcct& a) {
+      s << "\"" << name << "\":{\"frac\":" << f << ",\"gmac_gpu\":" << a.macs_gpu / 1e9 << ",\"gmac_cpu\":" << a.macs_cpu / 1e9 << ",\"wait_ms\":" << a.ms_wait
+        << ",\"stage_ms\":" << a.ms_stage << ",\"sets\":" << a.sets << ",\"failed\":" << a.failed << "}";
+    };
+    s << ",\"gpu\":{\"kernel\":\"" << (gpu_kernel == 1 ? "matrix" : "integer") << "\",";
+    one("attn", gpu_frac, ga);
+    s << ",";
+    one("experts", gpu_frac_experts, ge);
+    s << "}";
+  }
+  s
     << ",\"mean_union_per_layer\":" << (double)union_sum / std::max<uint64_t>(1, layer_units) << ",\"hits\":" << hits << ",\"late\":" << late << ",\"misses\":" << misses
     << ",\"named\":" << named << ",\"named_used\":" << named_used << ",\"named_unused\":" << named_unused << ",\"used_not_named\":" << used_not_named
     << ",\"mb_read\":" << bytes_read / 1048576.0 << "}";
@@ -231,6 +284,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   auto t_all = clk::now();
   // embeddings
   auto t0 = clk::now();
+  stage_mark(ST_EMBED);
   pfor(pool, n_all, [&](int i) {
     Mo.rows.row(ids[i], X.data() + (size_t)i * H);
   });
@@ -239,7 +293,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   static const int split_min = getenv("DMENG_SPLIT_MIN") ? atoi(getenv("DMENG_SPLIT_MIN")) : 2 * 256;
   constexpr int CHK = 256;
   std::vector<GJob> J;
-  GpuGemm* G8 = o.gpu_frac > 0 ? Mo.gpu.get() : nullptr;  // the GPU half of the 8-bit attention products, if on
+  GpuGemm* const gpu = (o.gpu_frac > 0 || o.gpu_frac_experts > 0) ? Mo.gpu.get() : nullptr;  // the GPU's share, if on
 
   // Layer-major: each layer runs over the whole span (sub-chunks of SUB positions bound the scratch), so a layer's
   // experts are read once per span, not once per chunk.
@@ -280,8 +334,11 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
         Sn[(size_t)i * 512 + j] = std::sin(ang);
       }
     const Lw& W = Mo.lw[L];
+    GpuGemm* const Ga = n >= o.gpu_min && o.gpu_frac > 0 ? gpu : nullptr;           // attention projections
+    GpuGemm* const Ge = n >= o.gpu_min && o.gpu_frac_experts > 0 ? gpu : nullptr;   // shared + routed experts
     // ---- attention input
     auto ta = clk::now();
+    stage_mark(ST_ATTN_PROJ);
     qa.reserve(H, n);
     pfor(pool, n, [&](int i) {
       rmsnorm(Xb + (size_t)i * H, W.ln_in, H, c.eps, Hn.data() + (size_t)i * H);
@@ -290,13 +347,14 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     xqb_pad(qa);
     if (!W.full) {
       // ---- Gated DeltaNet
-      run_set(pool, G8, o.gpu_frac, o.gpu_min, n, {{&W.qkv, &qa, A.data(), (size_t)C}, {&W.z, &qa, Z.data(), (size_t)ZD}}, J, &k.ms_gpu_wait);
+      run_split(pool, Ga, o.gpu_frac, {{&W.qkv, &qa, A.data(), (size_t)C, n}, {&W.z, &qa, Z.data(), (size_t)ZD, n}}, J, &k.ga);
       pfor(pool, n, [&](int i) {
         const float* h = Hn.data() + (size_t)i * H;
         for (int r = 0; r < c.NVH; r++) BB[(size_t)i * c.NVH + r] = dot_bf16((const uint16_t*)W.wb.w + (size_t)r * H, h, H);
         for (int r = 0; r < c.NVH; r++) AA[(size_t)i * c.NVH + r] = dot_bf16((const uint16_t*)W.wa.w + (size_t)r * H, h, H);
       });
       auto tb = clk::now();
+      stage_mark(ST_CONV);
       k.ms_attn_proj += std::chrono::duration<double, std::milli>(tb - ta).count();
       // conv: channel by channel, positions in order (phase_conv per position)
       const int CK = c.CK;
@@ -310,6 +368,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       });
       k.ms_conv += msd(tb);
       auto th0 = clk::now();
+      stage_mark(ST_ATTN_CORE);
       // heads: head by head, positions in order (phase_lin_heads per position)
       const int DK = c.DK, DV = c.DV, rep = c.NVH / c.NKH;
       pfor(pool, c.NVH, [&](int h) {
@@ -367,8 +426,9 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       pfor(pool, n, [&](int i) { xqb_set(qo, i, O.data() + (size_t)i * ZD); });
       xqb_pad(qo);
       auto tc = clk::now();
+      stage_mark(ST_ATTN_OUT);
       k.ms_attn_core += std::chrono::duration<double, std::milli>(tc - tb).count();
-      run_set(pool, G8, o.gpu_frac, o.gpu_min, n, {{&W.o, &qo, Y.data(), (size_t)H}}, J, &k.ms_gpu_wait);
+      run_split(pool, Ga, o.gpu_frac, {{&W.o, &qo, Y.data(), (size_t)H, n}}, J, &k.ga);
       k.ms_attn_out += msd(tc);
       if (sink && captured(bnd[bi])) {
         const LState& ls = Sst.ls[L];
@@ -380,9 +440,10 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       const int KD = c.NKV * HD;
       float* Kp = B.data();
       float* Vp = B.data() + (size_t)n * KD;
-      run_set(pool, G8, o.gpu_frac, o.gpu_min, n, {{&W.q, &qa, A.data(), (size_t)2 * QD}, {&W.k, &qa, Kp, (size_t)KD}, {&W.v, &qa, Vp, (size_t)KD}}, J,
-              &k.ms_gpu_wait);
+      run_split(pool, Ga, o.gpu_frac, {{&W.q, &qa, A.data(), (size_t)2 * QD, n}, {&W.k, &qa, Kp, (size_t)KD, n}, {&W.v, &qa, Vp, (size_t)KD, n}}, J,
+                &k.ga);
       auto tb = clk::now();
+      stage_mark(ST_ATTN_CORE);
       k.ms_attn_proj += std::chrono::duration<double, std::milli>(tb - ta).count();
       LState& S = Sst.ls[L];
       // K (normed, rotated) and V into the cache at their positions (attn_full)
@@ -622,12 +683,14 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       pfor(pool, n, [&](int i) { xqb_set(qo, i, O.data() + (size_t)i * QD); });
       xqb_pad(qo);
       auto tc = clk::now();
+      stage_mark(ST_ATTN_OUT);
       k.ms_attn_core += std::chrono::duration<double, std::milli>(tc - tb).count();
-      run_set(pool, G8, o.gpu_frac, o.gpu_min, n, {{&W.o, &qo, Y.data(), (size_t)H}}, J, &k.ms_gpu_wait);
+      run_split(pool, Ga, o.gpu_frac, {{&W.o, &qo, Y.data(), (size_t)H, n}}, J, &k.ga);
       k.ms_attn_out += msd(tc);
     }
     // ---- residual, MoE input
     auto tr = clk::now();
+    stage_mark(ST_MOE_ROUTER);
     pfor(pool, n, [&](int i) {
       float* x = Xb + (size_t)i * H;
       const float* y = Y.data() + (size_t)i * H;
@@ -674,6 +737,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     }
     // ---- the layer's experts: union, slots, early names for the next layer
     auto tcache = clk::now();
+    stage_mark(ST_MOE_CACHE);
     Cache& Ca = Mo.core->cache;
     const long clock_last = clk0 + n - 1;
     Ca.now_step = clock_last * NL + L;
@@ -725,6 +789,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     // early names for layer L + 1 (issued behind this layer's own reads)
     if (bi == 0 && o.stream && L + 1 < NL) {
       auto tn = clk::now();
+      stage_mark(ST_PREFETCH);
       std::vector<uint8_t> want(NE, 0);
       if (o.stream == 1) {
         std::fill(want.begin(), want.end(), 1);
@@ -757,10 +822,12 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
           }
         }
       k.ms_names += msd(tn);
+      stage_mark(ST_MOE_CACHE);
     }
     k.ms_cache += msd(tcache);
     // ---- experts in waves: whatever has landed, then the rest as it lands
     auto texp = clk::now();
+    stage_mark(ST_MOE_EXPERTS);
     double wait_ms = 0;
     std::vector<uint8_t> done(NE, 0);
     bool shared_done = false;
@@ -797,23 +864,30 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
         for (size_t t = 0; t < epos[e].size(); t++) xqb_copy(q, (int)t, qa, epos[e][t] / K);
         xqb_pad(q);
       });
-      // gate and up (+ the shared expert's in the first wave)
-      J.clear();
-      for (size_t w = 0; w < wave.size(); w++) {
-        const int e = wave[w], ne = (int)epos[e].size();
-        for (int r = 0; r < I; r += 64) {
-          J.push_back({&mats[w * 3 + 0], &qe[e], r, r + 64, ne, G.data() + (size_t)off[w] * GI, (size_t)GI});
-          J.push_back({&mats[w * 3 + 1], &qe[e], r, r + 64, ne, U.data() + (size_t)off[w] * GI, (size_t)GI});
-        }
-      }
+      // gate and up (+ the shared expert's in the first wave); with the GPU on, its rows read each expert's positions
+      // straight from the layer's MoE input qa (gmap: the position of each assignment)
       const bool do_shared = !shared_done;
       float* Gs = G.data() + (size_t)n * K * GI;  // the shared expert's rows sit after all routed assignments
       float* Us = U.data() + (size_t)n * K * GI;
-      if (do_shared) {
-        add_gemm(J, W.sg, qa, n, Gs, GI);
-        add_gemm(J, W.su, qa, n, Us, GI);
+      GpuGemm* const Gw = Ge && na + (do_shared ? n : 0) >= o.gpu_min_wave ? Ge : nullptr;  // this wave's GPU, if any
+      std::vector<int> gmap;
+      std::vector<GItem> gi;
+      if (Gw) {
+        gmap.resize(na);
+        for (size_t w = 0; w < wave.size(); w++)
+          for (size_t t = 0; t < epos[wave[w]].size(); t++) gmap[off[w] + t] = epos[wave[w]][t] / K;
       }
-      run_gjobs(pool, J);
+      for (size_t w = 0; w < wave.size(); w++) {
+        const int e = wave[w], ne = (int)epos[e].size();
+        const int* gm = Gw ? gmap.data() + off[w] : nullptr;
+        gi.push_back({&mats[w * 3 + 0], &qe[e], G.data() + (size_t)off[w] * GI, (size_t)GI, ne, &qa, gm});
+        gi.push_back({&mats[w * 3 + 1], &qe[e], U.data() + (size_t)off[w] * GI, (size_t)GI, ne, &qa, gm});
+      }
+      if (do_shared) {
+        gi.push_back({&W.sg, &qa, Gs, (size_t)GI, n});
+        gi.push_back({&W.su, &qa, Us, (size_t)GI, n});
+      }
+      run_split(pool, Gw, o.gpu_frac_experts, gi, J, &k.ge);
       // activations, quantised for the down projection
       pfor(pool, (int)wave.size() + (do_shared ? 1 : 0), [&](int w) {
         if (w == (int)wave.size()) {
@@ -841,14 +915,13 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       });
       // down projections into a staging area (rows of G reused: an assignment's H outputs), then into place
       std::vector<float> D((size_t)na * H);
-      J.clear();
+      gi.clear();
       for (size_t w = 0; w < wave.size(); w++) {
         const int e = wave[w], ne = (int)epos[e].size();
-        for (int r = 0; r < H; r += 64) J.push_back({&mats[w * 3 + 2], &qd[e], r, r + 64, ne, D.data() + (size_t)off[w] * H, (size_t)H});
+        gi.push_back({&mats[w * 3 + 2], &qd[e], D.data() + (size_t)off[w] * H, (size_t)H, ne});
       }
-      if (do_shared)
-        for (int r = 0; r < H; r += 64) J.push_back({&W.sd, &qd[NE], r, r + 64, n, Eo.data() + (size_t)K * H, (size_t)(K + 1) * H});
-      run_gjobs(pool, J);
+      if (do_shared) gi.push_back({&W.sd, &qd[NE], Eo.data() + (size_t)K * H, (size_t)(K + 1) * H, n});
+      run_split(pool, Gw, o.gpu_frac_experts, gi, J, &k.ge);
       pfor(pool, (int)wave.size(), [&](int w) {
         const int e = wave[w];
         for (size_t t = 0; t < epos[e].size(); t++) {
@@ -867,6 +940,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     k.ms_experts += msd(texp) - wait_ms;
     // ---- fixed-order combination (Model::moe), residual
     auto tcmb = clk::now();
+    stage_mark(ST_MOE_COMBINE);
     pfor(pool, n, [&](int i) {
       const float* pwl = Pw.data() + (size_t)i * K;
       const float* eout = Eo.data() + (size_t)i * (K + 1) * H;
@@ -883,6 +957,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     k.ms_experts += msd(tcmb);
     // ---- the cache's bookkeeping, position by position as token-by-token prefill would have done it
     auto tcb = clk::now();
+    stage_mark(ST_MOE_CACHE);
     for (int e : uni) {
       for (int a : epos[e]) {
         const long t = clk0 + a / K;
@@ -901,6 +976,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   // ---- head on the last position
   if (want_logits) {
     auto th = clk::now();
+    stage_mark(ST_HEAD);
     rmsnorm(X.data() + (size_t)(n_all - 1) * H, Mo.fnorm, H, c.eps, Mo.h.data());
     Mo.xin.prep(Mo.h.data(), H);
     const int V = c.V, RB = 64;
@@ -914,6 +990,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   Mo.core->tok_clock += n_all;
   k.positions += n_all;
   k.chunks++;
+  stage_mark(ST_OTHER);
   k.ms_total += msd(t_all);
   if (progress && *progress) (*progress)(prog_base + n_all, prog_total, 0.0);
   return true;
@@ -924,29 +1001,41 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
 Qwen35::Qwen35() = default;
 Qwen35::~Qwen35() = default;
 
-bool Qwen35::set_gpu_frac(double f, std::string& err) {
+bool Qwen35::set_gpu_frac(double f, bool experts, std::string& err) {
   if (!(f >= 0 && f < 1)) {
-    err = "prefill_gpu_frac must be in [0, 1)";
+    err = experts ? "prefill_gpu_experts must be in [0, 1)" : "prefill_gpu_frac must be in [0, 1)";
     return false;
   }
   if (f > 0 && !gpu) {
 #if defined(DM_METAL)
-    if (!R.base) {
-      err = "prefill_gpu_frac: load the model first";
+    if (!R.base || !core) {
+      err = "prefill GPU split: load and bind the model first";
       return false;
     }
     std::unique_ptr<GpuGemm> g(new GpuGemm());
-    if (!g->init(R.base, R.size)) {
-      err = "prefill_gpu_frac: GPU (Metal) init failed";
+    if (!g->init()) {
+      err = "prefill GPU split: GPU (Metal) init failed";
       return false;
     }
+    // the weights where they are, no copies: the resident file's region and the expert slab(s) (locked or plain
+    // memory; FILE and purgeable records are not wrapped, so those experts stay on the CPU)
+    const bool res = g->wrap(R.base, R.size);
+    bool slab = false;
+    for (int p = 0; p < core->cache.npools; p++)
+      if (core->cache.P[p].slab) slab = g->wrap(core->cache.P[p].slab, core->cache.P[p].slab_bytes) || slab;
+    if (!res && !slab) {
+      err = "prefill GPU split: neither the resident weights nor the expert slab could be wrapped";
+      return false;
+    }
+    fprintf(stderr, "dmeng: prefill GPU split on (resident %s, expert slab %s; %.2f GB wrapped)\n", res ? "wrapped" : "not wrapped",
+            slab ? "wrapped" : "not wrapped", g->wrapped_bytes() / 1e9);
     gpu = std::move(g);
 #else
-    err = "prefill_gpu_frac: this build has no Metal (CMake DM_METAL off)";
+    err = "prefill GPU split: this build has no Metal (DM_METAL off)";
     return false;
 #endif
   }
-  po.gpu_frac = f;
+  (experts ? po.gpu_frac_experts : po.gpu_frac) = f;
   return true;
 }
 
@@ -961,6 +1050,7 @@ ModelMem Qwen35::mem(const State& s0) const {
   if (P) {
     auto add = [&](const auto& v) { m.prefill_scratch += v.capacity() * sizeof(v[0]); };
     add(P->X); add(P->Hn); add(P->Y); add(P->A); add(P->B); add(P->Cv); add(P->O); add(P->Z); add(P->BB); add(P->AA); add(P->Lg);
+    m.prefill_scratch += gpu ? gpu->buffer_bytes() : 0;  // the GPU split's staging and output buffers
     add(P->Pw); add(P->Shw); add(P->Eo); add(P->G); add(P->U); add(P->Part); add(P->Qn); add(P->Cs); add(P->Sn); add(P->Pk); add(P->Rec);
     m.prefill_xqb = P->qa.cap + P->qo.cap;
     for (const XQB& q : P->qe) m.prefill_xqb += q.cap;
@@ -972,6 +1062,7 @@ ModelMem Qwen35::mem(const State& s0) const {
 bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, const std::vector<int>& caps, const LM::StateSink& sink,
                      PrefillStats* st, const std::atomic<bool>* cancel) {
   S = (QState*)&s0;
+  greedy_ = -1;  // the logits (if wanted) come from the full head
   // one position per pass: the decode path (the batched kernels are I16, and take inputs in multiples of 256)
   const bool dims_ok = c.H % 256 == 0 && c.I % 256 == 0 && c.SI % 256 == 0 && (c.NVH * c.DV) % 256 == 0 && (c.NQ * c.HD) % 256 == 0;
   const bool tbt = po.chunk <= 1 || prec != Prec::I16 || !dims_ok;
@@ -981,7 +1072,11 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
     P->M = this;
   }
   P->k.reset();
-  P->k.gpu = po.gpu_frac > 0 && gpu;
+  P->k.gpu = (po.gpu_frac > 0 || po.gpu_frac_experts > 0) && gpu;
+  P->k.gpu_frac = po.gpu_frac;
+  if (gpu) gpu->set_kernel(po.gpu_kernel);
+  P->k.gpu_kernel = gpu ? gpu->kernel() : -1;
+  P->k.gpu_frac_experts = po.gpu_frac_experts;
   // per-layer caps would refuse the next layer's early names (names never borrow past a cap): off for the pass
   Cache::CapsOff caps_off(core->cache);
   const uint64_t b0 = core->cache.st.bytes_urgent + core->cache.st.bytes_pf;
@@ -1022,7 +1117,10 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
     st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / 1048576.0;
     st->json = P->k.json();
   }
-  if (po.release) P.reset();  // the scratch back to the system (re-created by the next prefill)
+  if (po.release) {  // the scratch back to the system (re-created by the next prefill)
+    P.reset();
+    if (gpu) gpu->trim();
+  }
   return ok;
 }
 

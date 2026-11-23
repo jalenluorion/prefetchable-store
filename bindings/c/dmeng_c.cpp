@@ -41,6 +41,7 @@
 #include "dmeng/weights.h"
 #include "manifest.h"
 #include "../../src/serving/memwatch.h"
+#include "../../src/core/gpu_check.h"
 
 using namespace dm;
 
@@ -50,6 +51,7 @@ struct dm_engine {
   std::unique_ptr<Routers> R;
   std::unique_ptr<Xtok> X;  // cross-token routers, wrapping R
   std::string preset_json = "null";
+  Resolved res;  // the settings after precedence (presets.h), in dm_stats_json under "resolved"
   std::unique_ptr<Planner> PL;
   std::unique_ptr<Pool> prefill_pool;  // dm_sync's compute threads when they differ from decode's
   std::unique_ptr<State> S;
@@ -58,10 +60,16 @@ struct dm_engine {
   std::string err, stats, routers_path, res_file, last_prefill = "{}";  // the caller's strings are not kept (only copies)
   dm_open_opts o{};
   qos_class_t qos = QOS_CLASS_USER_INTERACTIVE;
+  uint64_t rs_urgent = 0, rs_pf = 0, rs_pf_n = 0, rs_unused = 0, rs_busy = 0, rs_bytes = 0, rs_steps = 0;  // reads at the last stats call
+  std::chrono::steady_clock::time_point rs_t = std::chrono::steady_clock::now();
   std::mutex busy;                     // held by dm_sync / dm_step (dm_set_cache_bytes applies at once when free)
   std::atomic<bool> cancel_req{false};
   int64_t avail_open = 0, slab_auto = 0;  // iOS: os_proc_available_memory at open, the slab the sizing rule chose
   int64_t steps = 0;
+  int64_t rs_steps_dt = 0;
+  uint64_t rs_dt[7] = {0};  // the readers' time by reads in flight at the last stats call (Readers::depth_times)
+  uint32_t ra_lcg = 12345;  // run_ahead_ab: the arm choice per step, as dmeng's DMENG_RA_AB
+  double ab_n[2] = {0, 0}, ab_ms[2] = {0, 0}, ab_wait[2] = {0, 0}, ab_mb[2] = {0, 0}, ab_urg[2] = {0, 0}, ab_named[2] = {0, 0};
 };
 
 static thread_local std::string g_err;
@@ -132,6 +140,14 @@ struct QosScope {  // the caller's QoS for the duration of a call
 
 extern "C" {
 
+const char* dm_gpu_check(int threads, double seconds) {
+  static thread_local std::string js;
+  std::string text;
+  js = gpu_gemm_selftest(threads > 0 ? threads : 4, seconds > 0 ? seconds : 2, &text);
+  fprintf(stderr, "%s", text.c_str());
+  return js.c_str();
+}
+
 void dm_default_opts(dm_open_opts* o) {
   std::memset(o, 0, sizeof *o);
   o->qos = DM_QOS_USER_INTERACTIVE;
@@ -199,14 +215,15 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   }
   e->res_file = res_file;
   const Mem res_mem = o.res_memory_mode == DM_MEM_PLAIN ? Mem::PLAIN : o.res_memory_mode == DM_MEM_FILE ? Mem::FILE : Mem::MLOCK;
-  if (resolve_model(model_dir, res_file, res_mem, lo, family, err, derived, o.embeddings ? o.embeddings : ""))
+  if (resolve_model(model_dir, res_file, res_mem, lo, family, err, derived, o.embeddings ? o.embeddings : "", profiled ? P.profile : ""))
     e->M = make_model(family, err);
   if (!e->M || !e->M->load(lo, err)) {
     g_err = "load: " + err;
     return nullptr;
   }
   const bool addr_given = (o.routers && *o.routers) || (o.routers_id && *o.routers_id) || o.xtok;
-  if (o.routers && *o.routers) e->routers_path = o.routers;
+  if (o.routers && *o.routers && std::strcmp(o.routers, "none") != 0) e->routers_path = o.routers;
+  else if (o.routers && std::strcmp(o.routers, "none") == 0) e->routers_path.clear();
   else if (o.routers_id && std::strcmp(o.routers_id, "none") == 0) e->routers_path.clear();
   else if (profiled && !addr_given) e->routers_path = P.routers;
   else if (o.routers_id && *o.routers_id && !router_path(model_dir, derived, o.routers_id, e->routers_path, err)) {
@@ -225,6 +242,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     if (p > 0) co.threads = std::min(co.threads, p);
   }
   if (o.readers > 0) co.readers = o.readers;
+  else if (profiled && P.readers > 0) co.readers = P.readers;
   co.cache_gb = (o.cache_bytes > 0 ? (double)o.cache_bytes : 3.3e9) / 1e9;
   co.mem = mem_c(o.memory_mode);
   if (o.cache_bytes <= 0 && e->avail_open <= 0 && profiled && P.cache == "auto" && co.mem == Mem::MLOCK) {  // the Mac rule
@@ -233,7 +251,11 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     std::string why;
     MemRule mr;
     mr.kv_positions = o.ctx > 0 ? o.ctx : 16384;
-    const double ceil = auto_cache_gb(mr, e->M->pos_bytes(), o.ckpt_gb > 0 ? o.ckpt_gb : 0.25, store_bytes_gb(model_dir, mi0.layer_file, mi0.layers), start, why);
+    const double ceil = auto_cache_gb(mr, e->M->pos_bytes(), std::max(o.ckpt_gb > 0 ? o.ckpt_gb : 0.25, SessionOptions().ckpt_min * [&] {  // the checkpoints' memory (a fresh
+      std::string e2;                                                                // state's fixed part, only reserved)
+      auto tmp = e->M->new_state(o.ctx > 0 ? o.ctx : 16384, e2);
+      return tmp ? (double)e->M->fixed_bytes(*tmp) / 1e9 : 0.0;
+    }()), store_bytes_gb(model_dir, mi0.layer_file, mi0.layers), start, why);
     co.cache_gb = std::min(ceil, start);
   }
   if (o.cache_bytes <= 0 && e->avail_open > 0 && co.mem != Mem::FILE) {  // iOS: the slab from the memory the app has
@@ -255,6 +277,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   else if (o.layer_caps == 2) co.layer_caps = "none";
   co.qos = (int)e->qos;
   if (o.reader_qos > 0) co.reader_qos = (int)qos_of(o.reader_qos - 1);
+  if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
   e->C = std::make_unique<Core>();
   if (!e->C->init(e->M->info(), co, model_dir, err) || !e->M->bind(*e->C, err)) {
     g_err = "core: " + err;
@@ -287,11 +310,15 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       g_err = "routers: " + err;
       return nullptr;
     }
-    e->R->m = o.router_m > 0 ? o.router_m : profiled ? P.m : 8;
-    if (o.router_tau > 0) e->R->tau = o.router_tau;  // the confidence rule (dmeng --rt-tau / --rt-cand)
-    else if (profiled && P.tau > 0) e->R->tau = P.tau;
-    if (o.router_cand > 0) e->R->cand = o.router_cand;
-    else if (profiled) e->R->cand = P.cand;
+    // the names rule (precedence: presets.h): an explicit router_m without router_tau is a plain top m; router_tau > 0
+    // the confidence rule, < 0 a plain top m; else the profile's rule when the routers are the profile's
+    int rm, rc;
+    double rt;
+    names_rule(P, profiled && !addr_given, o.router_m > 0, o.router_m > 0 ? o.router_m : 8, o.router_tau != 0, o.router_tau, o.router_cand > 0,
+               o.router_cand > 0 ? o.router_cand : 16, rm, rt, rc);
+    e->R->m = rm;
+    if (rt > 0) e->R->tau = rt;
+    e->R->cand = rc;
     e->C->hook = e->R.get();
   }
   const std::string xtok = o.xtok ? (std::strcmp(o.xtok, "none") == 0 ? "" : o.xtok) : profiled && !addr_given ? P.xtok : "";
@@ -308,19 +335,91 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   }
   if (mode != "lossless") {  // fast or an advanced approximate preset (dmeng --mode)
     const std::string md = mode;
-    const std::string preset = md == "approx" ? "" : md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
+    std::string preset = md == "approx" ? "" : md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
+    std::string opts;  // P2 lever cells: approx:PRESET:w=W:bg=0|1:late=MS (read_w, background fetch, late wait)
+    if (const size_t c = preset.find(':'); c != std::string::npos) {
+      opts = preset.substr(c + 1);
+      preset = preset.substr(0, c);
+    }
     if (!e->C->ns.preset(preset)) {
-      g_err = "mode: exact|fast|lossless|approx[:PRESET], got " + md;
+      g_err = "mode: exact|fast|lossless|approx[:PRESET[:w=W:bg=0|1:late=MS]], got " + md;
       return nullptr;
+    }
+    for (size_t i = 0; i < opts.size();) {
+      size_t j = opts.find(':', i);
+      if (j == std::string::npos) j = opts.size();
+      const std::string kv = opts.substr(i, j - i);
+      const size_t q = kv.find('=');
+      if (q != std::string::npos) {
+        const std::string k = kv.substr(0, q);
+        const double v = std::atof(kv.c_str() + q + 1);
+        if (k == "w") e->C->ns.read_w = v;
+        else if (k == "bg") e->C->ns.bg = v != 0;
+        else if (k == "late") e->C->ns.late_ms = v;
+      }
+      i = j + 1;
     }
     if (e->C->ns.prio) e->C->cache.rd.prio = true;
     if (e->C->ns.cancel) e->C->cancel_stale = true;
+  }
+  // the prefill's GPU split (exact): 0 = the profile's shares (mac: 0.4 / 0.4), < 0 = off
+  const double gpu_frac = o.prefill_gpu_frac < 0 ? 0 : o.prefill_gpu_frac > 0 ? o.prefill_gpu_frac : profiled ? P.gpu_frac : 0;
+  const double gpu_experts = o.prefill_gpu_experts < 0 ? 0 : o.prefill_gpu_experts > 0 ? o.prefill_gpu_experts : profiled ? P.gpu_experts : 0;
+  if (gpu_frac > 0 || gpu_experts > 0 || o.prefill_gpu_min > 0 || o.prefill_gpu_min_wave > 0) {
+    std::string ge;
+    char v[32];
+    auto set = [&](const char* k, double x) {
+      snprintf(v, sizeof v, "%.6f", x);
+      return e->M->set_option(k, v, ge);
+    };
+    if ((o.prefill_gpu_int_kernel && !set("prefill_gpu_kernel", 0)) || (o.prefill_gpu_min_wave > 0 && !set("prefill_gpu_min_wave", o.prefill_gpu_min_wave)) || (o.prefill_gpu_min > 0 && !set("prefill_gpu_min", o.prefill_gpu_min)) || (gpu_frac > 0 && !set("prefill_gpu_frac", gpu_frac)) ||
+        (gpu_experts > 0 && !set("prefill_gpu_experts", gpu_experts))) {
+      g_err = "prefill gpu: " + ge;
+      return nullptr;
+    }
+  }
+  {  // run-ahead (exact: names only): 0 = the profile's, < 0 = off
+    const int ra = o.run_ahead < 0 ? 0 : o.run_ahead > 0 ? o.run_ahead : profiled ? P.run_ahead : 0;
+    const int rd = o.run_ahead_depth > 0 ? o.run_ahead_depth : profiled ? P.run_ahead_depth : 1;
+    std::string re;
+    if (ra > 0 && (!e->M->set_option("run_ahead", std::to_string(ra), re) || (rd > 1 && !e->M->set_option("run_ahead_depth", std::to_string(rd), re)))) {
+      g_err = "run_ahead: " + re;
+      return nullptr;
+    }
+    e->res.run_ahead = ra;
+    e->res.run_ahead_depth = rd;
+    e->C->ra_budget = o.run_ahead_budget < 0 ? 0 : o.run_ahead_budget > 0 ? o.run_ahead_budget : profiled ? P.ra_budget : 0;
+    e->C->ra_max_tok = o.run_ahead_max < 0 ? 0 : o.run_ahead_max > 0 ? o.run_ahead_max : profiled ? P.ra_max_tok : 0;
+    e->C->ra_sat_skip = o.run_ahead_sat_skip < 0 ? false : o.run_ahead_sat_skip > 0 ? true : profiled && P.ra_sat_skip;
+    e->C->cache.rd.depth_times(e->rs_dt);
+    e->res.ra_budget = e->C->ra_budget;
+    e->res.ra_max_tok = e->C->ra_max_tok;
+    e->res.ra_sat_skip = e->C->ra_sat_skip;
   }
   int pt = o.prefill_threads;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
   // (P2: 6 prefill threads with the 4-bit resident measured slower on the phone, 33.3 vs 30.3 s for 472 tokens: off)
 #endif
   if (pt > 0 && pt != e->C->o.threads) e->prefill_pool.reset(new Pool(pt, -1, (int)e->qos));
+  {  // the model's own options ("name=value;..."); iOS default: free the batched prefill's scratch after each prompt
+     // (P2: a 357-token prompt left ~0.35 GB of footprint behind for the rest of the session)
+    std::string mo = o.model_options ? o.model_options : "";
+#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
+    if (mo.find("prefill_release") == std::string::npos) mo = "prefill_release=1" + std::string(mo.empty() ? "" : ";") + mo;
+#endif
+    for (size_t i = 0; i < mo.size();) {
+      size_t j = mo.find(';', i);
+      if (j == std::string::npos) j = mo.size();
+      const std::string kv = mo.substr(i, j - i);
+      const size_t q = kv.find('=');
+      std::string merr;
+      if (q != std::string::npos && !e->M->set_option(kv.substr(0, q), kv.substr(q + 1), merr)) {
+        g_err = "model_options: " + merr;
+        return nullptr;
+      }
+      i = j + 1;
+    }
+  }
   const int ctx = o.ctx > 0 ? o.ctx : 16384;
   e->S = e->M->new_state(ctx, err);
   if (!e->S) {
@@ -333,16 +432,33 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.disk_gb > 0) so.disk_gb = o.disk_gb;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
   so.ckpt_gb = 0.2;  // the phone's 4.27 GB limit: about 3 checkpoints and one short parked sequence
+  so.ckpt_min = 0;   // (the byte budget alone there)
   so.park_gb = 0.3;
 #endif
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
   so.disk_min = 16;  // P2: short chats get a disk copy (a chat continued after a relaunch restores it)
+  so.disk_gain = 16;  // ... and a restore of it pays from 16 positions (the 256 default never fires for a short chat)
 #endif
   if (o.disk_min > 0) so.disk_min = o.disk_min;
   so.preload_experts = o.preload_experts != 0;
+  so.refresh_pinned = so.preload_experts;  // P2: the preload of a new chat brings the last turn's experts
   if (o.ckpt_gb > 0) so.ckpt_gb = o.ckpt_gb;
   if (o.park_gb > 0) so.park_gb = o.park_gb;
   e->pc = std::make_unique<PrefixCache>(*e->lm, so);
+  e->res.profile = profiled ? P.profile : "none";
+  e->res.mode = mode;
+  e->res.routers = e->routers_path;
+  e->res.m = e->R ? e->R->m : 0;
+  e->res.tau = e->R ? e->R->tau : -1;
+  e->res.cand = e->R ? e->R->cand : 0;
+  e->res.xtok = xtok;
+  e->res.cache_gb = co.cache_gb;
+  e->res.cache_auto = o.cache_bytes <= 0;
+  e->res.evict = co.evict;
+  e->res.readers = co.readers;
+  e->res.drafts = 0;  // the C API has no drafting
+  e->res.gpu_frac = gpu_frac;
+  e->res.gpu_experts = gpu_experts;
   return e.release();
 }
 
@@ -399,13 +515,14 @@ int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int n
     if (progress) progress(user, done, total, mb);
   };
   if (e->prefill_pool) std::swap(e->C->pool, e->prefill_pool);  // the prompt on prefill_threads, decode on threads
-  SyncResult r = e->pc->sync(v, mk, logits);
+  SyncResult r = e->pc->sync(v, mk, logits, logits != nullptr);  // NULL logits: state only (an idle-time prefix)
   if (e->prefill_pool) std::swap(e->C->pool, e->prefill_pool);
   e->lm->on_progress = nullptr;
   if (r.cancelled) e->cancel_req.store(false);
   {
     std::ostringstream lp;
     lp << "{\"source\":\"" << r.source << "\",\"reused\":" << r.reused << ",\"computed\":" << r.computed << ",\"ms_restore\":" << r.ms_restore
+       << ",\"ms_preload\":" << r.ms_preload << ",\"preloaded\":" << r.preloaded
        << ",\"ms_prefill\":" << r.ms_prefill << ",\"positions\":" << r.pf.positions << ",\"chunks\":" << r.pf.chunks << ",\"ms\":" << r.pf.ms
        << ",\"ms_wait\":" << r.pf.ms_wait << ",\"mb_read\":" << r.pf.mb_read * 1048576.0 / 1e6 << ",\"detail\":" << (r.pf.json.empty() ? "{}" : r.pf.json) << "}";
     e->last_prefill = lp.str();
@@ -431,8 +548,22 @@ int dm_step(dm_engine* e, int32_t id, float* logits) {
   std::lock_guard<std::mutex> lk(e->busy);
   QosScope qs(e->qos);
   if (e->cancel_req.exchange(false)) return DM_ECANCELLED;
+  const bool ab = e->o.run_ahead_ab > 0 && e->C->run_ahead;
+  if (ab) e->ra_lcg = e->ra_lcg * 1664525u + 1013904223u, e->C->ra_off = ((e->ra_lcg >> 16) & 1) == 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  const double w0 = e->C->t.wait;
+  const uint64_t b0 = e->C->cache.rd.bytes.load(), u0 = e->C->cache.st.bytes_urgent, n0 = e->C->cache.st.bytes_pf;
   e->pc->step(id, logits);
   e->steps++;
+  if (ab) {  // per arm (on = 1): reads that land during the next token count there (both arms alike)
+    const int a = !e->C->ra_off;
+    e->ab_n[a] += 1;
+    e->ab_ms[a] += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    e->ab_wait[a] += e->C->t.wait - w0;
+    e->ab_mb[a] += (e->C->cache.rd.bytes.load() - b0) / 1e6;
+    e->ab_urg[a] += (e->C->cache.st.bytes_urgent - u0) / 1e6;  // (a stats call between steps resets these: then 0)
+    e->ab_named[a] += (e->C->cache.st.bytes_pf - n0) / 1e6;
+  }
   return DM_OK;
 }
 
@@ -440,6 +571,10 @@ void dm_cancel(dm_engine* e) {
   if (!e) return;
   e->cancel_req.store(true);
   if (e->lm) e->lm->cancel();
+}
+
+void dm_cancel_clear(dm_engine* e) {
+  if (e) e->cancel_req.store(false);
 }
 
 int dm_persist(dm_engine* e, int pos) {
@@ -573,6 +708,11 @@ const char* dm_stats_json(dm_engine* e) {
   s << "{\"model\":" << e->lm->stats_json() << ",\"prefix_cache\":" << e->pc->stats_json() << ",\"memory\":{\"footprint_gb\":" << foot
     << ",\"footprint_peak_gb\":" << peak << ",\"held_gb\":" << Ca.held_bytes() / 1e9 << ",\"mode\":" << e->o.memory_mode
     << ",\"reader_gb_read\":" << Ca.rd.bytes.load() / 1e9;
+  {
+    const ModelMem mm = e->M->mem(*e->S);
+    s << ",\"model\":{\"resident_gb\":" << mm.resident / 1e9 << ",\"kv_reserved_gb\":" << mm.kv_reserved / 1e9 << ",\"recurrent_gb\":" << mm.recurrent / 1e9
+      << ",\"prefill_scratch_gb\":" << mm.prefill_scratch / 1e9 << ",\"prefill_xqb_gb\":" << mm.prefill_xqb / 1e9 << "}";
+  }
   if (Ca.mem == Mem::FILE)
     s << ",\"file_cache_resident_gb\":" << Ca.file_resident_bytes() / 1e9 << ",\"file_refaults\":" << Ca.st.file_refaults
       << ",\"file_resident_skips\":" << Ca.rd.file_resident_skips.load() << ",\"file_gb_skipped\":" << Ca.rd.file_bytes_skipped.load() / 1e9
@@ -587,7 +727,24 @@ const char* dm_stats_json(dm_engine* e) {
     << ",\"mode\":\"" << (e->C->ns.on ? "approx" : "lossless") << "\",\"preset\":" << e->preset_json << ",\"xtok\":" << (e->X ? "true" : "false") << ",\"router_tau\":" << (e->R ? e->R->tau : 0) << ",\"split\":" << e->C->o.split
     << ",\"prefill_threads\":" << (e->prefill_pool ? e->prefill_pool->size() : e->C->o.threads)
     << ",\"resident_bits\":" << (e->o.resident_bits == 4 ? 4 : 8) << ",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9
-    << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"res_memory_mode\":" << e->o.res_memory_mode << "}";
+    << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode << "}";
+  {  // P2 levers: the reads since the last stats call (urgent = read when needed, named = issued ahead by the router;
+     // named unused = named records evicted before any use; the cache counters are reset by every stats call, the
+     // readers' are not), drive busy (wall time with a read in flight) and rate
+    Cache& Cm = e->C->cache;
+    const uint64_t bw = Cm.rd.busy_wall(), by = Cm.rd.bytes.load(), stp = e->steps;
+    auto dl = [](uint64_t now, uint64_t then) { return now >= then ? (double)(now - then) : 0.0; };
+    const double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - e->rs_t).count();
+    const double tok = std::max(1.0, dl(stp, e->rs_steps)), busy_s = dl(bw, e->rs_busy) / 1e9;
+    const double rec = (double)Cm.P[0].rec;
+    s << ",\"reads\":{\"tokens\":" << dl(stp, e->rs_steps) << ",\"mb_urgent_per_token\":" << Cm.st.bytes_urgent / 1e6 / tok
+      << ",\"mb_named_per_token\":" << Cm.st.bytes_pf / 1e6 / tok << ",\"named_records_per_token\":" << Cm.st.n_pf_issued / tok
+      << ",\"mb_named_unused_per_token\":" << Cm.st.n_pf_unused_evicted * rec / 1e6 / tok << ",\"wall_s\":" << wall << ",\"busy_s\":" << busy_s
+      << ",\"busy_pct\":" << 100.0 * busy_s / std::max(1e-9, wall) << ",\"gb_per_s_busy\":" << dl(by, e->rs_bytes) / 1e9 / std::max(1e-9, busy_s)
+      << ",\"gb_per_s_wall\":" << dl(by, e->rs_bytes) / 1e9 / std::max(1e-9, wall) << "}";
+    e->rs_busy = bw; e->rs_bytes = by; e->rs_steps = stp;
+    e->rs_t = std::chrono::steady_clock::now();
+  }
   {  // the approximate mode's own account (since the last stats call): raw totals over layer steps
     const Approx& N = e->C->ns;
     s << ",\"approx\":{\"on\":" << N.on << ",\"layer_steps\":" << N.steps << ",\"weight_replaced_sum\":" << N.w_replaced
@@ -595,7 +752,7 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"steps_with_a_replacement\":" << N.steps_replaced << ",\"max_replaced_weight\":" << N.w_replaced_max
       << ",\"read_now\":" << N.n_read_now << ",\"weight_read_now_sum\":" << N.w_read_now << ",\"late_waited\":" << N.n_late_waited
       << ",\"late_got\":" << N.n_late_got << ",\"late_dropped\":" << N.n_late_dropped << ",\"late_wait_ms\":" << N.late_wait_ms
-      << ",\"bg\":" << N.n_bg << ",\"drop\":" << N.drop;
+      << ",\"bg\":" << N.n_bg << ",\"bg_on\":" << N.bg << ",\"read_w\":" << N.read_w << ",\"late_ms\":" << N.late_ms << ",\"drop\":" << N.drop;
     std::vector<float> w = N.w_tok;  // released weight left out per token
     double sum = 0;
     for (float x : w) sum += x;
@@ -606,8 +763,29 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"steps_with_a_drop_share\":" << N.steps_replaced / std::max(1.0, N.steps) << ",\"picks_left_out_per_token\":" << N.n_replaced / nt
       << ",\"picks_read_and_waited_per_token\":" << (N.n_read_now + N.n_late_waited) / nt << "}";
   }
+  if (e->C->run_ahead) s << ",\"run_ahead\":" << e->C->ra_json();  // cumulative since open (dmeng's counters)
+  {  // the readers' wall time by reads in flight since the last stats call (per token: dmeng's read_queue counters)
+    uint64_t d[7];
+    e->C->cache.rd.depth_times(d);
+    const double tk = std::max<double>(1, e->steps - e->rs_steps_dt);
+    auto per = [&](int i) { return (d[i] - e->rs_dt[i]) / 1e6 / tk; };
+    s << ",\"read_queue\":{\"tokens\":" << e->steps - e->rs_steps_dt << ",\"reader_idle_ms_per_token\":" << per(0)
+      << ",\"reader_idle_queued_ms_per_token\":" << per(1) << ",\"in_flight_1_2_3_4plus_ms_per_token\":[" << per(2) << "," << per(3)
+      << "," << per(4) << "," << per(5) << "],\"read_bursts_per_token\":" << (d[6] - e->rs_dt[6]) / tk << "}";
+    std::memcpy(e->rs_dt, d, sizeof d);
+    e->rs_steps_dt = e->steps;
+  }
+  if (e->ab_n[0] + e->ab_n[1] > 0) {
+    s << ",\"ra_ab\":{";
+    for (int a = 0; a < 2; a++) {
+      const double n = std::max(1.0, e->ab_n[a]);
+      s << (a ? ",\"on\":" : "\"off\":") << "{\"tokens\":" << e->ab_n[a] << ",\"ms\":" << e->ab_ms[a] / n << ",\"wait_ms\":" << e->ab_wait[a] / n
+        << ",\"mb_read\":" << e->ab_mb[a] / n << ",\"mb_urgent\":" << e->ab_urg[a] / n << ",\"mb_named\":" << e->ab_named[a] / n << "}";
+    }
+    s << "}";
+  }
   if (e->C->hook) s << ",\"hook\":" << e->C->hook->stats_json(*e->C, (int)std::max<int64_t>(1, e->steps));
-  s << "}";
+  s << ",\"resolved\":" << e->res.json() << "}";
   e->stats = s.str();
   e->lm->reset_stats();
   return e->stats.c_str();

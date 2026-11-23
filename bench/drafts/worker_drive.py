@@ -4,7 +4,7 @@ max_new, temperature, optional tool-call fragments), the generated ids and the w
 Used to compare drafting off / on in the server's own decode loop (ids must be identical).
 
   worker_drive.py OUT.json REQS.json -- WORKER --model DIR [worker flags...]
-REQS.json: [{"ids": [...] | "ids_file": F, "max_new": N, "temp": 0, "marks": [...], "skel": [[...], ...],
+REQS.json: [{"ids": [...] | "ids_file": F, "max_new": N, "temp": 0, "top_p": 1, "top_k": 0, "seed": 1, "marks": [...], "skel": [[...], ...],
              "continue": true (prompt = the previous request's prompt + its output + "ids")}, ...]"""
 import json, subprocess, sys, time
 
@@ -14,6 +14,7 @@ reqs = json.load(open(reqs_path))
 p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
 ready = p.stdout.readline()
 assert ready.startswith("READY"), ready
+print(ready.strip(), file=sys.stderr, flush=True)  # the worker's resolved settings and cache size, for the run's log
 res, prev = [], None
 for k, rq in enumerate(reqs):
     ids = rq.get("ids") or [int(x) for x in open(rq["ids_file"]).read().replace(",", " ").split()]
@@ -24,7 +25,7 @@ for k, rq in enumerate(reqs):
     stop = rq.get("stop", [])
     rid = k + 1
     t0 = time.time()
-    p.stdin.write(f"R {rid} {rq.get('max_new', 64)} {rq.get('temp', 0)} 1 0 1 {len(ids)} {len(marks)} {len(stop)} {len(skel)}\n"
+    p.stdin.write(f"R {rid} {rq.get('max_new', 64)} {rq.get('temp', 0)} {rq.get('top_p', 1)} {rq.get('top_k', 0)} {rq.get('seed', 1)} {len(ids)} {len(marks)} {len(stop)} {len(skel)}\n"
                   f"{' '.join(map(str, ids))}\n{' '.join(map(str, marks))}\n{' '.join(map(str, stop))}\n[]\n")
     for f in skel:
         p.stdin.write(" ".join(map(str, f)) + "\n")

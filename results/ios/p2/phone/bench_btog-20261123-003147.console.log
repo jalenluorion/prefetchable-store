@@ -1,0 +1,45 @@
+LAUNCH fresh process (args: -- -autotest -kernelBench -p0spec cell=1,sustain=0,metal=1,bgthreads=0,batch=0,cases=a4gu,threads=6,btog=20); previous process pid 36290: last scene phase active, 212 s ago
+ENGINE PhoneStore (native: -autotest always runs the native engine) mode=prefetch
+DIAG memWarn=log historyMode=strict mappedWeightsInUse=0 mode=prefetch prefixCache=on
+MEM launch: footprint=0.009 peak=0.009 avail=4.286 limit~4.295 GB | mlx active=n/a peak=n/a cache=n/a GB | resident=0.032 file-backed=0.023 compressed=0.000 GB | faults=2416 pageins=220 | thermal=nominal
+KBENCH launch spec 'cell=1,sustain=0,metal=1,bgthreads=0,batch=0,cases=a4gu,threads=6,btog=20' thermal nominal
+KBENCH start: features {"hw.optional.arm.FEAT_DotProd":1,"hw.optional.arm.FEAT_I8MM":1,"hw.optional.arm.FEAT_FHM":1,"hw.optional.arm.FEAT_FP16":1,"hw.optional.arm.FEAT_BF16":1,"hw.optional.arm.FEAT_SME":0,"hw.optional.arm.FEAT_SME2":0,"hw.optional.arm.FEAT_SVE":-1,"hw.ncpu":6,"hw.perflevel0.physicalcpu":2,"hw.perflevel1.physicalcpu":4,"hw.perflevel0.l2cachesize":16777216,"hw.perflevel1.l2cachesize":4194304,"hw.l1dcachesize":65536,"hw.cachelinesize":128,"hw.pagesize":16384,"hw.memsize":5936922624,"hw.cpufamily":-2023363094,"hw.perflevel0.cpusperl2":2,"hw.nperflevels":2,"hw.machine":"iPhone15,5","kern.osversion":"24B119","kern.osproductversion":"27.2","machdep.cpu.brand_string":""} thermal nominal
+SCENE active: same process, up 0.4 s; engine idle, slabs allocated
+KBENCH bw qos=ui threads=6 47.0 GB/s
+KBENCH bw qos=default threads=6 48.6 GB/s
+KBENCH mv a4gu qos=ui t=6 37.8 GB/s 67.2 GMAC/s 15.6 us/mat [nominal]
+KBENCH mv a4gu qos=default t=6 30.7 GB/s 54.6 GMAC/s 19.2 us/mat [nominal]
+KBENCH metal exact a4gu: 0 of 512 rows differ from the CPU kernel
+KBENCH metal exact a4dn: 0 of 2048 rows differ from the CPU kernel
+KBENCH metal exact a8rt: 0 of 256 rows differ from the CPU kernel
+KBENCH metal exact a8out: 0 of 2048 rows differ from the CPU kernel
+KBENCH metal exact a4out: 0 of 2048 rows differ from the CPU kernel
+KBENCH metal exact gd N=64: 0 of 65536 outputs differ
+KBENCH metal command buffer round trip p50 223 us p90 257 us
+KBENCH metal read bandwidth 42.0 GB/s
+KBENCH metal mv a4gu 30.3 GB/s 53.9 GMAC/s (gpu-time 31.8 GB/s, 18.5 us/mat)
+KBENCH metal mv a4dn 30.4 GB/s 54.0 GMAC/s (gpu-time 32.1 GB/s, 18.4 us/mat)
+KBENCH metal mv a8qkv 44.1 GB/s 41.5 GMAC/s (gpu-time 47.4 GB/s, 376.1 us/mat)
+KBENCH metal mv a8out 40.6 GB/s 38.2 GMAC/s (gpu-time 43.6 GB/s, 204.6 us/mat)
+KBENCH metal mv a8rt 33.0 GB/s 31.0 GMAC/s (gpu-time 34.9 GB/s, 15.9 us/mat)
+KBENCH metal mv a8head 44.0 GB/s 41.5 GMAC/s (gpu-time 47.6 GB/s, 1497.8 us/mat)
+KBENCH metal mv a4qkv 41.3 GB/s 73.4 GMAC/s (gpu-time 44.4 GB/s, 212.4 us/mat)
+KBENCH metal mv a4out 40.7 GB/s 72.4 GMAC/s (gpu-time 43.3 GB/s, 108.9 us/mat)
+KBENCH metal mv a4head 44.2 GB/s 78.6 GMAC/s (gpu-time 46.7 GB/s, 807.7 us/mat)
+KBENCH metal gd a8qkv N=64 92.7 GMAC/s
+KBENCH metal gd a8qkv N=256 93.3 GMAC/s
+SCENE inactive: same process, up 46.4 s; engine idle, slabs allocated
+SCENE active: same process, up 57.1 s; engine idle, slabs allocated
+SCENE inactive: same process, up 60.2 s; engine idle, slabs allocated
+KBENCH batched together N=256: gpu alone 87.1, cpu(6, 4-bit) alone 123.5, together gpu 72.6 + cpu 76.7 = 149.3 GMAC/s [nominal -> fair]
+SCENE active: same process, up 83.8 s; engine idle, slabs allocated
+KBENCH metal together: gpu alone 28.7, cpu(6) alone 19.5, together gpu 16.0 + cpu 15.2 = 31.2 GB/s [serious]
+KBENCH done in 87 s, thermal serious
+P0 wrote kernelbench.json
+DONE
+00:31:48  Acquired tunnel connection to device.
+00:31:48  Enabling developer disk image services.
+00:31:48  Acquired usage assertion.
+Launched application with com.jalenl.phonestore bundle identifier.
+Waiting for the application to terminate...
+The app terminated with the exit code 0.

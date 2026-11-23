@@ -61,11 +61,18 @@ struct Manifest {
   std::string router_rule, activation;
   double route_scale = 1.0;
   std::vector<std::string> layer_format;  // per physical layer
+  // per physical layer, relative to the folder: a profile's own record files (profiles.<name>.experts.layer_files);
+  // empty = layer_file for every layer
+  std::vector<std::string> layer_paths;
   std::vector<RecordFormat> formats;      // manifest order
   std::vector<RouterEntry> routers;
   std::vector<Derived> derived;
 
   bool load(const std::string& model_dir, std::string& err);  // moved-store.json + config.json
+  // profiles.<name>.experts, when present: its layer_format (one id per physical layer) replaces the folder's, and its
+  // layer_files ({"20": "store_nv4/layer_20.bin", ...}) name that profile's own files for those layers (e.g. Inkling's
+  // phone-small: layers 20-23 rewritten as NVFP4, the originals untouched). No experts entry: nothing changes.
+  bool apply_profile_experts(const std::string& profile, std::string& err);
   const Part* part(const std::string& path) const;
   const RecordFormat* format(const std::string& id) const;
   const RouterEntry* router(const std::string& id) const;  // "" = the default router

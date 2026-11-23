@@ -62,7 +62,7 @@ lowered it), so the eviction-policy work in `moved-store-port-ios-evict` merges 
 
 ## phone-stage (P2, 2026-11-22): changes on top of unified-wip f89d451
 
-Branch `phone-stage` (worktree `moved-store-phone`). Defaults unchanged: a caller that leaves the new fields zero gets
+Branch `phone-stage`. Defaults unchanged: a caller that leaves the new fields zero gets
 unified-wip's behaviour. Results: `results/ios/p2/P2.md`.
 
 | file | change | default |
@@ -87,3 +87,15 @@ not be combined with it.
 | `src/models/qwen3_5_moe/prefill.cpp` | the batched prefill suspends the caps for its pass | |
 | `tools/dmeng.cpp` | `--drop` overrides the preset only when given | |
 | `tests/c_api/dm_gate.c` | `--policy-probe`, `--resident`, `--mode` | |
+
+### phone-stage, 2026-11-23 (first-token rows)
+
+| file | change | default |
+|---|---|---|
+| `include/dmeng/session.h`, `src/serving/session.cpp` | `sync(..., want_logits = true)`: false = state only (a checkpoint / disk copy / parked sequence at the end of ids is restored whole, nothing recomputed for logits); `best_disk` / `load_disk` take the cut | true: unchanged |
+| | `persist(p)` at the live end checkpoints it first (the end of a reply); a file written from memory holds only the end and the pinned checkpoints (was every checkpoint <= p, ~63 MB each on Qwen3.6) | |
+| | the first marked prefix's file is named `prefix_<hash>.pin.bin` and the disk LRU keeps pinned files while they total <= disk_gb / 2; lookups accept either name | |
+| | `SessionOptions::refresh_pinned`: persist at a pinned file's position rewrites its saved expert set to the one held now | off |
+| `bindings/c/dmeng_c.{h,cpp}` | `dm_sync` with `logits == NULL` = state only; `refresh_pinned` follows `preload_experts` | callers that pass logits: unchanged |
+| `apps/ios/DmengKit/Dmeng.swift` | `DmengModel.prefill(ids, marks)` (state only), `clearCancel()`, `DmengOptions.modelOptions` | |
+| `bindings/c/dmeng_c.{h,cpp}` | `dm_cancel_clear` (drop a cancel that found nothing running: type-ahead cancels background syncs); `dm_open_opts.model_options` ("name=value;...", Model::set_option; iOS default `prefill_release=1`: a 357-token prompt left ~0.35 GB of scratch in the footprint); mode string options `approx:PRESET:w=W:bg=0\|1:late=MS` (read_w, background fetch, late wait; dmeng `--read-w --bg --late`); `dm_stats_json` gains `reads` (urgent / named / named-unused MB per token, drive busy % and GB/s since the last call), `memory.model` (KV reserved, recurrent, prefill scratch) and `approx.read_w / bg_on / late_ms` | macOS: no model options |

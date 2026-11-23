@@ -9,7 +9,7 @@
 #include <vector>
 
 #include "dmeng/model.h"
-#include "dmeng/greedy_head.h"
+#include "dmeng/screen_head.h"
 
 namespace dm {
 struct GpuGemm;  // src/core/gpu_gemm.h
@@ -26,10 +26,16 @@ struct PrefillOpts {
   int whole_from = 1000;
   bool batched_always = false;  // chunk 1 through the batched code (one position per pass): a debugging reference
   FILE* record = nullptr;       // if set: every position's picks, int16 [pos][NL][K], appended per span
-  // share of each 8-bit attention projection's rows computed on the GPU (src/core/gpu_gemm.h: the same bits) beside the
-  // CPU, for sub-chunks of at least gpu_min positions; 0 = CPU only. Needs a build with DM_METAL.
-  double gpu_frac = 0;
+  // share of each attention projection's rows (qkv, z, o; q, k, v, o; 8- or 4-bit) computed on the GPU
+  // (src/core/gpu_gemm.h: the same bits) beside the CPU, for sub-chunks of at least gpu_min positions; 0 = CPU only.
+  // gpu_frac_experts: the same for the experts' products (routed experts held in the slab, and the shared expert).
+  // Needs a build with DM_METAL.
+  double gpu_frac = 0, gpu_frac_experts = 0;
   int gpu_min = 256;
+  int gpu_kernel = 1;  // 1: the matrix-unit kernel, 0: the integer kernel (gpu_gemm.h; the same bits)
+  // experts arrive in waves (whatever has landed): a wave uses the GPU only with at least this many (position, expert)
+  // assignments (the shared expert's positions counted), so a trickle of reads does not pay a GPU round trip per expert
+  int gpu_min_wave = 128;
   // free the prefill's scratch (activations, expert inputs, packed activations: ~0.5 GB at 512-position sub-chunks) at
   // the end of every prefill; the next one allocates it again. Placement of memory only: no computed bit changes
   bool release = false;
@@ -121,13 +127,21 @@ struct Qwen35 : Model {
   XBuf xin, xatt;
   std::vector<float> x, h, hm, y, buf, o, lgts, emb;
   Times* T = nullptr;
-  // exact greedy head: a 4-bit copy of the 8-bit head (the top nibble of each code) gives every row's logit within a
-  // proven bound; only the rows that can still hold the maximum are computed with the exact 8-bit head, so the argmax
-  // (lowest index on ties) is the full head's, bit for bit
+  // the screened head (core, screen_head.h): the head split in place into nibble planes; a pass over the high planes
+  // bounds every row, the rows that can be in the top k are computed exactly. The argmax (Want::GREEDY) and the top-k
+  // logits (Want::TOPK, k = head_topk) are the full head's, bit for bit
   bool fast_head = false, fast_head_check = false;
+  int head_topk = 0;
   double hd_mismatch = 0;
-  GreedyHead gh;  // the exact greedy head (core)
+  ScreenHead sh;
   int greedy_ = -1;
+  // run-ahead (Core::run_ahead): one layer ahead on an approximate state, for its picks
+  std::vector<float> ra_x, ra_h, ra_y, ra_lg;
+  XBuf ra_xq;
+  int run_ahead_step(int L, const float* ypart, int32_t* picks, int maxk);
+  bool attn_linear_ro(int L, const float* hin, float* rout);
+  int run_ahead_deeper_step(int d, int32_t* picks, int maxk);
+  int ra_L = -1;  // the last layer the run-ahead state holds (its MoE left out)
 
   Qwen35();  // both defined in prefill.cpp, where Prefill is complete
   ~Qwen35() override;
@@ -150,7 +164,7 @@ struct Qwen35 : Model {
   bool set_option(const std::string& name, const std::string& value, std::string& err) override;
   std::string stats_json(int ntok) const override;
   void reset_stats() override {
-    gh.reset_stats();
+    sh.reset_stats();
     hd_mismatch = 0;
   }
   ModelMem mem(const State& s) const override;  // prefill.cpp (the batched-prefill scratch sizes)
@@ -159,8 +173,8 @@ struct Qwen35 : Model {
                PrefillStats* st, const std::atomic<bool>* cancel) override;
   PrefillOpts po;
   std::unique_ptr<Prefill> P;
-  std::unique_ptr<GpuGemm> gpu;  // the Metal half of the prefill's 8-bit products (po.gpu_frac > 0), kept across prefills
-  bool set_gpu_frac(double f, std::string& err);  // prefill.cpp
+  std::unique_ptr<GpuGemm> gpu;  // the Metal share of the prefill's products (po.gpu_frac(_experts) > 0), kept across prefills
+  bool set_gpu_frac(double f, bool experts, std::string& err);  // prefill.cpp
   std::vector<size_t> fixed_off;  // [NL] byte offset of a DeltaNet layer's conv state in the fixed blob
   void attn_linear(int L, const float* hin, float* rout);
   void attn_full(int L, const float* hin, float* rout);
@@ -179,6 +193,13 @@ struct Qwen35 : Model {
   bool verify(State& s, const int32_t* ids, int n) override;
   void commit(State& s, int a) override;
   const float* logits_at(int i) const override;
+  // draft heads trained outside (verify.cpp): post-norm final hidden of the last step (i < 0, kept when the step wanted
+  // logits) or of verify position i; the raw embedding row; the output head's argmax (screened when built) + top-1 prob
+  const float* final_hidden(int i) const override;
+  bool embed_row(int32_t tok, float* out) const override;
+  int head_argmax(const float* hn, float* conf) override;
+  XBuf dh_x;
+  std::vector<float> dh_lg;
   std::string verify_json() const;  // verify statistics (steps, rollbacks, ms of state copies and replays)
 };
 
@@ -193,7 +214,7 @@ struct LinCtx {
   // is done; the heads quantise their own outputs), its rows as run_rows computes them
   const Weight* wo = nullptr;
   float* rout = nullptr;
-  int o_chunks = 0;
+  int o_chunks = 0, o_nb = 0;  // claims of the output projection: o_nb of 32 rows, then 8-row claims (a short tail)
   std::atomic<int> heads_left{0};
   alignas(128) std::atomic<int> next{0};
 };

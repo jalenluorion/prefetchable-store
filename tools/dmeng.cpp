@@ -6,6 +6,7 @@
 //   dmeng --model DIR --teacher ids.txt --dump-logits out.f32        (teacher-forced logits at every position)
 //   dmeng --help | --help-advanced
 #include <limits.h>
+#include <sys/stat.h>
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <unistd.h>
@@ -45,7 +46,8 @@ static const char* HELP_SHORT = R"(usage: dmeng --model DIR (--prompt TEXT | --p
   --n N                  tokens to generate (default 120)
   --temp T --top-p P --top-k K --seed S   sampling (default: greedy)
   --cache-gb G|auto      expert cache size in GB (default auto: from the memory free at start)
-  --drafts 0|1           draft and verify, greedy only, experimental (default 0)
+  --drafts 0|1           draft and verify, greedy or sampled (the ids are plain decoding's for the seed), in exact and fast
+                         mode (default 0)
   --json F               write the statistics line to F as well
   --help-advanced        every other option, grouped
 )";
@@ -59,7 +61,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          what the command line leaves unset; any of --prefetch, --routers, --xtok, --oracle,
                          --plan-routers makes the early address entirely the command line's
   --mode exact|fast|lossless|approx[:PRESET]   exact = lossless, fast = approx:drop (default: the profile's)
-  --drafts 0|1           1 = --draft lookup (greedy only); default: the profile's (off)
+  --drafts 0|1           1 = --draft lookup --early 4 (Inkling with mtp.safetensors: --draft both); default: the profile's (off)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --chat --reasoning-effort E   with --prompt: the chat template (python/run.py)
@@ -80,6 +82,7 @@ model and memory
                          --file-adapt 0|1 (the budget follows what the OS keeps; --cache-gb is the start and the max),
                          --file-min-gb G (adaptive floor, default 1), --file-core-gb G (a locked core of the hottest records)
   --threads N --readers N --split N    compute threads (8), reader threads (4), pieces per record read (1)
+  --reader-io-low 0|1    the readers' disk I/O one tier below the process's own (default 1 on iOS, 0 on macOS)
   --prec i16|i8|f16|f32  activation precision (default i16; f32 = the exact reference path, where the model has one)
   --ctx N                context positions (default 16384)
   --half-life T          eviction: half-life of the decayed use count, in tokens (default 8)
@@ -87,7 +90,8 @@ model and memory
 
 generation
   --n N --temp T --top-k K --top-p P --seed S --stop-eos ID
-  --fast-head 1|2        exact greedy head (temperature 0); 2 also checks it against the full head
+  --fast-head 0|1|2      screened head (Qwen3.6, Inkling; default 1): the exact argmax (temperature 0, no drafting) or the exact
+                         top-k logits (--top-k 1..64); 0 = the full head; 2 also checks it against the full head
   --start-pos P          timing of long contexts: the first token sits at position P
 
 early address (lossless: names only schedule reads; the released router decides)
@@ -133,15 +137,22 @@ outputs
                          decode again: the ids must be the same
   --prefill-chunk N      the prompt through the model's batched prefill in chunks of N (1: single steps); exact
                          (default 512 under a profile unless --record is given, else 1)
-  --prefill-gpu-frac F   with --prefill-chunk: that share of each 8-bit attention projection's rows on the GPU beside
-                         the CPU (builds with DM_METAL; the same bits); 0 = CPU only (default)
-  --draft lookup|fixed|head|both   draft and verify (greedy only): drafts verified up to --draft-max 7 at a time in
-                         one pass; accepted while each equals the model's own greedy token, the rest rolled back, so the
-                         ids are one-position decoding's. Sources: the lookup (the longest earlier match of the sequence's
+  --prefill-gpu-frac F   with --prefill-chunk: that share of each attention projection's rows on the GPU beside
+                         the CPU (builds with DM_METAL; the same bits); 0 = CPU only (default: the profile's; the
+                         mac profile 0.4 for both models, else 0)
+  --prefill-gpu-experts F  the same for the experts' products (routed experts in the slab, the shared expert;
+                         the mac profile 0.4; Inkling: its NVFP4 layers)
+  --prefill-gpu off      the batched prefill on the CPU only (both shares 0)
+  --draft lookup|fixed|head|both   draft and verify: drafts verified up to --draft-max 7 at a time in one pass;
+                         accepted while each equals the token the pass itself produces (greedy: its argmax; sampled: the
+                         sampler with that token's own draw, so the seed's tokens are unchanged; fast mode: the pass applies
+                         the single step's leave-out rule), the rest rolled back, so the ids are one-position decoding's. Sources: the lookup (the longest earlier match of the sequence's
                          last 2-16 tokens) and the model's draft head (Inkling's MTP, mtp.safetensors; its features come
                          from the model's own steps). lookup / head / both: a controller picks the source and the draft
                          length from running acceptance and measured step costs (or a plain step); fixed: the whole
                          lookup draft every step
+  --draft-q8 0|1         the draft head's matrices in the engine's 8-bit format (AFF8; default 1) or bf16 as released (0);
+                         drafts only propose, so the ids do not depend on it
   --draft-thr P          head drafts are used only while their top-1 probability is >= P (default 0.9: the best measured on the
                          Pittsburgh generation, within 0.1% of the best on the coding answer; results/ink_draft/DRAFT-HEAD.md)
   --head-backoff B,M     after a lost head try (no draft over the threshold, its draft not chosen, none accepted, or the
@@ -161,6 +172,15 @@ outputs
                          experts of later steps as one-position steps do (routers: the first two blocks per position at
                          the pass's start, the lag rows in each step's router fork-join; oracle: the recorded picks); names
                          only schedule reads (default 0 under a profile, 1 with --profile none)
+  --draft-gate 0|1       with --draft lookup: the controller's cost model from per-pass counters per pass width (compute as a
+                         ratio to a plain step's, wait for reads, urgent MB, the next step's excess wait): a draft runs when
+                         its expected tokens per estimated ms beat a plain step's by --draft-margin (default 0.05)
+                         (default 1; 0 = the cost ratio table alone)
+  --draft-light F        with --draft: a light draft head trained outside (draft.h LightHeadSource; jobs/babel/q36_draft_head.py's
+                         heads_*.safetensors) as one more source; --draft-light-q8 0|1 (default 1: the engine's 8-bit
+                         format), --draft-light-thr P (offer drafts while their confidence >= P, default 0),
+                         --draft-light-dump F (every run's input and drafts, for the reference check),
+                         --draft-light-backoff 0 (run it every step: acceptance measurements)
   --skeleton F           with --draft: tool-call skeleton fragments (one line of token ids each) as a second draft source
   --probe-every N        with --draft lookup: one short draft after N declined offers (default 48)
   --verify-check N       after the prompt: N greedy single steps, then the same positions again through verify passes of
@@ -173,21 +193,27 @@ struct Args {
       steps_out, force, pool_share, nll_out, ref_nll, qual_out, ref_qual, dump_names, taps_out, plan_routers, evict_trace;
   std::string prefetch = "none", mem = "mlock", res_mem = "mlock", prec = "i16", lead = "4", mode = "lossless", evict = "auto",
               plan_calib = "rank", late, evict_policy, router_heavy, layer_caps;
+  int reader_io_low = -1;  // -1: CoreOpts' platform default
   int n = 120, start_pos = 0, ctx = 16384, threads = 8, readers = 4, split = 1, m = 8, top_k = 0, dump_from = 0, stop_eos = -1, drop = -1;
-  int rt_cand = 16, router_ecache = 0, fast_head = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1;
+  int rt_cand = 16, router_ecache = 0, fast_head = -1, run_ahead = 0, run_ahead_depth = 1, ra_max = 0, ra_sat = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1;
   int plan_budget = 1, plan_revoke = 1, plan_maxcand = 32;
-  int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1;
-  double prefill_gpu_frac = 0;
-  std::string xtok, xtok_bg, skeleton;
+  int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1;
+  double draft_margin = 0.05;
+  double prefill_gpu_frac = 0, prefill_gpu_experts = 0;
+  bool prefill_gpu_off = false;
+  std::string xtok, xtok_bg, skeleton, draft_light, draft_light_dump;
+  int draft_light_q8 = 1, draft_light_backoff = 1;
+  double draft_light_thr = 0;
   int verify_check = 0;
   double xtok_tau = 0.5;
   std::string draft = "none";  // none | lookup | head | both (controller) | fixed (the whole lookup draft every step)
   double draft_thr = 0.9;
-  int backoff0 = 32, backoff_max = 256, draft_exact = 0, check_start = 0, check_logits = 200;
+  int backoff0 = 32, backoff_max = 256, draft_exact = 0, draft_q8 = 1, check_start = 0, check_logits = 200;
   std::string draft_check, check_out;
   int draft_bench = 0;
   int file_check = 1, file_hint = 0, file_skip_resident = 1, file_prefault = 1, file_adapt = 0;
   double file_min_gb = 1.0, file_core_gb = 0;
+  double ra_budget = 0;
   double temp = 0, top_p = 1.0, cache_gb = 5.0, half_life = 8.0, rt_tau = -1, read_w = -1, read_mass = -1;
   double plan_u = 0.9, plan_tau_long = 0.5, plan_tau = -1, plan_pin_p = 0.2, plan_revoke_p = 0.1;
   uint64_t seed = 0;
@@ -351,6 +377,7 @@ int main(int argc, char** argv) {
     else if (k == "--threads") a.threads = std::stoi(v());
     else if (k == "--readers") a.readers = std::stoi(v());
     else if (k == "--split") a.split = std::stoi(v());
+    else if (k == "--reader-io-low") a.reader_io_low = std::stoi(v());
     else if (k == "--temp") a.temp = std::stod(v());
     else if (k == "--top-k") a.top_k = std::stoi(v());
     else if (k == "--top-p") a.top_p = std::stod(v());
@@ -373,6 +400,11 @@ int main(int argc, char** argv) {
     else if (k == "--no-loop-hold") a.loop_hold = false;
     else if (k == "--force-routing") a.force = v();
     else if (k == "--fast-head") a.fast_head = std::stoi(v());
+    else if (k == "--run-ahead") a.run_ahead = std::stoi(v());
+    else if (k == "--run-ahead-depth") a.run_ahead_depth = std::stoi(v());
+    else if (k == "--run-ahead-budget") a.ra_budget = std::stod(v());
+    else if (k == "--run-ahead-max") a.ra_max = std::stoi(v());
+    else if (k == "--run-ahead-sat-skip") a.ra_sat = std::stoi(v());
     else if (k == "--mode") a.mode = v();
     else if (k == "--late") a.late = v();
     else if (k == "--read-w") a.read_w = std::stod(v());
@@ -407,6 +439,8 @@ int main(int argc, char** argv) {
     else if (k == "--state-check") a.state_check = true;
     else if (k == "--prefill-chunk") a.prefill_chunk = std::stoi(v());
     else if (k == "--prefill-gpu-frac") a.prefill_gpu_frac = std::stod(v());
+    else if (k == "--prefill-gpu-experts") a.prefill_gpu_experts = std::stod(v());
+    else if (k == "--prefill-gpu") a.prefill_gpu_off = v() == "off";
     else if (k == "--xtok") a.xtok = v();
     else if (k == "--xtok-bg") a.xtok_bg = v();
     else if (k == "--xtok-tau") a.xtok_tau = std::stod(v());
@@ -414,6 +448,7 @@ int main(int argc, char** argv) {
     else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--draft-thr") a.draft_thr = std::stod(v());
     else if (k == "--draft-exact") a.draft_exact = std::stoi(v());
+    else if (k == "--draft-q8") a.draft_q8 = std::stoi(v());
     else if (k == "--draft-check") a.draft_check = v();
     else if (k == "--draft-bench") a.draft_bench = std::stoi(v());
     else if (k == "--draft-check-start") a.check_start = std::stoi(v());
@@ -427,7 +462,14 @@ int main(int argc, char** argv) {
     else if (k == "--probe-every") a.probe_every = std::stoi(v());
     else if (k == "--early") a.early = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
+    else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
+    else if (k == "--draft-margin") a.draft_margin = std::stod(v());
     else if (k == "--skeleton") a.skeleton = v();
+    else if (k == "--draft-light") a.draft_light = v();
+    else if (k == "--draft-light-q8") a.draft_light_q8 = std::stoi(v());
+    else if (k == "--draft-light-thr") a.draft_light_thr = std::stod(v());
+    else if (k == "--draft-light-dump") a.draft_light_dump = v();
+    else if (k == "--draft-light-backoff") a.draft_light_backoff = std::stoi(v());
     else if (k == "--verify-check") a.verify_check = std::stoi(v());
     else if (k == "--file-check") a.file_check = std::stoi(v());
     else if (k == "--file-hint") a.file_hint = std::stoi(v());
@@ -472,9 +514,7 @@ int main(int argc, char** argv) {
     if (!addr_given && !P.routers.empty()) {
       a.prefetch = "router";
       a.routers = P.routers;
-      if (!has("--m")) a.m = P.m;
-      if (!has("--rt-tau")) a.rt_tau = P.tau;
-      if (!has("--rt-cand")) a.rt_cand = P.cand;
+      names_rule(P, true, has("--m"), a.m, has("--rt-tau"), a.rt_tau, has("--rt-cand"), a.rt_cand, a.m, a.rt_tau, a.rt_cand);
     }
     if (!addr_given && !P.xtok.empty()) {
       a.xtok = P.xtok;
@@ -484,8 +524,16 @@ int main(int argc, char** argv) {
     if (!has("--evict")) a.evict = P.evict;
     if (!has("--cache-gb")) a.cache_auto = true;
     if (!has("--prefill-chunk") && a.record.empty()) a.prefill_chunk = 512;
+    if (!has("--prefill-gpu-frac")) a.prefill_gpu_frac = P.gpu_frac;
+    if (!has("--prefill-gpu-experts")) a.prefill_gpu_experts = P.gpu_experts;
+    if (!has("--run-ahead")) a.run_ahead = P.run_ahead;
+    if (!has("--run-ahead-depth")) a.run_ahead_depth = P.run_ahead_depth;
+    if (!has("--run-ahead-budget")) a.ra_budget = P.ra_budget;
+    if (!has("--readers") && P.readers > 0) a.readers = P.readers;
+    if (!has("--run-ahead-max")) a.ra_max = P.ra_max_tok;
+    if (!has("--run-ahead-sat-skip")) a.ra_sat = P.ra_sat_skip ? 1 : 0;
     if (!has("--verify-names")) a.verify_names = 0;
-    if (a.drafts < 0) a.drafts = P.drafts && a.temp <= 0 ? 1 : 0;
+    if (a.drafts < 0) a.drafts = P.drafts ? 1 : 0;
   } else {
     if (a.print_defaults) {
       printf("null\n");
@@ -493,15 +541,27 @@ int main(int argc, char** argv) {
     }
     a.mode = engine_mode_of(a.mode);
   }
-  if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
+  if (a.prefill_gpu_off) a.prefill_gpu_frac = a.prefill_gpu_experts = 0;
+  if (has("--routers") && !has("--prefetch") && a.routers != "none" && !a.routers.empty()) a.prefetch = "router";  // named routers name
   LoadOpts lo;
   std::string family;
-  if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings)) return die("model", err);
+  if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings, profiled ? P.profile : ""))
+    return die("model", err);
   if (!a.family.empty()) family = a.family;
+  // --drafts 1: the lookup and the tool-call fragments, plus Inkling's draft head when its files are there (held in the
+  // engine's 8-bit format: 0.44 GB with its fold); early names from the copied spans
+  if (a.drafts > 0 && !has("--draft")) {
+    struct stat sb1, sb2;
+    const bool ink_head = family == "inkling2_loop" && stat((a.model + "/mtp.safetensors").c_str(), &sb1) == 0 &&
+                          stat((a.model + "/resident.safetensors").c_str(), &sb2) == 0;
+    a.draft = ink_head ? "both" : "lookup";
+  }
+  if (a.drafts > 0 && !has("--early")) a.early = 4;
   CoreOpts co;
   co.threads = a.threads;
   co.readers = a.readers;
   co.split = a.split;
+  if (a.reader_io_low >= 0) co.reader_io_low = a.reader_io_low != 0;
   co.prec = a.prec == "i8" ? Prec::I8 : a.prec == "f16" ? Prec::F16 : Prec::I16;
   co.ref = a.prec == "f32";
   co.cache_gb = a.cache_gb;
@@ -665,8 +725,30 @@ int main(int argc, char** argv) {
     C.force = forced.data();
     C.force_n = hdr[0];
   }
-  if (a.fast_head && a.temp <= 0 && a.teacher.empty() && !M->set_option("fast_head", std::to_string(a.fast_head), err)) return die("model", err);
+  // the screened head: greedy (temperature 0), or a top-k sampler (top-k 1..64: only the exact top-k logits are needed)
+  // the screened head: on by default (Qwen3.6) where it is exact and nothing needs every logit: greedy decoding without
+  // drafting or the verify check, or top-k sampling with k <= 64; --fast-head 0 = the full head, 1 / 2 asked explicitly
+  // (2 also checks every token against the full head)
+  const bool fh_auto = a.fast_head < 0;
+  const bool fh_family = family == "qwen3_5_moe" || family == "inkling2_loop";
+  if (fh_auto) a.fast_head = fh_family ? 1 : 0;
+  const bool fh_greedy_ok = a.temp <= 0 && a.draft == "none" && a.verify_check <= 0 && a.draft_check.empty();
+  bool head_topk = a.fast_head > 0 && a.temp > 0 && a.top_k > 0 && a.top_k <= 64 && fh_family;
+  if (a.fast_head > 0 && (fh_greedy_ok || head_topk) && a.teacher.empty()) {
+    std::string e2;
+    const bool ok = M->set_option("fast_head", std::to_string(a.fast_head), e2) &&
+                    (!head_topk || M->set_option("head_topk", std::to_string(a.top_k), e2));
+    if (!ok && !fh_auto) return die("model", e2);
+    if (!ok) a.fast_head = 0, head_topk = false;  // (default on: the full head where it cannot run, e.g. a mapped resident)
+  } else if (fh_auto) {
+    a.fast_head = 0;
+  }
   if (!a.taps_out.empty() && !M->set_option("taps", "1", err)) return die("model", err);
+  if (a.run_ahead > 0 && !M->set_option("run_ahead", std::to_string(a.run_ahead), err)) return die("model", err);
+  C.ra_budget = a.ra_budget;
+  C.ra_max_tok = a.ra_max;
+  C.ra_sat_skip = a.ra_sat != 0;
+  if (a.run_ahead > 0 && a.run_ahead_depth > 1 && !M->set_option("run_ahead_depth", std::to_string(a.run_ahead_depth), err)) return die("model", err);
   if (a.start_pos > 0 && !M->seek(*S, a.start_pos)) return die("model", "--start-pos is not supported by this model");
   const bool use_lookup = a.draft == "lookup" || a.draft == "fixed" || a.draft == "both";
   const bool use_head = a.draft == "head" || a.draft == "both" || !a.draft_check.empty();
@@ -675,6 +757,7 @@ int main(int argc, char** argv) {
   if (use_head) {  // before the prompt: the head's features are taken from every committed position
     auto th = clk::now();
     if (!M->set_option("draft_ctx", std::to_string(a.ctx), err) || !M->set_option("draft_exact", std::to_string(a.draft_exact), err) ||
+        !M->set_option("draft_q8", std::to_string(a.draft_q8), err) ||
         !M->set_option("draft_head", "1", err))
       return die("draft head", err);
     head_load_s = ms_since(th) / 1000;
@@ -706,12 +789,14 @@ int main(int argc, char** argv) {
   const MemStat m0 = memstat();
   auto& CS = C.cache.st;
   auto& RD = C.cache.rd;
+  uint64_t dt0[7] = {0};
   uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0;
   auto reset_stats = [&]() {
     C.reset_stats();
     M->reset_stats();
     rd_busy0 = RD.busy_ns.load();
     rd_wall0 = RD.busy_wall();
+    RD.depth_times(dt0);
     rd_bytes0 = RD.bytes.load();
     sau0 = RD.spec_inflight_at_urgent.load();
     fskip0 = RD.file_resident_skips.load();
@@ -796,6 +881,11 @@ int main(int argc, char** argv) {
          << ",\"ranker_choices\":" << C.cache.rk_choices << ",\"ranker_shortlist\":" << (double)C.cache.rk_cands / std::max<uint64_t>(1, C.cache.rk_choices)
          << ",\"ranker_evals_per_token\":" << per(C.cache.rk_evals)
          << ",\"wait_miss_ms_per_token\":" << per(CS.wait_ms_miss) << ",\"wait_late_ms_per_token\":" << per(CS.wait_ms_late)
+         << ",\"wait_runnable_ms_per_token\":" << per(CS.wait_ms_runnable)
+         << ",\"expert_spin_thread_ms_per_token\":" << per(C.exp_spin_ns.load() / 1e6)
+         << ",\"expert_calls_jobs_calls_gb_s\":" << C.xc_json()
+         << ",\"rerun_ab_calls_gb_s\":[" << C.rr_calls[0] << "," << C.rr_bytes[0] / std::max(1.0, C.rr_ns[0]) << "," << C.rr_calls[1] << ","
+         << C.rr_bytes[1] / std::max(1.0, C.rr_ns[1]) << "," << C.rr_count.load() << "]"
          << ",\"misses_per_token\":" << per(CS.n_miss) << ",\"cap_borrow_per_token\":" << per(CS.n_cap_borrow) << ",\"late_per_token\":" << per(CS.n_late) << ",\"late_still_queued_per_token\":" << per(CS.n_late_queued)
          << ",\"miss_after_evict_per_token\":" << per(CS.n_miss_evicted) << ",\"miss_after_pf_evict_per_token\":" << per(CS.n_miss_pf_evicted)
          << ",\"pf_cancelled_per_token\":" << per(CS.n_pf_cancelled) << ",\"misses_by_planner_p_per_token\":[";
@@ -808,7 +898,12 @@ int main(int argc, char** argv) {
          << ",\"spec_jobs\":" << RD.njobs[1].load() - j0[1] << ",\"spec_queue_ms\":" << (RD.q_ns[1].load() - q0[1]) / 1e6 / dj(1)
          << ",\"spec_service_ms\":" << (RD.svc_ns[1].load() - s0[1]) / 1e6 / dj(1) << ",\"drive_busy_ms_per_token\":" << per(wall)
          << ",\"drive_gb_s_while_busy\":" << (RD.bytes.load() - rd_bytes0) / 1e9 / std::max(1e-9, wall / 1e3)
-         << ",\"drive_depth\":" << (RD.busy_ns.load() - rd_busy0) / 1e6 / std::max(1e-9, wall) << "}";
+         << ",\"drive_depth\":" << (RD.busy_ns.load() - rd_busy0) / 1e6 / std::max(1e-9, wall);
+      uint64_t dt1[7];
+      RD.depth_times(dt1);
+      js << ",\"reader_idle_ms_per_token\":" << per((dt1[0] - dt0[0]) / 1e6) << ",\"reader_idle_queued_ms_per_token\":" << per((dt1[1] - dt0[1]) / 1e6)
+         << ",\"in_flight_1_2_3_4plus_ms_per_token\":[" << per((dt1[2] - dt0[2]) / 1e6) << "," << per((dt1[3] - dt0[3]) / 1e6) << ","
+         << per((dt1[4] - dt0[4]) / 1e6) << "," << per((dt1[5] - dt0[5]) / 1e6) << "],\"read_bursts_per_token\":" << per((double)(dt1[6] - dt0[6])) << "}";
     }
     {
       const Approx& N = C.ns;
@@ -833,10 +928,33 @@ int main(int argc, char** argv) {
     }
     if (C.hook) js << ",\"" << (plan ? "planner" : a.prefetch == "oracle" ? "oracle" : a.prefetch == "transplant" ? "transplant" : "routers") << "\":" << C.hook->stats_json(C, steps);
     js << ",\"model\":" << M->stats_json(steps);
+    if (C.run_ahead) js << ",\"run_ahead\":" << C.ra_json();
   };
   auto head = [&](const char* mode) {
     js << "{\"engine\":\"dmeng\",\"family\":\"" << family << "\",\"mode\":\"" << mode << "\",\"accuracy\":\"" << a.mode
-       << "\",\"preset\":" << (profiled ? P.json() : std::string("null")) << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
+       << "\",\"preset\":" << (profiled ? P.json() : std::string("null")) << ",\"resolved\":" << [&] {
+            Resolved r;
+            r.profile = profiled ? P.profile : "none";
+            r.mode = a.mode;
+            r.routers = a.prefetch == "router" ? a.routers : "";
+            r.m = a.m;
+            r.tau = a.rt_tau;
+            r.cand = a.rt_cand;
+            r.xtok = a.xtok == "none" ? "" : a.xtok;
+            r.cache_gb = a.cache_gb;
+            r.cache_auto = a.cache_auto;
+            r.evict = a.evict;
+            r.drafts = a.drafts > 0 ? 1 : 0;
+            r.gpu_frac = a.prefill_gpu_frac;
+            r.gpu_experts = a.prefill_gpu_experts;
+            r.run_ahead = a.run_ahead > 0 ? a.run_ahead : 0;
+            r.run_ahead_depth = a.run_ahead_depth;
+            r.ra_budget = a.ra_budget;
+            r.ra_max_tok = a.ra_max;
+            r.ra_sat_skip = a.ra_sat != 0;
+            r.readers = a.readers;
+            return r.json();
+          }() << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
        << "\",\"m\":" << (a.prefetch == "router" ? a.m : 0) << ",\"cache_gb\":" << a.cache_gb << ",\"slots\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.slots(p);
@@ -995,8 +1113,26 @@ int main(int argc, char** argv) {
     dr.o.lookup = a.draft != "head";
     dr.o.max = a.draft_max;
     dr.o.probe_every = a.probe_every;
+    dr.o.gate = a.draft_gate != 0;
+    dr.o.margin = a.draft_margin;
     dr.o.early = a.early;
     const bool head_src = a.draft == "head" || a.draft == "both";
+    LightHeadSource lh;
+    int light_li = -1;  // the last committed position's index in the last pass (-1: a single step)
+    if (!a.draft_light.empty()) {
+      std::string e2;
+      if (!lh.load(a.draft_light, mi.hidden, C.pool.get(), a.draft_light_q8 != 0, e2)) return die("draft light", e2);
+      lh.thr = (float)a.draft_light_thr;
+      if (!a.draft_light_backoff) lh.backoff0 = lh.backoff_max = 0;  // run every step (acceptance measurements)
+      if (!a.draft_light_backoff) lh.gate = false;  // (and every draft: the acceptance per index)
+      lh.est = [&](int n) { return dr.est(n); };
+      lh.vocab_out = VO;
+      lh.hidden = [&]() { return M->final_hidden(light_li); };
+      lh.embed = [&](int32_t t, float* o) { return M->embed_row(t, o); };
+      lh.head = [&](const float* z, float* c) { return M->head_argmax(z, c); };
+      if (!a.draft_light_dump.empty()) lh.dump = fopen(a.draft_light_dump.c_str(), "wb");
+      dr.extra.push_back(&lh);
+    }
     if (head_src) {
       hs.M = M.get();
       hs.thr = (float)a.draft_thr;
@@ -1016,13 +1152,14 @@ int main(int argc, char** argv) {
       dr.skeleton.set(fr);
     }
     std::mt19937_64 rng(a.seed);
-    const bool fast = a.fast_head > 0 && a.temp <= 0;
-    const Want want = fast ? Want::GREEDY : Want::LAST;
+    const bool fast = a.fast_head > 0 && fh_greedy_ok;
+    const Want want = fast ? Want::GREEDY : head_topk ? Want::TOPK : Want::LAST;
     auto tp = clk::now();
     if (a.prefill_chunk > 1) {  // the batched prefill (records not kept)
       std::string e2;
       if (!M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
       if (a.prefill_gpu_frac > 0 && !M->set_option("prefill_gpu_frac", std::to_string(a.prefill_gpu_frac), e2)) return die("prefill", e2);
+      if (a.prefill_gpu_experts > 0 && !M->set_option("prefill_gpu_experts", std::to_string(a.prefill_gpu_experts), e2)) return die("prefill", e2);
       std::vector<int32_t> pid(prompt.begin(), prompt.end());
       M->prefill(*S, pid.data(), (int)pid.size(), true, {}, nullptr, nullptr, nullptr);
     } else {
@@ -1045,23 +1182,38 @@ int main(int argc, char** argv) {
       logits_saved = M->logits();
     }
     reset_stats();  // decode statistics from here on
-    auto next_tok = [&]() { return fast ? M->greedy() : sample(M->logits().data(), VO, a.temp, a.top_k, a.top_p, rng); };
+    // (the greedy head's answer; after a batched prefill the logits come from the full head)
+    auto next_tok = [&]() { return fast && M->greedy() >= 0 ? M->greedy() : sample(M->logits().data(), VO, a.temp, a.top_k, a.top_p, rng); };
     std::vector<int> out{next_tok()};
     std::vector<double> step_ms, step_wait, step_mb, step_hit;
+    double ra_ab_n[2] = {0, 0}, ra_ab_ms[2] = {0, 0}, ra_ab_wait[2] = {0, 0};  // (DMENG_RA_AB) tokens with run-ahead off / on
     std::vector<int> step_n, step_acc;
     const bool drafting = a.draft != "none";
-    if ((drafting || a.verify_check > 0) && (a.temp > 0 || fast)) return die("draft", "greedy decoding with the full head only");
+    if ((drafting || a.verify_check > 0) && fast) return die("draft", "the full head only (no --fast-head)");
+    if (a.verify_check > 0 && a.temp > 0) return die("verify-check", "greedy only");
+    // under sampling, each produced token takes its own draw by index (sample_at): the same tokens as sampled decoding
+    Draws draws(a.seed);
+    if (drafting && a.temp > 0)
+      dr.pick = [&](const float* lg, int i) { return sample_at(lg, VO, a.temp, a.top_k, a.top_p, draws, out.size() + (size_t)i); };
     struct ModelTarget : DraftTarget {
       Model& M;
       State& S;
       ModelTarget(Model& m, State& s) : M(m), S(s) {}
       int pos() const override { return S.pos; }
-      void step(int id) override { M.step(S, id, Want::LAST); }
+      int* li = nullptr;
+      void step(int id) override {
+        M.step(S, id, Want::LAST);
+        if (li) *li = -1;
+      }
       const float* logits() const override { return M.logits().data(); }
       bool verify(const int* ids, int n) override { return M.verify(S, (const int32_t*)ids, n); }
       const float* logits_at(int i) const override { return M.logits_at(i); }
-      void commit(int a2) override { M.commit(S, a2); }
+      void commit(int a2) override {
+        M.commit(S, a2);
+        if (li) *li = a2 - 1;
+      }
     } tgt(*M, *S);
+    tgt.li = &light_li;
     std::string vcheck_json;
     if (a.verify_check > 0) {
       // reference: N single steps from the state after the prompt; then the same tokens through verify passes
@@ -1128,6 +1280,9 @@ int main(int argc, char** argv) {
       if (a.stop_eos >= 0 && out.back() == a.stop_eos) break;
       const double w0 = C.t.wait;
       const uint64_t b0 = C.cache.st.bytes_urgent + C.cache.st.bytes_pf, h0 = C.cache.st.n_hit;
+      static const bool ra_ab = getenv("DMENG_RA_AB") && atoi(getenv("DMENG_RA_AB")) > 0 && C.run_ahead;
+      static uint32_t ra_lcg = 12345;
+      if (ra_ab) ra_lcg = ra_lcg * 1664525u + 1013904223u, C.ra_off = ((ra_lcg >> 16) & 1) == 0;
       auto ts = clk::now();
       int n = 1, acc = 0;
       if (!drafting) {
@@ -1145,6 +1300,7 @@ int main(int argc, char** argv) {
         }
       }
       step_ms.push_back(ms_since(ts));
+      if (ra_ab) ra_ab_n[!C.ra_off] += 1, ra_ab_ms[!C.ra_off] += step_ms.back(), ra_ab_wait[!C.ra_off] += C.t.wait - w0;
       step_wait.push_back(C.t.wait - w0);
       step_mb.push_back((C.cache.st.bytes_urgent + C.cache.st.bytes_pf - b0) / 1e6);
       step_hit.push_back((double)(C.cache.st.n_hit - h0));
@@ -1183,6 +1339,7 @@ int main(int argc, char** argv) {
     js << ",\"start_pos\":" << a.start_pos << ",\"prompt_tokens\":" << prompt.size() << ",\"prefill_s\":" << prefill_s
        << ",\"prefill_tok_s\":" << prompt.size() / prefill_s << ",\"prefill_mb_read\":" << pre_bytes / 1e6 << ",\"prefill_hits\":" << pre_hit
        << ",\"prefill_misses\":" << pre_miss << ",\"prefill_wait_ms\":" << pre_wait_ms << ",\"tokens\":" << out.size();
+    js << ",\"hold_releases\":" << C.n_hold_release << ",\"union_batches\":" << C.n_union_batches;  // phone sizes: pins released, unions in batches
     if (drafting) {
       std::string dj = dr.stats_json();
       if (head_src) {
@@ -1190,11 +1347,18 @@ int main(int argc, char** argv) {
         hj.insert(hj.size() - 1, ",\"load_s\":" + std::to_string(head_load_s));
         dj.insert(dj.size() - 1, ",\"head\":" + hj);
       }
+      if (!a.draft_light.empty()) dj.insert(dj.size() - 1, ",\"light\":" + lh.stats_json());
+      if (lh.dump) fclose(lh.dump), lh.dump = nullptr;
       js << ",\"draft\":" << dj;
     }
     js << vcheck_json;
+    if (ra_ab_n[0] + ra_ab_n[1] > 0)
+      js << ",\"ra_ab\":{\"tokens_off\":" << ra_ab_n[0] << ",\"ms_off\":" << ra_ab_ms[0] / std::max(1.0, ra_ab_n[0]) << ",\"wait_off\":"
+         << ra_ab_wait[0] / std::max(1.0, ra_ab_n[0]) << ",\"tokens_on\":" << ra_ab_n[1] << ",\"ms_on\":" << ra_ab_ms[1] / std::max(1.0, ra_ab_n[1])
+         << ",\"wait_on\":" << ra_ab_wait[1] / std::max(1.0, ra_ab_n[1]) << "}";
     if (a.prefill_chunk > 1) js << ",\"prefill_chunk\":" << a.prefill_chunk;
-    if (a.prefill_chunk > 1 && a.prefill_gpu_frac > 0) js << ",\"prefill_gpu_frac\":" << a.prefill_gpu_frac;
+    if (a.prefill_chunk > 1 && (a.prefill_gpu_frac > 0 || a.prefill_gpu_experts > 0))
+      js << ",\"prefill_gpu_frac\":" << a.prefill_gpu_frac << ",\"prefill_gpu_experts\":" << a.prefill_gpu_experts;
     if (a.state_check) js << ",\"state_check\":{\"fixed_mb\":" << fixed_saved.size() / 1e6 << ",\"pos_mb\":" << pos_saved.size() / 1e6 << ",\"same_ids\":" << (state_same ? "true" : "false") << "}";
     emit_stats(steps, dec_s, step_ms);
     js << "}";

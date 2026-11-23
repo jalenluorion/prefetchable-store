@@ -49,6 +49,10 @@ void xq_prep(XQ& q, const float* x);  // all blocks
 // y[r - r0] = W[r] . x for rows r in [r0, r1). Row r of the codes starts at codes + r * row_bytes.
 void mv_aff4(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQ& x, float* y);
 void mv_aff8(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQ& x, float* y);
+// AFF8 split into nibble planes (weights.h, Weight::AFF8S; rows = the matrix's rows), I16 activations: bit-identical to
+// mv_aff8 on the unsplit bytes.
+void mv_aff8s_i16(const uint8_t* codes, int rows, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQ& x,
+                  float* y);
 void mv_nvfp4(const uint8_t* codes, const uint8_t* scales_e4m3, float gmul, int K, int r0, int r1, const XQ& x, float* y);
 void mv_mxfp8(const uint8_t* codes, const uint8_t* scales_e8m0, int K, int r0, int r1, const XQ& x, float* y);
 void mv_f32(const float* W, int K, int r0, int r1, const float* x, float* y);

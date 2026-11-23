@@ -35,11 +35,11 @@
   "docs_dir" : "<app documents>",
   "engine" : {
     "choice" : "native: -autotest always runs the native engine",
-    "detail" : "native runtime (mlx-swift 0.32.3, MLX core 0.32.3); prefetch, int8 lag-4 routers, cap 18 (auto:720, 720 slots); layout slim; codec: 40 layers .psc; kernels: mlx.metallib (-fno-fast-math): \/var\/containers\/Bundle\/Application\/2BB2EE52-33B3-4BAC-AE25-3C1CC8C26DE4\/PhoneStoreApp.app\/mlx.metallib",
+    "detail" : "native runtime (mlx-swift 0.32.3, MLX core 0.32.3); prefetch, int8 lag-4 routers, cap 18 (auto:720, 720 slots); layout slim; codec: 40 layers .psc; kernels: mlx.metallib (-fno-fast-math): <app bundle>\/PhoneStoreApp.app\/mlx.metallib",
     "is_stub" : false,
     "load_log" : [
       "tokenizer + chat template from model\/",
-      "kernels: mlx.metallib (-fno-fast-math): \/var\/containers\/Bundle\/Application\/2BB2EE52-33B3-4BAC-AE25-3C1CC8C26DE4\/PhoneStoreApp.app\/mlx.metallib",
+      "kernels: mlx.metallib (-fno-fast-math): <app bundle>\/PhoneStoreApp.app\/mlx.metallib",
       "weights loaded: resident 1.10 GB + routers 0.33 GB; phys_footprint 0.176 -> 1.601 GB (+1.424), resident pages +1.377 GB (file-backed +-0.021)",
       "loaded in 2.6s",
       "ready in 2.9s: prefetch, cap 18, 2.75 GB planned, layout slim",
@@ -57,7 +57,7 @@
       "history" : "strict template: transformers' bytes; follow-ups re-prefill the previous answer",
       "keep" : "31",
       "kernel warm-up" : "off (token-by-token prefill)",
-      "kernels" : "mlx.metallib (-fno-fast-math): \/var\/containers\/Bundle\/Application\/2BB2EE52-33B3-4BAC-AE25-3C1CC8C26DE4\/PhoneStoreApp.app\/mlx.metallib",
+      "kernels" : "mlx.metallib (-fno-fast-math): <app bundle>\/PhoneStoreApp.app\/mlx.metallib",
       "layout" : "slim",
       "memory plan" : "2.75 GB (resident 1.10 + routers 0.33 + slabs 1.27 + codec staging 0.04)",
       "mode" : "prefetch",

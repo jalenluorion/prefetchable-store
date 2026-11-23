@@ -128,7 +128,7 @@ Python dependence left: the whole front end (`python/serve/dmserve.py`: HTTP, th
 template via `jinja2`, the response parsing); the C++ worker needs no Python. Removing it needs a C++ HTTP layer, a BPE
 tokenizer and a Jinja subset in C++: not done.
 
-## Commands (from the worktree root; every model command goes through `bench/serving/slot.sh LOG TIMEOUT cmd...`)
+## Commands (from the repository root; every model command goes through `bench/serving/slot.sh LOG TIMEOUT cmd...`)
 
 Build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4`. Python: `../../.venv/bin/python`
 (local/flash/.venv: `tokenizers`, `jinja2`); the format gate needs transformers (`local/inkling/.venv`).

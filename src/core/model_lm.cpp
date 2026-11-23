@@ -72,8 +72,25 @@ bool ModelLM::prefill(const int* ids, int n, float* logits, const std::vector<in
 
 void ModelLM::step(int id, float* logits) {
   dec_steps_++;
-  m_.step(s_, id, logits ? Want::LAST : Want::NONE);
+  m_.step(s_, id, !logits ? Want::NONE : head_k_ == 1 ? Want::GREEDY : head_k_ > 1 ? Want::TOPK : Want::LAST);
   if (logits) std::memcpy(logits, m_.logits().data(), sizeof(float) * inf_.vocab);
+}
+
+bool ModelLM::enable_screened_head(std::string& err) {
+  if (screened_) return true;
+  // a family without a top-k screened head refuses head_topk (asked first: its greedy-only fast head is not built)
+  if (!m_.set_option("head_topk", "1", err) || !m_.set_option("fast_head", "1", err)) return false;
+  screened_ = true;
+  return true;
+}
+
+int ModelLM::set_head_k(int k) {
+  if (!screened_ || k < 1 || k > 64) return head_k_ = 0;
+  if (k > 1) {
+    std::string e;
+    if (!m_.set_option("head_topk", std::to_string(k), e)) return head_k_ = 0;
+  }
+  return head_k_ = k;
 }
 
 bool ModelLM::verify(const int* ids, int n) { return m_.verify(s_, (const int32_t*)ids, n); }

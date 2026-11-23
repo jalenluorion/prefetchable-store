@@ -2,6 +2,7 @@
 // embedding rows read from disk, row phases (several matrices in one fork-join) and the small numeric helpers every
 // model uses. Nothing here knows which model runs.
 #pragma once
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -32,7 +33,8 @@ Mem mem_of(const std::string& s);  // "plain" | "mlock" | "purgeable" | "file"
 // ---------------------------------------------------------------------------------------------- weights
 // One matrix [rows = outputs, cols = inputs] over stored bytes. The quantised kinds share the kernels' Fmt numbering.
 struct Weight {
-  enum Kind : int { NONE = -1, AFF4 = 0, AFF8 = 1, NVFP4 = 2, MXFP8 = 3, BF16 = 4, F32 = 5 };
+  // AFF8S: AFF8 with its code bytes split into nibble planes in place (aff8s_split; the screened head, screen_head.h)
+  enum Kind : int { NONE = -1, AFF4 = 0, AFF8 = 1, NVFP4 = 2, MXFP8 = 3, BF16 = 4, F32 = 5, AFF8S = 6 };
   Kind kind = NONE;
   int rows = 0, cols = 0;
   const uint8_t* c = nullptr;  // codes (quantised kinds)
@@ -40,13 +42,31 @@ struct Weight {
   const void* b = nullptr;     // fp16 biases (affine)
   const void* w = nullptr;     // bf16 or f32 values
   float gmul = 1.f;            // NVFP4 per-matrix global multiplier
-  bool quantised() const { return kind >= AFF4 && kind <= MXFP8; }  // needs a prepared XQ input
+  int srows = 0;               // AFF8S: the rows the split was laid out for (a view may cut rows; the layout keeps these)
+  bool quantised() const { return (kind >= AFF4 && kind <= MXFP8) || kind == AFF8S; }  // needs a prepared XQ input
   size_t bytes() const;                                             // bytes a full pass reads
 };
 
 // y[r - r0] = W[r] . x for rows [r0, r1). Quantised kinds read the prepared xq; bf16 / f32 read the fp32 xf.
 // ref = the exact reference path (fp32 activations, scalar kernels) for AFF8 / NVFP4 / MXFP8 when xf is given.
 void mv(const Weight& w, int r0, int r1, const XQ* xq, const float* xf, float* y, bool ref = false);
+
+// AFF8S, the split 8-bit layout: the same bytes as AFF8, regrouped in blocks of 64 rows (the last block may be shorter).
+// A block of n rows holds the n rows' high nibbles (n x cols/2 bytes), then their low nibbles (n x cols/2). In a row's
+// plane each 64-input group is 32 bytes: byte j (0..15) = elements j (low nibble) and 16 + j (high nibble), byte 16 + j
+// = elements 32 + j and 48 + j. Scales and biases are untouched. A pass over the high planes alone reads half the codes.
+// aff8s_split turns an AFF8 matrix into AFF8S in place (its memory must be writable); aff8s_rows writes rows [r0, r1)
+// back as AFF8 bytes; aff8s_view gives an AFF8 view of those rows (rows 0 .. r1 - r0 of the view = rows r0 .. r1).
+bool aff8s_split(Weight& w, Pool& pool, std::string& err);
+void aff8s_rows(const Weight& w, int r0, int r1, uint8_t* out);
+Weight aff8s_view(const Weight& w, int r0, int r1, std::vector<uint8_t>& buf);
+inline const uint8_t* aff8s_hi(const Weight& w, int r) {
+  return w.c + (size_t)(r & ~63) * w.cols + (size_t)(r & 63) * (w.cols / 2);
+}
+inline const uint8_t* aff8s_lo(const Weight& w, int r) {
+  const int b0 = r & ~63, nb = w.srows - b0 < 64 ? w.srows - b0 : 64;
+  return w.c + (size_t)b0 * w.cols + (size_t)(nb + (r & 63)) * (w.cols / 2);
+}
 
 // exact reference kernels (fp32 activations)
 void kref_aff8(const Weight& w, int r0, int r1, const float* x, float* y);
@@ -124,6 +144,13 @@ struct Job {
   float* out;
 };
 void run_rows(Pool& pool, const Job* jobs, int n, int chunk, bool ref = false, double* bytes = nullptr);
+// Run-ahead (core.h): while set, the row phases stop claiming rows once *g_rows_stop reaches 0 (the read the step waits
+// for has landed); the rows left out are garbage, which the run-ahead throws away. Null (the default): no effect.
+extern std::atomic<const std::atomic<int>*> g_rows_stop;
+inline bool rows_stop() {
+  const std::atomic<int>* w = g_rows_stop.load(std::memory_order_relaxed);
+  return w && w->load(std::memory_order_relaxed) == 0;
+}
 // The same with the inputs' quantisation inside the fork-join: nq inputs xs[i] (Ks[i] values) into qs[i] block by block
 // (xq_block, the blocks XBuf::prep would do), then the rows, each row chunk once every block is done (a counter): the
 // serial prep before a row phase becomes part of it. The quantised bytes and the rows are XBuf::prep's and run_rows'.
@@ -146,6 +173,7 @@ struct JobN {
   const float* const* xf;  // [n] fp32 inputs
   float* const* out;     // [n] outputs (rows written at out[i] + r)
   const XQB* xb = nullptr;  // the same inputs packed (optional)
+  int r0 = 0, r1 = -1;      // rows [r0, r1) only (r1 < 0: to the last row; a GPU split computes the rest)
 };
 void run_rows_n(Pool& pool, const JobN* jobs, int nj, int chunk, bool ref = false, double* bytes = nullptr);
 
@@ -174,5 +202,17 @@ inline float bf16_to_f32(uint16_t v) {
   __builtin_memcpy(&f, &b, 4);
   return f;
 }
+
+// bf16 [R, K] (K % 64 == 0) to the engine's 8-bit in-memory format (AFF8: codes [R, K] u8, scale / offset [R, K / 64]
+// fp16, x ~= s c + b with b = the group's min and s = (max - min) / 255, both rounded to fp16 before the codes are taken)
+void quant_aff8(Pool& pool, const uint16_t* w, int R, int K, uint8_t* codes, _Float16* scales, _Float16* biases);
+// An AFF8 matrix holding its own memory, made from bf16 rows (in-memory weights loaded from bf16 files: draft heads)
+struct OwnedAff8 {
+  std::vector<uint8_t> c;
+  std::vector<_Float16> s, b;
+  Weight w;
+  void from_bf16(Pool& pool, const uint16_t* bf16, int R, int K);
+  size_t bytes() const { return c.size() + 2 * (s.size() + b.size()); }
+};
 
 }  // namespace dm

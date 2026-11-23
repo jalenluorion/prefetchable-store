@@ -202,6 +202,43 @@ static bool emb_offset(const Manifest& m, int64_t& off, std::string& err) {
 
 static std::string I(int64_t v) { return std::to_string(v); }
 
+bool Manifest::apply_profile_experts(const std::string& profile, std::string& err) {
+  if (profile.empty()) return true;
+  const Json& ex = raw["profiles"][profile]["experts"];
+  if (ex.is_null()) return true;
+  if (!ex["layer_format"].is_null()) {
+    if ((int64_t)ex["layer_format"].size() != physical_layers) {
+      err = "profiles." + profile + ".experts.layer_format: one id per physical layer";
+      return false;
+    }
+    layer_format.clear();
+    for (auto& x : ex["layer_format"].arr) {
+      if (!format(x.s())) {
+        err = "profiles." + profile + ".experts.layer_format: unknown record format " + x.s();
+        return false;
+      }
+      layer_format.push_back(x.s());
+    }
+  }
+  if (!ex["layer_files"].is_null()) {
+    layer_paths.clear();
+    for (int L = 0; L < physical_layers; L++) {
+      char b[512];
+      snprintf(b, sizeof b, layer_file_printf().c_str(), L);
+      layer_paths.push_back(b);
+    }
+    for (auto& kv : ex["layer_files"].obj) {
+      const int L = atoi(kv.first.c_str());
+      if (L < 0 || L >= physical_layers) {
+        err = "profiles." + profile + ".experts.layer_files: no layer " + kv.first;
+        return false;
+      }
+      layer_paths[L] = kv.second.s();
+    }
+  }
+  return true;
+}
+
 bool Manifest::engine_cfg(Cfg& out, std::string& err) const {
   out.clear();
   int64_t eoff;
@@ -324,6 +361,11 @@ bool Manifest::engine_cfg(Cfg& out, std::string& err) const {
            {"emb_off", I(eoff)},
            {"layer_file", layer_file_printf()},
            {"eos", config.get("eos_token_id") ? py_str(config["eos_token_id"]) : "-1"}};
+    if (!layer_paths.empty()) {  // a profile's own record files (apply_profile_experts): ';'-joined, one per layer
+      std::string lp;
+      for (auto& p : layer_paths) lp += (lp.empty() ? "" : ";") + p;
+      out.push_back({"layer_paths", lp});
+    }
     for (auto& f : formats) {
       std::string tag = f.kind == "nvfp4" ? "nv" : "mx";
       const MatrixLayout *gu = f.matrix("gate_up"), *dn = f.matrix("down");

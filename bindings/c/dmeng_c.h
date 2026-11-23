@@ -107,7 +107,8 @@ typedef struct dm_open_opts {
   double plan_u;           /* planner: the drive-load target of rule 1; 0 = 0.9 */
   int reader_qos;          /* DM_QOS_* + 1 of the reader threads; 0 = user-initiated (default) */
   double router_tau;       /* fixed routers: > 0 = name the top router_cand whose calibrated probability >= tau (the
-                              confidence rule) instead of a fixed top router_m; 0 = off */
+                              confidence rule) instead of a fixed top router_m; 0 = the profile's; < 0 = off (a plain top
+                              router_m whatever the profile) */
   int router_cand;         /* candidates of the confidence rule; 0 = 16 */
   int split;               /* pieces per record read; 0 = 1 */
   const char* mode;        /* NULL = the profile's; "exact" (= "lossless") or "fast" (= "approx:drop", approximate: tokens
@@ -124,9 +125,40 @@ typedef struct dm_open_opts {
   const char* profile;     /* NULL / "" / "auto" = from the device; "mac", "phone", "phone-small"; "none" = no profile */
   const char* xtok;        /* cross-token routers (engine file): NULL = the profile's (Inkling: source 47, with priority
                               reads), "none" = off */
+  const char* model_options; /* "name=value;name=value": the model's own options (Model::set_option), applied after load;
+                              NULL = none (iOS: prefill_release=1, the batched prefill's scratch freed after each prompt) */
+  /* Batched prefill split with the GPU (Metal; exact: the GPU's rows are the CPU kernels' bits, so tokens do not
+   * change). The GPU computes this share of each matrix's rows while the CPU computes the rest, for prefill sub-chunks
+   * of at least prefill_gpu_min positions. 0 = the profile's share (mac: 0.4 and 0.4 for both models;
+   * every other profile: CPU only), < 0 = CPU only. Builds without Metal refuse > 0 (the profile's is 0 there). */
+  double prefill_gpu_frac;    /* attention projections (8- or 4-bit resident) */
+  double prefill_gpu_experts; /* experts' products: routed experts in a locked / plain slab, and the shared expert */
+  int prefill_gpu_min;        /* 0 = 256 */
+  int prefill_gpu_int_kernel; /* 0 = the matrix-unit kernel (default), 1 = the integer kernel (the same bits; slower) */
+  int prefill_gpu_min_wave;   /* a wave of landed experts uses the GPU from this many (position, expert) pairs; 0 = 128 */
+  int run_ahead;              /* run-ahead while a step waits on reads: the picks it names; 0 = the profile's (mac: 8;
+                                 phones: off), < 0 = off */
+  int run_ahead_depth;        /* its depth in layers; 0 = the profile's (1) */
+  double run_ahead_budget;    /* its speculative ms per token at most this x the running-average compute per token;
+                                 0 = the profile's (phones, exact: 0.2), < 0 = no limit */
+  int run_ahead_max;          /* at most this many run-aheads per token; 0 = the profile's, < 0 = no limit */
+  int run_ahead_sat_skip;     /* 1: no run-ahead while every reader has a read in flight and reads wait behind them;
+                                 0 = the profile's (phones, exact: on), < 0 = off */
+  int run_ahead_ab;           /* measurement: 1 = run-ahead skipped or allowed token by token in this process (a fixed
+                                 pseudo-random choice per dm_step, dmeng's DMENG_RA_AB), the two arms in dm_stats_json
+                                 "ra_ab" (tokens, ms, wait and MB read per token each) */
+  int reader_io_low;          /* the reader threads' disk I/O one tier below the app's (IOPOL_STANDARD; CPU QoS unchanged):
+                                 0 = the platform's default (on on iOS: the UI's page-ins go first; off on macOS), 1 = on,
+                                 -1 = off */
 } dm_open_opts;
 
 void dm_default_opts(dm_open_opts* o);
+
+/* The prefill GPU split's self-test on this device (no model): both GPU kernels against the CPU kernels bit for bit,
+ * then rates (GMAC/s) of each GPU kernel alone, the CPU's 4-bit batched kernel alone on `threads`, and both at once.
+ * About 8 x seconds. JSON: "exact" true/false, "rates_gmacs" {...}; {"gpu":false} without a GPU. The string is valid
+ * until the next call on the same thread. */
+const char* dm_gpu_check(int threads, double seconds);
 
 /* Open a moved-store model folder (moved-store.json, store/, resident or derived files, routers/). NULL on failure;
  * the reason is in dm_last_error(NULL). */
@@ -159,8 +191,10 @@ typedef struct dm_sync_result {
 } dm_sync_result;
 
 /* Bring the live state to ids[0..n) with the least recomputation (live prefix, checkpoint, parked sequence, disk copy,
- * else cold), and write the logits after ids[n-1] (vocab floats; logits may be NULL). marks[0..nmarks): positions
- * (1..n) where a message ends (checkpoint candidates; the first >= 1024 is the disk prefix). Returns DM_ECANCELLED if
+ * else cold), and write the logits after ids[n-1] (vocab floats). logits NULL = state only (an idle-time prefix the next
+ * call extends: a saved state at n itself is restored whole, no position recomputed; dm_step must not follow until a
+ * dm_sync with logits). marks[0..nmarks): positions (1..n) where a message ends (checkpoint candidates; the first >=
+ * disk_min is the disk prefix, its file pinned). dm_persist(pos) at the live end (after decode) checkpoints it first. Returns DM_ECANCELLED if
  * dm_cancel stopped it (within one layer); the state is then consistent at dm_info's pos. */
 int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int nmarks, float* logits,
             dm_progress_fn progress, void* user, dm_sync_result* res);
@@ -174,6 +208,9 @@ const char* dm_last_prefill_json(dm_engine* e);
 /* Stop the running dm_sync (within one layer) or make the next dm_sync / dm_step return DM_ECANCELLED at once; the
  * request is consumed by the call that returns DM_ECANCELLED. Any thread. */
 void dm_cancel(dm_engine* e);
+/* Drop a cancel that found no dm_sync / dm_step to stop (dm_cancel is sticky until the next call consumes it): a caller
+ * that cancels background work (an idle-time prefix) queues this after the cancel, before its next real call. */
+void dm_cancel_clear(dm_engine* e);
 /* Write the disk copy of the live sequence's prefix [0, pos) if pos is a checkpointed position. */
 int dm_persist(dm_engine* e, int pos);
 

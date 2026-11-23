@@ -24,7 +24,42 @@ struct Preset {
   bool rd_prio = false;            // speculative reads by priority (with the cross-token names)
   std::string evict = "auto";
   bool drafts = false;
+  // the batched prefill's exact CPU + GPU split (Metal builds): shares of the attention projections' and the experts'
+  // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for both models, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)
+  double gpu_frac = 0, gpu_experts = 0;
+  // run-ahead while a step waits on reads (exact: names only): the picks it names (0 = off) and its depth in layers
+  // (the mac profile of both models: 8 at depth 1, results/parity/PARITY.md; the phone profiles: off)
+  int run_ahead = 0, run_ahead_depth = 1;
+  // its limits (Core::ra_budget / ra_max_tok / ra_sat_skip; built-in: no limit, no skip): speculative ms per token at
+  // most budget x the token's compute, at most max_tok run-aheads per token, none while every reader is busy
+  double ra_budget = 0;
+  int ra_max_tok = 0;
+  bool ra_sat_skip = false;
+  // (a profile's run_ahead may list "modes": on only in those; the phones: exact)
+  int readers = 0;  // reader threads (0 = the front end's default; the phones: 8)
   std::vector<std::string> notes;  // defaults that did not resolve, fallbacks taken
+  std::string json() const;
+};
+
+// Precedence, in every front end (dmeng, dmserve, the C API): an option given explicitly > the profile > the manifest's
+// defaults > the built-in values. The names rule: an explicit m without an explicit tau is a plain top m (the profile's
+// confidence rule does not replace it); an explicit tau > 0 is the confidence rule, tau <= 0 a plain top m. The
+// resolved tau is -1 for a plain top m (Routers::tau = 0 would name every candidate).
+void names_rule(const Preset& p, bool profiled, bool m_given, int m, bool tau_given, double tau, bool cand_given, int cand, int& m_out,
+                double& tau_out, int& cand_out);
+
+// The settings a run actually uses after that precedence, written under "resolved" in every run's JSON (dmeng --json,
+// dmserve's READY line, dm_stats_json), so an option silently replaced by a default shows.
+struct Resolved {
+  std::string profile, mode, routers, xtok, evict;  // mode: the engine's mode string; routers / xtok: "" = none
+  int m = 0, cand = 0, drafts = 0;
+  double tau = -1, cache_gb = 0, gpu_frac = 0, gpu_experts = 0;  // tau as the routers use it: >= 0 the confidence rule
+  int run_ahead = 0, run_ahead_depth = 1;                         // picks named by the run-ahead (0 = off), its depth
+  double ra_budget = 0;                                           // its limits (0 / 0 / false: none)
+  int ra_max_tok = 0;
+  bool ra_sat_skip = false;
+  int readers = 0;
+  bool cache_auto = false;
   std::string json() const;
 };
 

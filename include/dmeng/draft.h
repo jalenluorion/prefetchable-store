@@ -17,12 +17,16 @@
 //                 positions used, for the step's positions and `early` positions past them.
 #pragma once
 #include <array>
+#include <cstdio>
+#include <functional>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "dmeng/weights.h"
 
 namespace dm {
 
@@ -141,6 +145,73 @@ class HeadSource : public DraftSource {
   std::vector<float> prob_;  // the last proposal's probabilities
 };
 
+// A light draft head trained outside the engine (the 35B's: jobs/babel/q36_draft_head.py; model-agnostic). From the
+// post-norm final hidden state h_t of the last committed position and the token just chosen from it:
+//   z_0 = h_t; for draft offset j = 1..ND: u = [rmsnorm(z_{j-1}) * norm_z_j, rmsnorm(e_j) * norm_e_j] (fp32, eps 1e-6),
+//   z_j = z_{j-1} + down_j(silu(up_j(u))), e_1 = the embedding row of the token chosen from h_t, e_j = that of draft j-1;
+//   logits_j = vocab . (proj . z_j) (low rank: proj [R, D], vocab [V, R]) or the model's own output head over z_j
+//   ("full": Model::head_argmax, the screened greedy head); draft j = argmax (first index on ties), its confidence =
+//   max softmax. Drafts stop at the first whose confidence is below thr.
+// File: safetensors, bf16, names mlp.{j}.{norm_z,norm_e}.weight [D], mlp.{j}.up.{weight [H, 2D], bias [H]},
+// mlp.{j}.down.{weight [D, H], bias [D]}, proj.weight [R, D] and vocab.weight [V, R] (low rank only). Held in the
+// engine's 8-bit format (q8, default) or as bf16 values in fp32 (the reference check); drafts only propose.
+class LightHeadSource : public DraftSource {
+ public:
+  static constexpr int NB = 6;
+  LightHeadSource() { timed = true; }
+  // path: the safetensors file; D must be the model's hidden size
+  bool load(const std::string& path, int D, Pool* pool, bool q8, std::string& err);
+  std::function<const float*()> hidden;             // h_t of the last committed position (null: no proposal)
+  std::function<bool(int32_t, float*)> embed;       // the embedding row of a token
+  std::function<int(const float*, float*)> head;    // "full" variants: the model's head over z -> argmax, *conf
+  float thr = 0.f;
+  int vocab_out = 0;                                // rows that count for the argmax (0: all)
+  const char* name() const override { return "light"; }
+  int buckets() const override { return NB; }
+  bool propose(const std::vector<int32_t>& hist, int max, Draft& d) override;
+  void feedback(int offered, int accepted) override;
+  // its own cost (ms per call, every draft through the output layer) is paid whether or not a pass runs: it is not run
+  // while an earlier source's offer is chosen, nor while backed off (after a call whose draft did not run, kept nothing,
+  // or made the step slower per token than a plain step: backoff0 steps, doubling to backoff_max)
+  bool ask(const std::vector<int32_t>& hist, double best_gain) override;
+  void outcome(const DraftCtl& ctl, int l, double gain, bool chosen, int accepted, double step_ms) override;
+  int backoff0 = 32, backoff_max = 256;
+  long lost = 0, skipped_backoff = 0, skipped_earlier = 0;
+  bool gate = true;                       // confidence-gated width (more()); false: every draft up to the max
+  std::function<double(int)> est;         // the controller's estimated ms of a pass of n positions (Drafter::est)
+  // the drafts of one call, for checks: from h and the chosen token, up to max (no threshold)
+  int run(const float* h, int32_t tok, int max, int32_t* out, float* conf);
+  int ND = 0, D = 0, H = 0, R = 0, V = 0;
+  bool lowrank = false, q8 = true;
+  FILE* dump = nullptr;  // every run: pos i32 (hist index of tok), h [D] f32, tok i32, n i32, drafts i32 [ND], confidences f32 [ND]
+  size_t weight_bytes() const;
+  std::string stats_json() const;
+  long runs = 0, offers = 0, drafts = 0, kept = 0, n_drafts_run = 0, dump_pos = -1;
+  double ms = 0, ms_embed = 0, ms_mlp = 0, ms_out = 0;  // per call / per draft: the embedding row, the MLP, the output layer
+  double cal[NB] = {0.40, 0.55, 0.65, 0.78, 0.88, 0.96};  // acceptance per confidence bin (learned)
+  static int bin(double p);
+
+ private:
+  struct Step {
+    std::vector<float> nz, ne, ub, db;
+    std::vector<uint16_t> up16, dn16;  // bf16 (q8 off)
+    OwnedAff8 up, dn;
+  };
+  std::vector<Step> st_;
+  std::vector<uint16_t> proj16_, vocab16_;
+  OwnedAff8 proj_, vocab_;
+  Pool* pool_ = nullptr;
+  XBuf xu_, xa_, xz_, xr_;
+  std::vector<float> z_, e_, u_, a_, r_, lg_;
+  std::vector<float> last_conf_;
+  long now_ = 0, backoff_ = -1, until_ = 0, first_declined_ = 0, declined_seen_ = 0, stopped_early_ = 0;
+  double acc_n_[8][NB] = {{0}}, acc_k_[8][NB] = {{0}};  // decayed counts of drafts verified / kept, per index and bin
+  double q_of(int j, float c) const;
+  bool more(int nd, const float* conf);
+  void vocab_rows(int vo, int* id, float* conf);
+  void mat(const OwnedAff8& q, const std::vector<uint16_t>& b16, int rows, int cols, XBuf& xb, const float* x, float* y);
+};
+
 // The model the drafter runs on (dmeng: the Model and its State; dmserve: the prefix cache's live sequence).
 struct DraftTarget {
   virtual ~DraftTarget() {}
@@ -150,6 +221,7 @@ struct DraftTarget {
   virtual bool verify(const int* ids, int n) = 0;   // n positions in one pass; logits_at(i) after position i
   virtual const float* logits_at(int i) const = 0;
   virtual void commit(int a) = 0;                   // keep the first a positions of the last verify
+  virtual const float* hidden() const { return nullptr; }  // post-norm final hidden of the last committed position
 };
 
 struct DraftCtl {
@@ -178,6 +250,21 @@ struct DraftOpts {
   int probe_every = 48;
   int early = 0;              // early names for the step's positions and this many past them (0: off)
   bool lookup = true;         // the lookup source (off: only the skeleton and the extra sources draft)
+  bool gate = true;           // the cost model from per-pass counters (WidthStat); off: the cost ratio table alone (the earlier rule)
+  double margin = 0.05;       // a draft runs only when its estimated time per token beats a plain step's by this share
+};
+
+// Per-pass counters for passes of one width (n positions; n = 1: plain steps). The controller's estimate of a pass of n
+// positions is c1 x rho(n) + wait(n) + next(n): c1 = a plain step's compute (wall minus waits, the timed sources' own time
+// left out), rho(n) = the pass's compute over c1 at the time (a ratio, so a busy machine slows both alike), wait(n) = the
+// pass's wait for reads (measured per width; for a width not measured yet, its urgent MB from the measured widths' slope
+// times the passes' wait per urgent MB), next(n) = the wait of the plain step after it beyond a plain step's (what the
+// pass left the next step to read). A plain step is c1 + wait(1), wait(1) from plain steps that follow plain steps.
+struct WidthStat {
+  long n = 0, tokens = 0;
+  double rho = -1, wait = -1, urg = -1;  // plain steps: decayed means (wait ms, urgent MB); passes: the last pass's
+  double s_cmp = 0, s_wait = 0, s_urg = 0, s_tot = 0;  // sums (statistics): compute ms, wait ms, urgent MB, total MB (urgent + named)
+  double d_n = 0, d_wait = 0, d_urg = 0, d_cmp = 0, d_ref = 0, d_tot = 0;  // decayed sums (plain steps: wait, urgent MB; passes: compute, c1 at the time, wait)
 };
 
 class Drafter {
@@ -189,6 +276,10 @@ class Drafter {
   DraftCtl ctl;
   Core* core = nullptr;                  // for early names (null: none)
   Core* reads = nullptr;                 // the read counters per kind of step (null: not kept)
+  // the token the model produces from a position's logits; i = its index among this step's outputs (0 .. accepted).
+  // Unset: greedy (argmax). Sampling: the release sampler with that token's own draw (sample_at), so a draft is kept
+  // exactly when it equals the token sampled decoding would give there.
+  std::function<int(const float* lg, int i)> pick;
   std::vector<int16_t> pick_log;         // every position's released picks (Core::pick_log points here with early on)
   // init after the options are set: family = the model family (the cost prior)
   void init(const std::string& family, Core* c);
@@ -201,13 +292,26 @@ class Drafter {
   // statistics
   long steps = 0, tokens = 0, verifies = 0, drafted = 0, acc_total = 0;
   long by_n[DraftCtl::DMAX + 1] = {0}, by_src_steps[4] = {0}, by_src_acc[4] = {0};
-  long early_names = 0, early_cancelled = 0;
+  long early_names = 0, early_cancelled = 0, prenamed = 0, explored = 0, probes_held = 0;
   // reads by kind of step, [0] plain steps, [1] verify passes: steps, tokens produced, on-the-spot reads (misses), picks
   // late (named, still in flight), bytes read on the spot / by names
   double rd_steps[2] = {0, 0}, rd_tok[2] = {0, 0}, rd_miss[2] = {0, 0}, rd_late[2] = {0, 0}, rd_urg[2] = {0, 0}, rd_pf[2] = {0, 0},
          rd_pos[2] = {0, 0};
   int last_n = 1;  // positions of the last step's pass
   double ms_steps = 0;
+  // the cost model
+  WidthStat ws[DraftCtl::DMAX + 1];
+  double c1 = 0;                // a plain step's compute ms (running)
+  long plain_n = 0;
+  double est(int n) const;      // estimated ms of a pass of n positions (1: a plain step)
+  struct Fit {                  // decayed least squares of y = a + b x
+    double sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+    void add(double x, double y, double dec) { sw = dec * sw + 1, sx = dec * sx + x, sy = dec * sy + y, sxx = dec * sxx + x * x, sxy = dec * sxy + x * y; }
+    bool solve(double a0, double b0, double pw, double& a, double& b) const;
+  };
+  Fit f_rho, f_urg, f_wait;     // passes: compute / c1 - 1, urgent MB and wait ms against n - 2
+  double k_wait = 0, k_urg = 0; // passes: decayed wait ms and urgent MB
+  double nx_s = 0, nx_w = 0;    // the plain step after a pass: decayed excess wait
   void reset_stats();
   std::string stats_json() const;
 
@@ -215,6 +319,18 @@ class Drafter {
   std::vector<DraftSource*> srcs_;
   std::map<std::pair<long, long>, std::vector<std::array<int, 3>>> ea_held_;
   void early(const Draft& d, int L, long p);
+  double rho0_[DraftCtl::DMAX + 1] = {0};  // the family's prior compute ratios
+  int pend_n_ = 0;
+  bool last_full_ = false;  // the last pass kept every draft
+  // the probe budget (ms, MB): 1% of every step's cost, minus what probes / explorations / names ahead cost beyond plain
+  // steps, plus chosen passes' gains; a probe runs only when it can afford losing all but its first token
+  double pb_ms = 0, pb_mb = 0, pb_xb = -1;
+  bool gamble_ = false;
+  bool probe_ok(int l) const;
+  long explore_ = 0;      // the previous step's pass width (> 1: its next-step excess is measured now)
+  bool prev_pass_ = false;
+  long gen_steps_ = 0;  // steps run (never reset; the first two are not measured)
+  void measure(int n, int tok, double cmp, double wait, double urg, double tot);
 };
 
 }  // namespace dm

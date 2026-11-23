@@ -3,6 +3,7 @@
 
   python python/derive/inkling2_loop_routers.py RUN --dir MODEL_DIR/routers [--bits 8|4]
   -> local/inkling/model/routers/<run>/ink_router_full_k<k>_h<H>_b<bits>.dmr for every ink_router_full_*_fp16.npz there
+     (and ink_router_lin_k<k>_b<bits>.dmr for every ink_router_lin_*_fp16.npz: the linear path only, hidden_mlp 0, no m2)
 
 Router a (one per application, 48) on x = [rmsnorm_w(emb), h_prev@a, h@(a-k)] (emb = the model's embed_tokens output, which in
 transformers PR 51050 is embed_norm(embedding); h = MoE-block inputs; a < k: no third block): z = lin(x) + mlp.2(gelu(mlp.0(x))).
@@ -61,8 +62,8 @@ ap.add_argument("--bits", type=int, default=8, choices=[4, 8])
 ap.add_argument("--dir", required=True)
 a = ap.parse_args()
 D = os.path.join(a.dir, a.run)
-files = sorted(glob.glob(os.path.join(D, "ink_router_full_*_fp16.npz")))
-assert files, f"no ink_router_full_*_fp16.npz in {D}"
+files = sorted(glob.glob(os.path.join(D, "ink_router_full_*_fp16.npz")) + glob.glob(os.path.join(D, "ink_router_lin_*_fp16.npz")))
+assert files, f"no ink_router_full_*_fp16.npz or ink_router_lin_*_fp16.npz in {D}"
 for f in files:
     z = np.load(f)
     lag, hid, na = int(z["__lag__"]), int(z["__hidden__"]), int(z["__n_apps__"])
@@ -89,7 +90,8 @@ for f in files:
 
     for r in range(na):
         p = f"{r}."
-        lw, l0 = z[p + "lin.weight"].astype(np.float32), z[p + "mlp.0.weight"].astype(np.float32)
+        lw = z[p + "lin.weight"].astype(np.float32)
+        l0 = z[p + "mlp.0.weight"].astype(np.float32) if hid > 0 else np.zeros((0, lw.shape[1]), np.float32)  # linear: no MLP rows
         n_in = lw.shape[1]
         assert n_in in (2 * H, 3 * H) and (n_in == 3 * H) == (r >= lag), (r, n_in)
         stacked = np.concatenate([lw, l0], 0)  # [NE + hid, n_in]
@@ -97,9 +99,10 @@ for f in files:
         q(p + "pre", stacked[:, : 2 * H])
         if n_in == 3 * H:
             q(p + "lagm", stacked[:, 2 * H :])
-        W.add(p + "b_pre", np.concatenate([z[p + "lin.bias"], z[p + "mlp.0.bias"]]).astype(np.float32), "f32")
-        q(p + "m2", z[p + "mlp.2.weight"].astype(np.float32))
-        W.add(p + "m2_b", z[p + "mlp.2.bias"].astype(np.float32), "f32")
+        W.add(p + "b_pre", np.concatenate([z[p + "lin.bias"]] + ([z[p + "mlp.0.bias"]] if hid > 0 else [])).astype(np.float32), "f32")
+        if hid > 0:  # a linear router (lin_k<k>, hidden 0) has no m2: the engine reads it only when hidden_mlp > 0
+            q(p + "m2", z[p + "mlp.2.weight"].astype(np.float32))
+            W.add(p + "m2_b", z[p + "mlp.2.bias"].astype(np.float32), "f32")
         mx.clear_cache()
     W.cfg += [("kind", "ink_router"), ("run", a.run), ("variant", str(z["__variant__"])), ("lag", lag), ("apps", na), ("hidden", H),
               ("experts", NE), ("hidden_mlp", hid), ("bits", a.bits), ("emb", "embed_norm_output"), ("rms_eps", "1.1920929e-07"),

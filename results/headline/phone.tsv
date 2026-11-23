@@ -1,0 +1,12 @@
+# iPhone 15 Plus, engine v2 f95cd75, phone-small profile (calibrated 4-bit in-memory file), equal footprint 2.93-2.95 GB against the old app's 2.96 GB; fast: threshold 0.08, linear_k2 names, top 3; exact: run-ahead on; drive 0.82-0.85 GB/s with 2.95 GB free; one run per cell, measured on the device
+aspect	old app (best)	exact mode	fast mode
+decode, prose, tok/s	3.95	2.94	3.74
+decode in the chat path, tok/s	3.3 (same day)	3.41	4.11
+decode, coding, tok/s	-	2.11	2.88
+MB read per token	199	233-239	179
+short first message, sent at once / typed ahead, s to first token	6.57	4.8 / 3.7	4.8 / 3.9
+follow-up in the same chat, at once / typed ahead, s	5.6-6	4.0 / 4.2	4.2 / 3.5
+same chat after a relaunch, at once / typed ahead, s	8.7	4.2 / 3.3	4.3 / 3.3
+cold 472-token input, s to first token	21	19.5	-
+cold launch to ready, s	3.5	2.7-3.2	2.7-2.9
+top choice equal to the exact 8-bit engine, prose / agent text	not measured	0.913 / 0.884	0.891 / 0.881

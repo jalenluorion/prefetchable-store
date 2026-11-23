@@ -283,9 +283,10 @@ void gemm_nvfp4_i16(const uint8_t* codes, const uint8_t* sc, float gmul, int K, 
           int32x4_t T[4];
           for (int s = 0; s < 4; s++) {  // sub-block s = chunks (s / 2) * 4 + s % 2 and that + 2
             const int k0 = (s >> 1) * 4 + (s & 1), k1 = k0 + 2;
-            int32x4_t hi = vmmlaq_s32(vmmlaq_s32(vdupq_n_s32(0), W[k0], vld1q_s8(xh + 16 * k0)), W[k1], vld1q_s8(xh + 16 * k1));
-            int32x4_t lo = vmmlaq_s32(vmmlaq_s32(vdupq_n_s32(0), W[k0], vld1q_s8(xl + 16 * k0)), W[k1], vld1q_s8(xl + 16 * k1));
-            T[s] = vaddq_s32(vshlq_n_s32(hi, 8), lo);  // [row a pos a, row a pos b, row b pos a, row b pos b]
+            // the high plane's sums shifted by 8, the low plane's SMMLAs accumulated into them (the same integers as
+            // (hi << 8) + lo): [row a pos a, row a pos b, row b pos a, row b pos b]
+            const int32x4_t hi = vmmlaq_s32(vmmlaq_s32(vdupq_n_s32(0), W[k0], vld1q_s8(xh + 16 * k0)), W[k1], vld1q_s8(xh + 16 * k1));
+            T[s] = vmmlaq_s32(vmmlaq_s32(vshlq_n_s32(hi, 8), W[k0], vld1q_s8(xl + 16 * k0)), W[k1], vld1q_s8(xl + 16 * k1));
           }
           int32x4_t D[4];
           tr4(T, D);

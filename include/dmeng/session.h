@@ -23,6 +23,9 @@ namespace dm {
 
 struct SessionOptions {
   double ckpt_gb = 0.25;       // memory for checkpoints on the live sequence (the system prefix's are on disk too)
+  int ckpt_min = 4;            // ... but room for at least this many whatever their size (Inkling's 173 MB fixed state:
+                               // 0.25 GB held one, the prompt's end, so a repeated or diverging request restored nothing;
+                               // the 35B's 63 MB states fit four); 0 = ckpt_gb alone (iOS)
   double park_gb = 0.9;        // memory for parked sequences
   int ckpt_every = 2048;       // also checkpoint every this many positions inside a long prefill (memory)
   int disk_every = 256;        // the disk copy of the system prefix keeps a checkpoint every this many positions, so a
@@ -31,7 +34,11 @@ struct SessionOptions {
   std::string disk_dir;        // "" = no disk copies
   double disk_gb = 4.0;        // size cap of disk_dir (least recently used files go first)
   int disk_min = 1024;         // write a disk copy for a marked prefix of at least this many positions
+  int disk_gain = 256;         // restore from disk only when it saves more than this many positions over the live state
   bool preload_experts = false; // a disk restore also reloads the expert set saved with it (measured: no decode gain, +1.4 s)
+  bool refresh_pinned = false;  // persist() at a pinned file's position (the system boundary, after each reply) replaces
+                                // its saved expert set with the one held now: a new chat's preload then brings in the
+                                // experts the last turn used (its generation-prompt tail included), not the system prompt's
 };
 
 struct SyncResult {
@@ -51,7 +58,9 @@ class PrefixCache {
   ~PrefixCache();
   // Bring the live state to ids (all of it) and put the logits after the last id in `logits`. marks: positions (1..n)
   // where a message ends (checkpoint candidates; the first mark >= disk_min is the disk prefix).
-  SyncResult sync(const std::vector<int>& ids, const std::vector<int>& marks, float* logits);
+  // want_logits false (state only: an idle-time sync of a prefix the next request extends): a checkpoint at the end of
+  // ids may be restored whole (no position recomputed for its logits); live_logits are then not valid.
+  SyncResult sync(const std::vector<int>& ids, const std::vector<int>& marks, float* logits, bool want_logits = true);
   // After sync: one generated token at a time (the live sequence grows with it).
   void step(int id, float* logits);
   // Draft and verify on the live sequence: ids[0..n) in one pass (logits_at(i) after position i); commit(a) keeps the first
@@ -60,7 +69,9 @@ class PrefixCache {
   const float* logits_at(int i) const { return m_.logits_at(i); }
   void commit(int a);
   const float* logits() const { return live_logits_.data(); }
-  // Write the disk copy of the live sequence's prefix [0, p) if p is a checkpointed position and no file holds it.
+  // Write the disk copy of the live sequence's prefix [0, p) if p is a checkpointed position (or the live end, which is
+  // checkpointed first) and no file holds it. A file for the first marked prefix (the system boundary) is pinned: the
+  // disk LRU keeps it while pinned files stay under half of disk_gb.
   void persist(int p);
   const std::vector<int>& live() const { return live_; }
   std::string stats_json() const;
@@ -83,12 +94,14 @@ class PrefixCache {
   std::vector<float> live_logits_;  // logits after the last live position (a repeated prompt needs no compute)
   std::vector<int> ver_ids_;        // the last verify's positions
   bool live_logits_ok_ = false;
+  int live_k_ = 0;  // the head k live_logits_ came from (LM::set_head_k; 0 = every logit)
   uint64_t clock_ = 0;
   // counters
   uint64_t n_req_ = 0, n_reused_ = 0, n_computed_ = 0, n_parks_ = 0, n_unparks_ = 0, n_disk_loads_ = 0, n_disk_writes_ = 0;
   void checkpoint(int p, bool pinned);
   void add_checkpoint(std::unique_ptr<Ckpt> c);
-  std::string disk_path(const std::vector<int>& ids, int p) const;
+  std::string disk_path(const std::vector<int>& ids, int p, bool pin = false) const;
+  std::string disk_existing(const std::vector<int>& ids, int p) const;  // either name, "" if none
   void begin_disk(const std::vector<int>& ids, int p, int start);
   void enforce_disk_cap(const std::string& keep);
   // the disk file being written by the current prefill (dense checkpoints of the system prefix)
@@ -121,8 +134,8 @@ class PrefixCache {
   uint64_t n_ahead_ = 0, n_ahead_pos_ = 0, n_ahead_hits_ = 0, n_ahead_parks_ = 0;
   void ahead_seen(const std::vector<int>& ids);
   void park_live(int keep_upto);
-  bool load_disk(const std::vector<int>& ids, int& got, double& ms_preload, int& npre);
-  int best_disk(const std::vector<int>& ids, std::string& path) const;
+  bool load_disk(const std::vector<int>& ids, int& got, double& ms_preload, int& npre, int cut = 1);
+  int best_disk(const std::vector<int>& ids, std::string& path, int cut = 1) const;
 };
 
 }  // namespace dm

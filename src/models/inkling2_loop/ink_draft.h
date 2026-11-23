@@ -38,6 +38,10 @@ struct InkDraftOpts {
   int H = 0, VU = 0, ctx = 16384;
   float softcap = 30.f;
   bool exact = false;
+  // decoding: hold the block's matrices and the fold F in the engine's 8-bit in-memory format (AFF8, groups of 64,
+  // fp16 scale and offset), as every other in-memory weight; drafts only propose, so their precision cannot change the
+  // output (a worse draft is rejected). false: bf16 as released (the port check's exact mode always is)
+  bool q8 = true;
   Prec prec = Prec::I16;  // the head's activation precision (the target's)
   Mem mem = Mem::MLOCK;
 };
@@ -67,11 +71,20 @@ class InkDraft {
 
  private:
   struct Layer {
-    const uint16_t *q, *k, *v, *o, *g, *u, *d, *kc, *vc;  // bf16 [out, in]
+    const uint16_t *q, *k, *v, *o, *g, *u, *d, *kc, *vc;  // bf16 [out, in] (null once quantised)
+    Weight wq[9];                                         // q8: the same nine, AFF8
     std::vector<float> ln_in, ln_post, qn, kn, kcn, dfl;    // norms (bf16 values)
   };
   bool read_all(std::string& err);
   bool make_fold(std::string& err);
+  bool layout_q8(std::string& err);    // q8: the AFF8 region for the block's matrices and F (filled as they are read)
+  bool q8_ = false;
+  uint8_t* qreg_ = nullptr;
+  size_t qreg_bytes_ = 0;
+  std::vector<uint16_t> rnn_wv_, ho_wv_;
+  size_t rnn_n_ = 0, ho_n_ = 0;  // q8: the RNN and hidden_out matrices (bf16, small) once wreg_ is gone
+  XBuf latq_;
+  std::vector<float> xfp_;  // q8: the context projections' inputs (bf16 values) as fp32
   void project(int n);                 // the oldest n pending positions -> context K/V
   void block(int p, const float* emb);  // the 8-slot block after committed position p -> hfin_
   void rnn_step(int prev, int j, float* latent);

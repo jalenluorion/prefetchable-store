@@ -1,0 +1,55 @@
+{
+ "profiles": {
+  "mac": {
+   "mode": "exact",
+   "resident": "resident_q8",
+   "cache": "auto"
+  },
+  "phone": {
+   "mode": "exact",
+   "resident": "resident_q8",
+   "cache": "slab",
+   "min_available_gb": 5.0
+  },
+  "phone-small": {
+   "mode": "fast",
+   "resident": "resident_q4",
+   "cache": "slab",
+   "experts": {
+    "layer_format": [
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16"
+    ],
+    "layer_files": {
+     "20": "store_nv4/layer_20.bin",
+     "21": "store_nv4/layer_21.bin",
+     "22": "store_nv4/layer_22.bin",
+     "23": "store_nv4/layer_23.bin"
+    },
+    "note": "layers 20-23 re-quantised from MXFP8 to NVFP4 (python/derive/ink_mx_to_nv.py); the release's files are untouched"
+   }
+  }
+ }
+}

@@ -1,0 +1,72 @@
+{
+  "background_session" : false,
+  "cellular" : false,
+  "fake_free_bytes" : 3000000000,
+  "files" : [
+    {
+      "attempts" : 0,
+      "local" : "config.json",
+      "mb_per_s" : 0.80797536094489009,
+      "network_bytes" : 3686,
+      "resumed_from" : 0,
+      "seconds" : 0.0045620203018188477,
+      "sha256_ok" : true,
+      "size" : 3686,
+      "source" : "network",
+      "state" : "done"
+    },
+    {
+      "attempts" : 0,
+      "local" : "generation_config.json",
+      "mb_per_s" : 0.047595607437784397,
+      "network_bytes" : 202,
+      "resumed_from" : 0,
+      "seconds" : 0.0042440891265869141,
+      "sha256_ok" : true,
+      "size" : 202,
+      "source" : "network",
+      "state" : "done"
+    },
+    {
+      "attempts" : 0,
+      "local" : "tokenizer.json",
+      "mb_per_s" : 26.633137694154978,
+      "network_bytes" : 12807982,
+      "resumed_from" : 0,
+      "seconds" : 0.4809039831161499,
+      "sha256_ok" : true,
+      "size" : 12807982,
+      "source" : "network",
+      "state" : "done"
+    },
+    {
+      "attempts" : 0,
+      "local" : "derived\/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+      "mb_per_s" : 33.780839151160535,
+      "network_bytes" : 68091904,
+      "resumed_from" : 0,
+      "seconds" : 2.0156960487365723,
+      "sha256_ok" : true,
+      "size" : 68091904,
+      "source" : "network",
+      "state" : "done"
+    }
+  ],
+  "free_bytes" : 3000000000,
+  "headroom_bytes" : 1000000000,
+  "manifest_url" : "https:\/\/huggingface.co\/jalenluorion\/Qwen3.6-35B-A3B-moved-store\/resolve\/main\/moved-store.json",
+  "mb_per_s_this_launch" : 31.761807742987475,
+  "model_dir" : "<app container>\/Documents\/dl_test",
+  "network_bytes_this_launch" : 80903774,
+  "only" : [
+    "config.json",
+    "tokenizer.json",
+    "generation_config.json",
+    "derived\/router.linear_k2.q8.dmr1.efd45c78a56b.bin"
+  ],
+  "phase" : "complete",
+  "seconds_since_start" : 2.5472030639648438,
+  "store_complete" : false,
+  "time" : "2026-11-23T05:26:30Z",
+  "total_bytes" : 80903774
+}

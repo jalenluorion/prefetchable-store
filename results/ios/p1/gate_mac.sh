@@ -4,7 +4,7 @@
 # same gate through the C API only (tests/c_api/dm_gate.c). Every run under the engine's guard (bench/guard.py, as the
 # engine session's filecache runs: POLL_S=2, 900 s, default swap / footprint / disk limits), one at a time. Decode names
 # early with the trained MLP lag-2 router (mlp_k2_h512 = routers/q36_router_full_k2_h512.dmr, m 8), as the references.
-#   zsh results/ios/p1/gate_mac.sh [tool] [capi]          (from the worktree; default both)
+#   zsh results/ios/p1/gate_mac.sh [tool] [capi]          (from the repository root; default both)
 cd ${0:A:h}/../../..
 WT=$PWD
 DM=$(cd $WT/../../../.. && pwd)          # deep-memory/

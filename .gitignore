@@ -13,3 +13,7 @@ reference/flash/drivebench
 results/drafts/runs/
 results/drafts/*.log
 build_dev/
+results/drafts/ctl_runs/
+results/drafts/*.log
+build/
+results/drafts/runs2/

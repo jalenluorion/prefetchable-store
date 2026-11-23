@@ -76,12 +76,17 @@ struct Readers {
   bool file_prefault = true;       // Mem::FILE: after the pread, touch one byte per page of the view (the reader takes
                                    // the soft faults that map the cached pages, not the compute threads)
   int qos = -1;                    // QoS class of the reader threads (qos_class_t); -1: user-initiated
+  bool io_low = false;             // the readers' disk I/O one tier below the threads' own (IOPOL_STANDARD); CoreOpts::reader_io_low
   // statistics (written by the readers)
   std::atomic<uint64_t> bytes{0}, jobs{0}, busy_ns{0};
   std::atomic<uint64_t> file_resident_skips{0}, file_bytes_skipped{0};  // Mem::FILE pieces found resident, not read
   std::atomic<uint64_t> q_ns[3], svc_ns[3], njobs[3], spec_inflight_at_urgent{0};  // [0] urgent, [1] speculative, [2] background
   std::atomic<uint64_t> bg_promoted{0};  // background reads a step needed before they started (moved to urgent)
   uint64_t busy_wall();      // wall time with at least one read in flight
+  // wall time by state: [0] no read in flight, nothing queued; [1] none in flight, reads queued (held back by the
+  // speculative limits); [2..5] 1, 2, 3, 4+ reads in flight. [6] = bursts (no read in flight -> one)
+  void depth_times(uint64_t out[7]);
+  bool saturated();  // every reader has a read in flight and reads wait behind them
   ~Readers() { stop(); }
 
  private:
@@ -97,6 +102,10 @@ struct Readers {
   int inflight_[3] = {0, 0, 0};
   int64_t busy_t0_ = 0;
   uint64_t busy_wall_ns_ = 0;
+  int64_t dt_last_ = 0;
+  int dt_state_ = 0;
+  uint64_t dt_ns_[7] = {0};
+  void tick_(int64_t t);  // (mu_ held) after a change of the in-flight count or the queues
 };
 
 struct Slot {
@@ -131,6 +140,7 @@ struct CacheStats {
   uint64_t n_reuse_hit = 0;             // looped layers: a pick already used by an earlier pass of the same token
   uint64_t bytes_urgent = 0, bytes_pf = 0;
   double wait_ms = 0, wait_ms_miss = 0, wait_ms_late = 0;
+  double wait_ms_runnable = 0;  // lossless step: waits for a pick while another pick of the same layer had landed, not yet run
   uint64_t file_checks = 0, file_refaults = 0, bytes_refault = 0;  // Mem::FILE: held records checked on use / found gone
   double policy_ms = 0;                 // victim() and pre_use(): the eviction policy's own time
   uint64_t n_cap_borrow = 0;            // urgent slots a layer at its cap took from the pool (its own were all pinned)
@@ -204,6 +214,7 @@ struct Cache {
   bool skip_reads = false;
   int split = 1;                 // a record is read as this many pieces (on as many reader threads)
   int extra_reserve[MAXP] = {0}; // slots a name must leave unpinned (the loop hold's worst case)
+  std::vector<std::string> layer_paths;  // set before init: per-layer files relative to dir (empty: the layer_file pattern)
   long now_step = 0;             // token * steps + step index of the MoE block running now
   bool evict_pf_ctx = false;     // the eviction being made is for a speculative read
   bool read_bg = false;          // a speculative read issued now goes to the readers' background class
@@ -407,6 +418,7 @@ struct Cache {
   }
   int slot_of(int L, int e) const { return tab[(size_t)L * NE + e]; }
   bool ready(int L, int slot) const { return pool(L).pending[slot].load(std::memory_order_acquire) == 0; }
+  const std::atomic<int>* pending_of(int L, int slot) const { return &pool(L).pending[slot]; }
   Slot& slot(int L, int i) { return pool(L).s[i]; }
   int victim(int L, int reserve);                             // smallest key among unpinned landed slots (free first)
   int victim_in(int L, int reserve, bool capped);             // ... the layer's own records only when capped
@@ -421,7 +433,8 @@ struct Cache {
   void (*on_long_wait)(void*) = nullptr;
   void* long_wait_ctx = nullptr;
   void use(int L, int slot, long t, long step);
-  int name(int L, int e, long step);                          // an early name: pins; the slot, or -1 if none could be had
+  int name(int L, int e, long step, int reserve = -1);        // an early name: pins; the slot, or -1 if none could be had
+                                                              // (reserve: slots left free for misses; -1: 2K + holds)
   void unpin(int L, int slot) {
     Slot& x = pool(L).s[slot];
     if (x.pins > 0) x.pins--;
