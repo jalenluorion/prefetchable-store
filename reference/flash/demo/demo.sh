@@ -2,7 +2,7 @@
 # One-command demo: start the store server (warm, prompt cache on) if it is not already up, then open stock OpenCode in this folder.
 #   ./demo.sh            # prefetch mode, 10 named / keep 3 / 24 slots per layer, thinking effort low
 #   ./demo.sh -v         # extra flags go to mlx_run.py (e.g. --reasoning-effort xhigh, the model's own default)
-# Expects the weights in ../model (hf download jalenluorion/Qwen3.8-Flash-Next-moved-store --local-dir model --exclude "routers3/*").
+# Expects the weights in ../model (hf download jalenluorion/Qwen3.8-Flash-Next-prefetchable-store --local-dir model --exclude "routers3/*").
 # OpenCode runs with its stock prompt and tools. The three environment variables only keep this machine's personal setup out
 # of the prompt (the machine's personal skills and instruction files) and stop OpenCode from updating itself.
 # Stop the server afterwards with: pkill -f "mlx_run.py --dir model"

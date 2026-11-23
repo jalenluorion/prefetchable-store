@@ -5,9 +5,9 @@ iPhone. That includes a 180B-parameter model whose weights are eight times the l
 
 | model | machine | memory used | speed |
 |---|---|---|---|
-| [Qwen3.8-Flash-Next](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-moved-store) (180B parameters) | base M4 MacBook Pro, 16 GB | 9 GB | 5.7 tokens/s |
-| [Qwen3.6-35B-A3B](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-moved-store) (35B parameters) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 26 to 29 tokens/s exact, 30 to 32 fast |
-| [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-moved-store) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 17 to 20 tokens/s exact, about 21 fast |
+| [Qwen3.8-Flash-Next](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-prefetchable-store) (180B parameters) | base M4 MacBook Pro, 16 GB | 9 GB | 5.7 tokens/s |
+| [Qwen3.6-35B-A3B](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-prefetchable-store) (35B parameters) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 26 to 29 tokens/s exact, 30 to 32 fast |
+| [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-prefetchable-store) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 17 to 20 tokens/s exact, about 21 fast |
 | Qwen3.6-35B-A3B | iPhone 15 Plus, 6 GB | 2.9 GB | 3.4 tokens/s exact, 4.1 fast |
 | Inkling 2 Mini | iPhone 15 Plus, 6 GB | 2.9 GB | 1.5 tokens/s exact, 2.4 fast |
 | Qwen3.6-35B-A3B | iPhone 17 Pro, 12 GB | 8 GB | 10 to 11 tokens/s exact, 11 to 13 fast (predicted) |
@@ -31,13 +31,13 @@ git clone https://github.com/jalenluorion/prefetchable-store && cd prefetchable-
 cmake -S . -B build && cmake --build build -j
 pip install tokenizers jinja2
 
-hf download jalenluorion/Qwen3.6-35B-A3B-moved-store --local-dir model
+hf download jalenluorion/Qwen3.6-35B-A3B-prefetchable-store --local-dir model
 build/dmeng --model model --chat --prompt "Write a haiku about rivers." --n 200
 
 python3 python/serve/dmserve.py --model-dir model --port 8090    # OpenAI-compatible server
 ```
 
-For Inkling 2 Mini, download `jalenluorion/Inkling-2-Mini-moved-store` instead; everything else is the same. A folder
+For Inkling 2 Mini, download `jalenluorion/Inkling-2-Mini-prefetchable-store` instead; everything else is the same. A folder
 downloaded from the Hub runs as it is. Each weight repo's card lists the files one device needs, so a Mac does not
 download the phone's files.
 
@@ -46,7 +46,7 @@ about 140 GB of free disk:
 
 ```bash
 cd reference/flash && pip install -r requirements.txt
-hf download jalenluorion/Qwen3.8-Flash-Next-moved-store --local-dir model --exclude "routers3/*"
+hf download jalenluorion/Qwen3.8-Flash-Next-prefetchable-store --local-dir model --exclude "routers3/*"
 python mlx_run.py --dir model --prompt "Explain what a mixture of experts is." --max-new 200
 ```
 
@@ -230,9 +230,9 @@ compared with each release on the weight repos' model cards.
 
 | model | weights | notes |
 |---|---|---|
-| Qwen3.6-35B-A3B | [jalenluorion/Qwen3.6-35B-A3B-moved-store](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-moved-store) | Mac and iPhone |
-| Inkling 2 Mini | [jalenluorion/Inkling-2-Mini-moved-store](https://huggingface.co/jalenluorion/Inkling-2-Mini-moved-store) | Mac and iPhone |
-| Qwen3.8-Flash-Next (180B) | [jalenluorion/Qwen3.8-Flash-Next-moved-store](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-moved-store) | Mac, through the Python runner in [reference/flash](reference/flash) |
+| Qwen3.6-35B-A3B | [jalenluorion/Qwen3.6-35B-A3B-prefetchable-store](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-prefetchable-store) | Mac and iPhone |
+| Inkling 2 Mini | [jalenluorion/Inkling-2-Mini-prefetchable-store](https://huggingface.co/jalenluorion/Inkling-2-Mini-prefetchable-store) | Mac and iPhone |
+| Qwen3.8-Flash-Next (180B) | [jalenluorion/Qwen3.8-Flash-Next-prefetchable-store](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-prefetchable-store) | Mac, through the Python runner in [reference/flash](reference/flash) |
 
 A model family is a short description of its layers, state and expert block in `src/models/<family>/`; the store, the
 step, the routers and the serving are shared. The weight repos share one layout and one manifest

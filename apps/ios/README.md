@@ -82,8 +82,8 @@ The first screen asks which model to download: Qwen3.6-35B-A3B or Inkling 2 Mini
 profile (the table above) and starts when you tap **Download**.
 
 - The app reads the model's `moved-store.json` from its Hugging Face repo
-  ([Qwen3.6-35B-A3B](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-moved-store),
-  [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-moved-store)) and downloads exactly the files of
+  ([Qwen3.6-35B-A3B](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-prefetchable-store),
+  [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-prefetchable-store)) and downloads exactly the files of
   this phone's profile.
 - Every file is checked against the SHA-256 in that manifest before it is put in place. A damaged or interrupted file
   is fetched again, resuming where it stopped.

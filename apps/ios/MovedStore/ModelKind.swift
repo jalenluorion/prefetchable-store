@@ -32,7 +32,7 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     /// Documents/<folder>: the Hub layout (moved-store.json, store/, derived/, the small files).
     var folderName: String { self == .qwen36 ? "dmeng-model" : "dmeng-model-inkling" }
     var folder: URL { docsURL.appendingPathComponent(folderName, isDirectory: true) }
-    var hubRepo: String { self == .qwen36 ? "jalenluorion/Qwen3.6-35B-A3B-moved-store" : "jalenluorion/Inkling-2-Mini-moved-store" }
+    var hubRepo: String { self == .qwen36 ? "jalenluorion/Qwen3.6-35B-A3B-prefetchable-store" : "jalenluorion/Inkling-2-Mini-prefetchable-store" }
     /// The engine's saved states (Application Support/<bundle>/<name>): one folder per model, so a state computed with
     /// one model's weights is never offered to the other.
     var prefixDirName: String { self == .qwen36 ? "dmeng-prefix" : "dmeng-prefix-inkling" }
