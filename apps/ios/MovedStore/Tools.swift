@@ -72,8 +72,8 @@ enum ToolSettings {
     static let openURLJSON = #"{"function": {"description": "Read a search result using its numbered result parameter. Use url only for an exact URL supplied by the user.", "name": "open_url", "parameters": {"properties": {"result": {"description": "the [n] number", "type": "integer"}, "url": {"type": "string"}}, "type": "object"}}, "type": "function"}"#
     static var toolsJSON: [String] { pageReads ? [ToolPrompt.webSearchJSON, openURLJSON] : [ToolPrompt.webSearchJSON] }
 
-    static let searchReadNote = "Now call open_url on at least one source above before answering. Pass its number as result, for example result=1."
-    static let followupReadNote = "If you need more evidence, open another result or make a more specific search. Otherwise, answer and cite your sources."
+    static let searchReadNote = "Call open_url with a result number before answering."
+    static let followupReadNote = "Read or search again if needed. Otherwise, answer with citations."
 
     static func toolNote(_ meta: ToolMeta, canCallAgain: Bool) -> String? {
         guard pageReads, canCallAgain, meta.error == nil else { return nil }
