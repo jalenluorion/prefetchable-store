@@ -129,6 +129,10 @@ if CommandLine.arguments.contains("-readerCheck") {
     let dateQuestion = "What's today's date?"
     precondition(SearchHint.engineContent(dateQuestion, hasDeviceDate: true) == dateQuestion)
     precondition(SearchHint.engineContent("What is today's weather?", hasDeviceDate: true).hasSuffix(SearchHint.hint))
+    precondition(SearchHint.isSearchPreamble("I'll check current headlines."))
+    precondition(SearchHint.isSearchPreamble("Let me search for the latest results."))
+    precondition(!SearchHint.isSearchPreamble("I'll check current headlines. Here are the results."))
+    precondition(!SearchHint.isSearchPreamble("I'll stay home today."))
     print("Reader checks passed")
     exit(0)
 }

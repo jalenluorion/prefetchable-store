@@ -803,11 +803,29 @@ final class ChatModel: ObservableObject {
         // may be in an earlier message ("give me more detail" follows the searched answer), so it comes from the history
         var (lastResults, lastQuery) = lastSearch(convID)
         var freeRetryUsed = false
+        let currentUser = engineHistory.lastIndex(where: { $0.role == .user })
         while true {
             let rec = await runRound(prompt: prompt, convID: convID, aid: aid, history: engineHistory, think: think, mx: mx,
                                      cancelAfter: cancelAfter, continuing: continuing || !rounds.isEmpty, tools: tools,
                                      toolsAllowed: tools && calls < ToolSettings.maxCalls + 1)
             rounds.append(rec)
+            if tools, let user = currentUser, searches.isEmpty, !userStopped, rec.error == nil, rec.reason == "eos",
+               engineHistory[user].content.contains(SearchHint.hint),
+               SearchHint.isSearchPreamble(splitThinking(rec.text, thinkingOn: think).1) {
+                let retry = rounds.count == 1
+                updateConv(convID) { c in
+                    if let i = c.messages.firstIndex(where: { $0.id == aid }) {
+                        c.messages[i].content = retry ? "" : "I couldn’t start the web search."
+                    }
+                }
+                if retry {
+                    engineHistory[user].content += "\n\n" + SearchHint.retryInstruction
+                    log("TOOL reply=\(replyNo) ended after announcing a search; retrying once")
+                    continue
+                }
+                persist(convID)
+                break
+            }
             guard tools, !userStopped, rec.error == nil, calls <= ToolSettings.maxCalls,
                   let (call, kept) = completedCall(convID: convID, aid: aid, think: think) else { break }
             calls += 1

@@ -1339,6 +1339,18 @@ enum Passages {
 /// `-searchHint 0|1` overrides the default.
 enum SearchHint {
     static let hint = "(Use web_search.)"
+    static let retryInstruction = "Call web_search now. Skip the preamble."
+    private static let searchPreamble = try! NSRegularExpression(
+        pattern: #"^(?:i[’']ll|i will|let me)\s+(?:quickly\s+)?(?:check|search|look up|look for|verify)\b[^.!?\n]*[.!?]?$"#,
+        options: [.caseInsensitive]
+    )
+
+    /// A reply that ends after announcing a search has no answer or tool call.
+    static func isSearchPreamble(_ answer: String) -> Bool {
+        let text = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count <= 120 else { return false }
+        return searchPreamble.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
     static let localDateQuestion = try! NSRegularExpression(
         pattern: #"^\s*(what (is|day is)|what'?s) (the date( today)?|today'?s date|today)\s*[?.!]?\s*$"#,
         options: [.caseInsensitive]
