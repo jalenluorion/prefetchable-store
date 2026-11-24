@@ -37,6 +37,12 @@ struct ChatView: View {
     var generatingElsewhere: Bool { m.isGenerating && m.generatingConvID != m.conv.id }
     var lastAssistantID: UUID? { m.conv.messages.last(where: { $0.role == .assistant })?.id }
 
+    private func scrollToLatest(_ proxy: ScrollViewProxy) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { proxy.scrollTo(bottomID, anchor: .bottom) }
+    }
+
     /// The rows: user and assistant messages; a tool result is not a row of its own but part of its call's card.
     struct Row: Identifiable {
         var message: ChatMessage
@@ -88,18 +94,16 @@ struct ChatView: View {
             }
             .scrollDismissesKeyboard(.interactively)
             .modifier(FollowTracking(follow: $follow, atBottom: $atBottom))
-            .onChange(of: m.conv.messages.last?.content) { _, _ in
-                if follow && generatingHere { proxy.scrollTo(bottomID, anchor: .bottom) }
-            }
-            .onChange(of: m.conv.messages.count) { _, _ in
-                follow = true
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(bottomID, anchor: .bottom) }
+            .onChange(of: m.conv.messages.last) { _, _ in
+                // Tool rounds replace the last row as streaming updates it. Use the same scroll
+                // transaction for both so an animated row change cannot compete with token updates.
+                if follow { scrollToLatest(proxy) }
             }
             .onChange(of: m.conv.id) { _, _ in
                 follow = true
-                proxy.scrollTo(bottomID, anchor: .bottom)
+                scrollToLatest(proxy)
             }
-            .onAppear { proxy.scrollTo(bottomID, anchor: .bottom) }
+            .onAppear { scrollToLatest(proxy) }
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom && !m.conv.visible.isEmpty {
                     Button {

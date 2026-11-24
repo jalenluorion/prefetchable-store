@@ -15,6 +15,13 @@ What the app does:
 - **Chats on the phone.** Saved conversations, thinking on or off per chat, Markdown replies, export as Markdown or
   JSON. Optional web search (DuckDuckGo by default; on by default, off in Settings or per chat with the globe button).
 
+With page reads enabled, DuckDuckGo finds candidate URLs and the app fetches their pages to look for relevant
+passages. It can retry with a more specific query when fewer than two sources qualify. The model is prompted to
+open a numbered result before answering. Recent numbered results reuse the page already fetched by the app.
+The evidence budgets are 128 tokens per search and 256 per read on iPhone 15, and 448/896 on the 12 GB class
+such as iPhone 17 Pro. The latter uses a provisional 3.5× prefill estimate. The phone’s local date is passed with
+each user turn so the warmed system prompt stays the same across days.
+
 ## What you need
 
 - **A Mac with Xcode 16.3 or later.** The package dependencies need Swift tools 6.1. The app was built with Xcode 26.3.
@@ -75,6 +82,9 @@ xcodebuild -project MovedStore.xcodeproj -target MovedStore -configuration Relea
 ```
 
 `SYMROOT` keeps the packages' build products in one folder, where the app's build finds them.
+
+Run `bash apps/ios/tests/search_check.sh` from the repository root to check page extraction, device budgets and
+dates, and a fixture-backed search through the numbered cache read.
 
 ## First launch
 

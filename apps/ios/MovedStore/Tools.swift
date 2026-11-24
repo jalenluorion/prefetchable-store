@@ -1,18 +1,19 @@
 import Foundation
+import libxml2
+import PDFKit
+import WebKit
 import Security
+
 // Web search through the model's native tool calling.
 //
 // The tool is declared in the system turn exactly as the release's chat template writes it for `tools=[...]`
-// (ToolPrompt.systemContent). The model answers with a `<tool_call>`; ChatModel stops the round there, runs the search,
-// appends the call turn and a `tool` turn and generates again from the engine's live state (only the result is
-// prefilled). A search reads the top result pages and gives the model selected sentences (facts), not titles: per source
-// the title, the host and 2-4 sentences ranked by overlap with the query, within `ToolSettings.resultTokenCap` tokens of
-// the engine's tokenizer. `open_url(result | url)` (declared when page reads are on) returns one page's selected
-// sentences within the same budget; `result` is the [n] of the last search's results (the model is shown hosts, not URLs,
-// so a URL it writes is usually invented).
+// (ToolPrompt.systemContent). The
+// model answers with `<tool_call>\n<function=web_search>\n<parameter=query>\n…\n</parameter>\n</function>\n</tool_call>`;
+// ChatModel stops the round there, runs the search, appends the call turn and a `tool` turn and generates again from the
+// engine's live state (only the result is prefilled). The no-key backend checks page content before showing a
+// result. open_url can then rank the cached page for the question, within the read budget, without fetching it again.
 
-/// The search backends. DuckDuckGo's HTML endpoint needs no key; Brave Search API and Tavily take a key the user pastes
-/// in Settings > Web search (kept in the Keychain).
+/// DuckDuckGo's HTML endpoint needs no key. Brave Search API and Tavily use keys stored in the Keychain.
 enum ToolBackend: String, CaseIterable, Identifiable, Codable {
     case duckduckgo, brave, tavily
     var id: String { rawValue }
@@ -40,23 +41,27 @@ enum ToolSettings {
     static let pageReadsKey = "tools.pageReads"
     static var d: UserDefaults { .standard }
 
-    /// Tools in new chats (default on).
     static var enabled: Bool { d.object(forKey: enabledKey) as? Bool ?? true }
     static var backend: ToolBackend { ToolBackend(rawValue: d.string(forKey: backendKey) ?? "") ?? .duckduckgo }
-    /// Page reads (default on): a search reads its top result pages, and `open_url` is declared. Off: snippets only, one
-    /// tool (the open_url declaration costs system-turn tokens in every chat).
     static var pageReads: Bool { d.object(forKey: pageReadsKey) as? Bool ?? true }
+
     /// Tool calls run per message; a further call gets an error result and the model answers with what it has. A failed
     /// open_url of a URL that was not among the last search's results (an invented one) does not count, once per message
-    /// (the error lists the results, so the retry can succeed). Each round costs the phone tens of seconds.
+    /// because the error lists the numbered results to retry.
     static let maxCalls = 3
-    /// The tool result's token budget (the engine's tokenizer): the result turn's first prefill chunk (112 + the turn's
-    /// 16 template tokens = 128 positions).
-    static let defaultResultTokens = 112
-    static var resultTokenCap: Int { defaultResultTokens }
+    // Keep search previews short. Explicit reads have room for a passage and its context. The larger-memory
+    // budgets start from the 3.5× prefill estimate for the 12 GB class.
+    static let defaultResultTokens = 128
+
+    static func evidenceBudget(reading: Bool, memory: UInt64) -> Int {
+        let largerPhone = memory >= UInt64(11) << 30
+        return reading ? (largerPhone ? 896 : 256) : (largerPhone ? 448 : defaultResultTokens)
+    }
     static let defaultResults = 3
     /// Result pages a search reads (the top ones; the rest keep their snippets).
     static let pagesPerSearch = 2
+    static let candidateLimit = 6
+    static let retryCandidateLimit = 4
     /// Bytes of a page read at most (the rest is not downloaded).
     static let pageByteCap = 1 << 20
     static let timeout: TimeInterval = 10
@@ -64,34 +69,43 @@ enum ToolSettings {
     /// The second tool (declared when page reads are on), keys sorted as swift-jinja's `tojson` writes them (the same form
     /// as ToolPrompt.webSearchJSON). `result`: the [n] of a result of the last search (resolved to its stored URL, so the
     /// model never has to know one); `url` stays as the alternative. Neither is required.
-    static let openURLJSON = #"{"function": {"description": "Open a result from the last search by its number, e.g. result 1. Use only if the results do not contain the answer.", "name": "open_url", "parameters": {"properties": {"result": {"description": "the [n] number", "type": "integer"}, "url": {"type": "string"}}, "type": "object"}}, "type": "function"}"#
+    static let openURLJSON = #"{"function": {"description": "Read a search result using its numbered result parameter. Use url only for an exact URL supplied by the user.", "name": "open_url", "parameters": {"properties": {"result": {"description": "the [n] number", "type": "integer"}, "url": {"type": "string"}}, "type": "object"}}, "type": "function"}"#
     static var toolsJSON: [String] { pageReads ? [ToolPrompt.webSearchJSON, openURLJSON] : [ToolPrompt.webSearchJSON] }
 
-    /// The system prompt's addition when tools are on (after the tools block and the user's system prompt). It names the
-    /// current month: without a date the model takes events after its training as still to come and never searches. The
-    /// month, not the day, so the saved system state changes once a month instead of daily.
-    static var systemAddition: String {
-        "It is \(currentMonth). Use web_search only when the answer needs current or specific facts: search once, with a short query. Answer in the user's language and name the source (title or site) you used."
+    static let searchReadNote = "Now call open_url on at least one source above before answering. Pass its number as result, for example result=1."
+    static let followupReadNote = "If you need more evidence, open another result or make a more specific search. Otherwise, answer and cite your sources."
+
+    static func toolNote(_ meta: ToolMeta, canCallAgain: Bool) -> String? {
+        guard pageReads, canCallAgain, meta.error == nil else { return nil }
+        if meta.name == "web_search", !meta.results.isEmpty { return searchReadNote }
+        if meta.name == "open_url" { return followupReadNote }
+        return nil
     }
 
-    static var currentMonth: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "MMMM yyyy"
-        return f.string(from: Date())
+    static let systemAddition = "Use web_search to find sources for current or specific facts. Start with a short query. Cite supporting sources by title or site. Include a URL only if it was provided to you. Say what you could not verify. Answer in the user's language."
+
+    static func dateNote(now: Date = Date(), timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        return "Device date: " + formatter.string(from: now)
     }
 
-    /// The system message content the engine is given: the template's tools block, the system prompt and the addition.
+    /// The day changes in the user turn, leaving the cached system prefix and prior turns stable.
     static func systemContent(_ system: String, tools: Bool) -> String {
         let s = system.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard tools else { return s }
-        return ToolPrompt.systemContent(system: s.isEmpty ? systemAddition : s + "\n\n" + systemAddition,
-                                        toolsJSON: toolsJSON)
+        var parts = s.isEmpty ? [] : [s]
+        parts.append("Use the latest Device date in the conversation as today's local date.")
+        if tools { parts.append(systemAddition) }
+        let content = parts.joined(separator: "\n\n")
+        return tools ? ToolPrompt.systemContent(system: content, toolsJSON: toolsJSON) : content
     }
 }
 
-/// API keys for the keyed backends: generic passwords in the Keychain (service <bundle id>.search, account = the
-/// backend). Never logged, never written to UserDefaults or the conversation files.
+/// API keys for the keyed backends: generic passwords in the Keychain (service <bundle id>.search, account =
+/// the backend). Never logged, never written to UserDefaults or the conversation files.
 enum SearchKeychain {
     static let service = (Bundle.main.bundleIdentifier ?? "app") + ".search"
 
@@ -201,6 +215,8 @@ struct SearchResult: Codable, Equatable, Sendable {
     var snippet: String
     /// The page itself was read (its selected sentences, not the snippet, went to the model). nil: not read.
     var read: Bool? = nil
+    /// An in-memory page snapshot, which can expire between turns.
+    var pageID: UUID? = nil
 
     /// host + path without the scheme, "www.", query and fragment (what the model is given, to save tokens).
     var shortURL: String {
@@ -225,7 +241,7 @@ struct ToolMeta: Codable, Equatable, Sendable {
     var query: String
     var backend: String
     var results: [SearchResult] = []
-    /// Tokens of the result text as the model reads it (the engine's tokenizer; nil before the model loads).
+    /// Tokens of the result text as the model reads it (the engine's tokenizer; nil for the stub).
     var resultTokens: Int?
     /// Wall time of the search (network + parsing + trimming).
     var ms: Double = 0
@@ -244,7 +260,7 @@ struct ToolMeta: Codable, Equatable, Sendable {
 
 /// The web search: fetch, parse, trim to the token budget, format for the model.
 enum WebSearch {
-    static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148"
+    static let userAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 PhoneStoreApp/1.0"
 
     static var session: URLSession = {
         let c = URLSessionConfiguration.ephemeral
@@ -254,8 +270,114 @@ enum WebSearch {
         return URLSession(configuration: c)
     }()
 
+    private final class PageRedirects: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+            let allowed = request.url.flatMap { Readable.safeURL($0.absoluteString) } != nil
+            completionHandler(allowed ? request : nil)
+        }
+    }
+
+    static var pageSession: URLSession = {
+        let c = URLSessionConfiguration.ephemeral
+        c.timeoutIntervalForResource = 5
+        c.httpAdditionalHeaders = ["User-Agent": userAgent, "Accept-Language": "en-US,en;q=0.8"]
+        return URLSession(configuration: c, delegate: PageRedirects(), delegateQueue: nil)
+    }()
+
+    private final class CachedPage {
+        let page: Readable.Page
+        let saved = Date()
+        init(_ page: Readable.Page) { self.page = page }
+    }
+
+    private static let pages: NSCache<NSUUID, CachedPage> = {
+        let cache = NSCache<NSUUID, CachedPage>()
+        cache.countLimit = 24
+        cache.totalCostLimit = 2 << 20
+        return cache
+    }()
+
+    private struct Verified {
+        let source: Passages.Source
+        let page: Readable.Page
+        let score: Double
+    }
+
+    private static func verify(_ results: [SearchResult], terms: [String: Double], requireStateNames: Bool,
+                               tried: inout Set<String>, limit: Int, render: Bool, desired: Int) async -> [Verified] {
+        guard desired > 0, !Task.isCancelled else { return [] }
+        var candidates: [SearchResult] = []
+        for result in results {
+            guard Readable.worthReading(result.url), tried.insert(canonical(result.url)).inserted else { continue }
+            candidates.append(result)
+            if candidates.count == limit { break }
+        }
+        let fetched = await withTaskGroup(of: (Int, Readable.Page?).self) { group in
+            for (i, result) in candidates.enumerated() {
+                group.addTask { (i, try? await readPage(result.url)) }
+            }
+            var result: [Int: Readable.Page] = [:]
+            for await (i, page) in group {
+                if let page { result[i] = page }
+                if Task.isCancelled { group.cancelAll() }
+            }
+            return result
+        }
+        guard !Task.isCancelled else { return [] }
+
+        var verified: [Verified] = []
+        var seen = Set<String>()
+        func keep(_ page: Readable.Page, index: Int) {
+            guard let score = Passages.evidence(page, terms: terms, requireStateNames: requireStateNames) else { return }
+            let result = candidates[index]
+            let url = page.url?.absoluteString ?? result.url
+            let title = shortTitle(page.title.isEmpty ? (result.title.isEmpty ? url : result.title) : page.title)
+            let ranked = Passages.rank(blocks: page.blocks, terms: terms, lead: false, title: title, passages: true, requireStateNames: requireStateNames)
+                .map { Passages.Sentence(text: Passages.preview($0.text, terms: terms), score: $0.score, pos: $0.pos) }
+            guard let lead = ranked.first, seen.insert(canonical(url)).inserted,
+                  seen.insert(lead.text.lowercased()).inserted else { return }
+            let id = UUID()
+            let host = SearchResult(title: "", url: url, snippet: "").host
+            let source = Passages.Source(title: title, host: host, url: url, sentences: ranked, read: true, maxKeep: 3, pageID: id)
+            verified.append(Verified(source: source, page: page, score: score + 0.25 / Double(index + 1)))
+        }
+        for i in candidates.indices {
+            if let page = fetched[i] { keep(page, index: i) }
+        }
+        if render, verified.count < desired, !Task.isCancelled,
+           let i = candidates.indices.first(where: {
+               guard let page = fetched[$0] else { return false }
+               return page.renderable && Passages.evidence(page, terms: terms, requireStateNames: requireStateNames) == nil
+           }), let page = fetched[i], let rendered = await Readable.render(page, terms: terms, requireStateNames: requireStateNames) {
+            keep(rendered, index: i)
+        }
+        return verified
+    }
+
+    private static func canonical(_ raw: String) -> String {
+        guard var parts = URLComponents(string: raw) else { return raw }
+        parts.fragment = nil
+        parts.host = parts.host?.lowercased()
+        let items = parts.queryItems?.filter { !$0.name.hasPrefix("utm_") && !["fbclid", "gclid"].contains($0.name) }
+        parts.queryItems = items?.isEmpty == false ? items : nil
+        return parts.string ?? raw
+    }
+
+    private static func retryQuery(_ query: String, context: String, requireStateNames: Bool) -> String? {
+        let existing = Set(Passages.words(query).map(Passages.norm))
+        var added = Set<String>()
+        let terms = Passages.words(context).filter { word in
+            let normalized = Passages.norm(word)
+            return word.count > 2 && !Passages.stop.contains(word) && !existing.contains(normalized) && added.insert(normalized).inserted
+        }.prefix(4)
+        if requireStateNames && !query.lowercased().contains("by state") { return query + " by state" }
+        if !terms.isEmpty { return query + " " + terms.joined(separator: " ") }
+        return existing.contains("official") ? nil : query + " official"
+    }
+
     enum Failure: LocalizedError {
-        case noKey(ToolBackend), http(Int), parse, empty, badURL, notHTML, noText
+        case noKey(ToolBackend), http(Int), parse, empty, badURL, notHTML, noText, noEvidence
         var errorDescription: String? {
             switch self {
             case .noKey(let b): return "no \(b.short) API key"
@@ -265,6 +387,7 @@ enum WebSearch {
             case .badURL: return "not a public http(s) URL"
             case .notHTML: return "not a web page"
             case .noText: return "no readable text"
+            case .noEvidence: return "no readable source contained relevant evidence"
             }
         }
     }
@@ -277,7 +400,7 @@ enum WebSearch {
         let backend = ToolSettings.backend
         var meta = ToolMeta(name: call.name, query: call.query, backend: backend.short)
         let t0 = Date()
-        let budget = ToolSettings.resultTokenCap
+        let budget = ToolSettings.evidenceBudget(reading: call.isPageRead, memory: ProcessInfo.processInfo.physicalMemory)
         let known = call.name == "web_search" || (call.name == "open_url" && ToolSettings.pageReads)
         guard known else {
             meta.error = "unknown tool \(call.name)"
@@ -297,9 +420,47 @@ enum WebSearch {
             case .brave: rs = try await brave(q, n: n)
             case .tavily: (rs, answer) = try await tavily(q, n: n)
             }
+            if backend == .duckduckgo && ToolSettings.pageReads {
+                let start = Date()
+                let terms = Passages.questionTerms(q + " " + context)
+                let requireStateNames = Passages.asksForUSStates(context)
+                let limit = max(n, ToolSettings.pagesPerSearch)
+                var attempted = Set<String>()
+                var verified = await verify(rs, terms: terms, requireStateNames: requireStateNames, tried: &attempted, limit: ToolSettings.candidateLimit,
+                                            render: true, desired: limit)
+                if verified.count < min(2, n), !Task.isCancelled, let retry = retryQuery(q, context: context, requireStateNames: requireStateNames),
+                   let more = try? await duckDuckGo(retry) {
+                    verified += await verify(more, terms: terms, requireStateNames: requireStateNames, tried: &attempted,
+                                             limit: ToolSettings.retryCandidateLimit, render: false, desired: limit - verified.count)
+                }
+                try Task.checkCancellation()
+                var urls = Set<String>(), hosts = Set<String>()
+                let best = verified.sorted { $0.score > $1.score }.filter {
+                    urls.insert(canonical($0.source.url)).inserted
+                }
+                // Prefer independent sources. Keep a second page from a site only if no other site qualified.
+                let independent = best.filter { hosts.insert($0.source.host).inserted }
+                let duplicates = best.filter { item in independent.contains { $0.source.host == item.source.host && $0.source.url != item.source.url } }
+                let selected = Array((independent + duplicates).prefix(n))
+                var sources = selected.map { $0.source }
+                let (text, kept, toks) = Passages.compose(&sources, answer: nil, budget: budget, count: count)
+                guard !kept.isEmpty else { throw Failure.noEvidence }
+                for result in kept {
+                    guard let id = result.pageID, let match = selected.first(where: { $0.source.pageID == id }) else { continue }
+                    let bytes = match.page.blocks.reduce(0) { $0 + $1.utf8.count }
+                    pages.setObject(CachedPage(match.page), forKey: id as NSUUID, cost: bytes)
+                }
+                meta.results = kept
+                meta.resultTokens = toks
+                meta.pages = kept.count
+                meta.pagesMs = Date().timeIntervalSince(start) * 1000
+                meta.budget = budget
+                meta.ms = Date().timeIntervalSince(t0) * 1000
+                return (text, meta)
+            }
             rs = Array(rs.filter { !$0.title.isEmpty && !$0.url.isEmpty }.prefix(n))
             guard !rs.isEmpty else { throw Failure.empty }
-            // the top result pages (Tavily's `content` is already the page's relevant extract)
+            // Tavily already supplies a passage from each page.
             var pages: [Int: [String]] = [:]
             if ToolSettings.pageReads && backend != .tavily {
                 let tp = Date()
@@ -385,15 +546,34 @@ enum WebSearch {
         meta.query = raw
         do {
             guard let u = Readable.safeURL(raw) else { throw Failure.badURL }
-            let page = try await readPage(u.absoluteString)
+            let terms = Passages.questionTerms(context)
+            let requireStateNames = Passages.asksForUSStates(context)
+            let page: Readable.Page
+            if let i = meta.resultIndex, let id = last[i - 1].pageID, let cached = pages.object(forKey: id as NSUUID),
+               Date().timeIntervalSince(cached.saved) < 300 {
+                page = cached.page
+                meta.backend = "page cache"
+            } else {
+                let direct = try await readPage(u.absoluteString)
+                if direct.renderable && Passages.evidence(direct, terms: terms, requireStateNames: requireStateNames) == nil,
+                   let rendered = await Readable.render(direct, terms: terms, requireStateNames: requireStateNames) {
+                    page = rendered
+                    meta.backend = "rendered page"
+                } else {
+                    page = direct
+                }
+            }
             meta.pagesMs = Date().timeIntervalSince(t0) * 1000
             guard !page.blocks.isEmpty else { throw Failure.noText }
             let title = shortTitle(page.title.isEmpty ? (u.host ?? raw) : page.title)
-            var src = [Passages.Source(title: title, host: SearchResult(title: "", url: u.absoluteString, snippet: "").host,
-                                       url: u.absoluteString,
-                                       sentences: Passages.rank(blocks: page.blocks, terms: Passages.terms(context), lead: false, title: title),
-                                       read: true, maxKeep: 40)]
+            guard terms.isEmpty || Passages.evidence(page, terms: terms, requireStateNames: requireStateNames) != nil else { throw Failure.noEvidence }
+            let ranked = Passages.rank(blocks: page.blocks, terms: terms, lead: false, title: title, passages: true, requireStateNames: requireStateNames)
+            guard !ranked.isEmpty else { throw Failure.noEvidence }
+            let url = page.url?.absoluteString ?? u.absoluteString
+            var src = [Passages.Source(title: title, host: SearchResult(title: "", url: url, snippet: "").host,
+                                       url: url, sentences: ranked, read: true, maxKeep: 12)]
             let (text, kept, toks) = Passages.compose(&src, answer: nil, budget: budget, count: count)
+            guard !kept.isEmpty else { throw Failure.noEvidence }
             meta.results = kept
             meta.resultTokens = toks
             meta.pages = 1
@@ -432,16 +612,20 @@ enum WebSearch {
     }
 
     /// Downloads a page (10 s, at most `pageByteCap` bytes; HTML or plain text only) and extracts its readable blocks.
-    static func readPage(_ url: String) async throws -> (title: String, blocks: [String]) {
+    static func readPage(_ url: String) async throws -> Readable.Page {
         guard let u = Readable.safeURL(url) else { throw Failure.badURL }
         var req = URLRequest(url: u)
-        req.timeoutInterval = ToolSettings.timeout
-        req.setValue("text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5", forHTTPHeaderField: "Accept")
-        let (bytes, resp) = try await session.bytes(for: req)
+        req.timeoutInterval = 5
+        req.setValue("text/html,application/xhtml+xml,text/plain,application/pdf;q=0.8", forHTTPHeaderField: "Accept")
+        let (bytes, resp) = try await pageSession.bytes(for: req)
+        guard let finalURL = resp.url, Readable.safeURL(finalURL.absoluteString) != nil else { throw Failure.badURL }
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard code == 200 else { throw Failure.http(code) }
         let type = ((resp as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type") ?? "text/html").lowercased()
-        guard type.contains("html") || type.contains("text/plain") else { throw Failure.notHTML }
+        let pdf = type.contains("application/pdf") || (type.contains("application/octet-stream") && finalURL.pathExtension.lowercased() == "pdf")
+        let plainText = type.contains("text/plain")
+        guard pdf || plainText || type.contains("html") else { throw Failure.notHTML }
+        let byteCap = pdf ? 4 << 20 : ToolSettings.pageByteCap
         var data = Data()
         data.reserveCapacity(256 << 10)
         var buf = [UInt8]()
@@ -449,14 +633,20 @@ enum WebSearch {
         for try await b in bytes {
             buf.append(b)
             if buf.count == 64 << 10 { data.append(contentsOf: buf); buf.removeAll(keepingCapacity: true) }
-            if data.count + buf.count >= ToolSettings.pageByteCap { break }
+            if data.count + buf.count >= byteCap { break }
         }
         data.append(contentsOf: buf)
+        try Task.checkCancellation()
+        if pdf {
+            guard let document = PDFDocument(data: data), !document.isLocked else { throw Failure.noText }
+            let blocks = (0..<min(document.pageCount, 20)).compactMap { document.page(at: $0)?.string }
+                .flatMap { Readable.plainBlocks(String($0.prefix(12_000))) }
+            return Readable.Page(title: document.documentAttributes?[PDFDocumentAttribute.titleAttribute] as? String ?? "",
+                                 blocks: Array(blocks.prefix(800)), url: finalURL)
+        }
         let html = String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
-        let plainText = type.contains("text/plain")
-        return await Task.detached(priority: .userInitiated) {
-            plainText ? ("", Readable.plainBlocks(html)) : Readable.extract(html)
-        }.value
+        if plainText { return Readable.Page(title: "", blocks: Readable.plainBlocks(html), url: finalURL) }
+        return Readable.extractPage(html, url: finalURL)
     }
 
     /// The first `n` words (with "…" when cut).
@@ -621,20 +811,16 @@ enum WebSearch {
 
 // MARK: page text
 
-/// The readable text of a web page: a simple readability heuristic, no DOM. Scripts, styles, navigation, headers,
-/// footers, asides, forms and comments are cut; the page's `<main>` (or its one large `<article>`) is the scope when it
-/// has text, else `<body>`; block-level tags end a block; blocks that are mostly link text (menus, link lists) and short
-/// boilerplate (cookies, sign-in, subscribe) are dropped, unless the page is nothing but links (a front page), whose
-/// link blocks are then the text.
+/// Extracts readable blocks from the page DOM while keeping headings and table labels with their text.
 enum Readable {
-    /// Result pages a search reads: http(s), not a video / social / PDF page whose HTML carries no article text.
+    /// Candidate URLs with a supported content type and a public-looking host.
     static func worthReading(_ url: String) -> Bool {
         guard let u = safeURL(url), let h = u.host?.lowercased() else { return false }
         let skip = ["youtube.com", "youtu.be", "tiktok.com", "instagram.com", "facebook.com", "x.com", "twitter.com",
                     "pinterest.com", "linkedin.com", "reddit.com"]
         if skip.contains(where: { h == $0 || h.hasSuffix("." + $0) }) { return false }
         let p = u.path.lowercased()
-        return ![".pdf", ".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mp3", ".zip", ".doc", ".docx", ".xls", ".ppt"].contains(where: p.hasSuffix)
+        return ![".jpg", ".jpeg", ".png", ".gif", ".mp4", ".mp3", ".zip", ".doc", ".docx", ".xls", ".ppt"].contains(where: p.hasSuffix)
     }
 
     /// An http(s) URL to a public host (no localhost, .local, private / loopback / link-local IPv4, IPv6 literals); a bare
@@ -643,7 +829,7 @@ enum Readable {
         var t = s.trimmingCharacters(in: .whitespacesAndNewlines)
         if !t.contains("://") { t = "https://" + t }
         guard let u = URL(string: t), let sch = u.scheme?.lowercased(), sch == "http" || sch == "https",
-              let h = u.host?.lowercased(), !h.isEmpty, !h.contains(":") else { return nil }
+              let h = u.host?.lowercased(), h.contains("."), !h.contains(":"), u.user == nil, u.password == nil else { return nil }
         if h == "localhost" || [".local", ".localhost", ".internal", ".lan", ".home"].contains(where: h.hasSuffix) { return nil }
         let p = h.split(separator: ".").compactMap { Int($0) }
         if p.count == 4 {
@@ -667,19 +853,6 @@ enum Readable {
         }
     }
 
-    static let cutTags = ["script", "style", "noscript", "svg", "template", "iframe", "head", "nav", "header", "footer",
-                          "aside", "form", "button", "select", "dialog", "menu"].map { re("<\($0)\\b[^>]*>.*?</\($0)\\s*>") }
-    static let comment = re("<!--.*?-->")
-    static let titleRe = re("<title[^>]*>(.*?)</title>")
-    static let mainRe = re("<main\\b[^>]*>(.*?)</main\\s*>")
-    static let articleRe = re("<article\\b[^>]*>(.*?)</article\\s*>")
-    static let bodyRe = re("<body[^>]*>(.*)</body>")
-    /// A tag's attributes, quoted values included (a value may contain ">": Wikipedia's data-mw JSON does).
-    static let attrs = #"(?:[^>"']|"[^"]*"|'[^']*')*"#
-    static let aOpen = re("<a\\b" + attrs + ">"), aClose = re("</a\\s*>")
-    static let blockTag = re("</?(p|div|li|ul|ol|h[1-6]|tr|table|tbody|thead|tfoot|section|article|main|br|hr|dd|dt|dl|blockquote|pre|figure|figcaption|caption|label|option|summary|details|time)\\b" + attrs + ">")
-    static let cellTag = re("</?(td|th)\\b" + attrs + ">")
-    static let anyTag = re("<" + attrs + ">")
     static let spaces = try! NSRegularExpression(pattern: "[ \\t\\r\\u00a0\\u200b]+")
     /// Wikipedia-style footnote markers ("[6]", "[citation needed]") and the spaces tag removal leaves before punctuation.
     static let footnote = try! NSRegularExpression(pattern: "\\[(\\d{1,3}|[a-z]|citation needed|note \\d+)\\]")
@@ -690,84 +863,196 @@ enum Readable {
                          "skip to content", "your browser", "accept all", "download the app", "follow us",
                          "click for", "click here", "get premium", "create your account", "you are here"]
 
-    static func extract(_ html0: String) -> (title: String, blocks: [String]) {
-        let title = groups(titleRe, html0, 1).first.map(WebSearch.plain) ?? ""
-        var html = replace(comment, html0, " ")
-        for r in cutTags { html = replace(r, html, " ") }
-        var scope = groups(bodyRe, html, 1).first ?? html
-        let mains = groups(mainRe, html, 1)
-        let arts = groups(articleRe, html, 1)
-        if let m = mains.max(by: { $0.count < $1.count }), WebSearch.plain(m).count >= 400 {
-            scope = m
-        } else if arts.count <= 2, let a = arts.max(by: { $0.count < $1.count }), WebSearch.plain(a).count >= 400 {
-            scope = a
-        }
-        // anchors marked (\u{1} … \u{2}) so a block's link text can be measured once the tags are gone
-        var t = replace(aOpen, scope, "\u{1}")
-        t = replace(aClose, t, "\u{2}")
-        t = replace(blockTag, t, "\n")
-        t = replace(cellTag, t, " ")
-        t = replace(anyTag, t, "")
-        t = WebSearch.entities(t)
-        var all: [(text: String, links: Bool)] = []
-        var seen = Set<String>()
-        for line in t.components(separatedBy: "\n") {
-            // link text measured per anchor: a menu is several short links; a headline (one long link) is text
-            var inLink = false, linkChars = 0, text = "", anchors = 0, maxAnchorWords = 0, cur = ""
-            for ch in line {
-                if ch == "\u{1}" || ch == "\u{2}" {
-                    if ch == "\u{1}" { inLink = true; anchors += 1; cur = "" } else if inLink {
-                        inLink = false
-                        maxAnchorWords = max(maxAnchorWords, cur.split(separator: " ").count)
-                    }
-                    if text.last.map({ !$0.isWhitespace }) ?? false { text.append(" ") }
-                    continue
-                }
-                text.append(ch)
-                if inLink { cur.append(ch); if !ch.isWhitespace { linkChars += 1 } }
-            }
-            text = replace(spaces, text, " ")
-            text = replace(footnote, text, "")
-            text = replace(spaceBeforePunct, text, "$1")
-            text = replace(spaceAfterOpen, text, "$1").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !text.isEmpty else { continue }
-            let words = text.split(separator: " ").count
-            let letters = text.filter { !$0.isWhitespace }.count
-            if words < 2 && !text.contains(where: \.isNumber) { continue }
-            let low = text.lowercased()
-            if words < 30 && boiler.contains(where: low.contains) { continue }
-            guard seen.insert(text).inserted else { continue }
-            let headline = anchors <= 2 && maxAnchorWords >= 5
-            all.append((text, letters > 0 && Double(linkChars) / Double(letters) > 0.6 && words < 40 && !headline))
-            if all.count >= 800 { break }
-        }
-        var blocks = all.filter { !$0.links }.map(\.text)
-        if blocks.reduce(0, { $0 + $1.count }) < 300 { blocks = all.map(\.text) }  // a page of links: they are its text
-        return (title, mergeShort(blocks))
+    struct Page: Sendable {
+        let title: String
+        let blocks: [String]
+        var url: URL? = nil
+        var renderable = false
     }
 
-    /// Runs of short blocks (table cells, infobox rows, "36°F (2°C)", "Wind Chill 39°F") joined into one block with
-    /// "; " (up to ~24 words), so they are ranked as one fact line instead of dropped as fragments.
-    static func mergeShort(_ blocks: [String]) -> [String] {
-        var out: [String] = []
-        var run: [String] = []
-        var runWords = 0
-        func flush() {
-            if !run.isEmpty { out.append(run.joined(separator: "; ")) }
-            run = []; runWords = 0
+    static func extract(_ html: String) -> (title: String, blocks: [String]) {
+        let page = extractPage(html)
+        return (page.title, page.blocks)
+    }
+
+    static func extractPage(_ html: String, url: URL? = nil) -> Page {
+        let options = HTML_PARSE_RECOVER.rawValue | HTML_PARSE_NONET.rawValue
+            | HTML_PARSE_NOERROR.rawValue | HTML_PARSE_NOWARNING.rawValue
+        let doc = html.withCString { htmlReadMemory($0, Int32(html.utf8.count), nil, "UTF-8", Int32(options)) }
+        guard let doc else { return Page(title: "", blocks: [], url: url, renderable: true) }
+        defer { xmlFreeDoc(doc) }
+        var title = "", heading = "", blocks: [String] = [], seen = Set<String>()
+        var excludedSection = false
+        var main: xmlNodePtr?
+        let excluded: Set<String> = ["head", "style", "noscript", "svg", "template", "iframe", "nav", "footer", "aside", "form",
+                                      "button", "select", "dialog", "menu"]
+        let content: Set<String> = ["p", "li", "dt", "dd", "blockquote", "pre", "figcaption"]
+        let headings: Set<String> = ["h1", "h2", "h3", "h4", "h5", "h6"]
+        func tag(_ n: xmlNodePtr) -> String {
+            n.pointee.name.map { String(cString: $0).lowercased() } ?? ""
         }
-        for b in blocks {
-            let w = b.split(separator: " ").count
-            if w < 6 && !".!?".contains(b.last ?? " ") {
-                if runWords + w > 24 { flush() }
-                run.append(b); runWords += w
-            } else {
-                flush()
-                out.append(b)
+        func text(_ n: xmlNodePtr) -> String {
+            guard let value = xmlNodeGetContent(n) else { return "" }
+            defer { xmlFree(value) }
+            return String(cString: value).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        }
+        func attribute(_ n: xmlNodePtr, _ name: String) -> String? {
+            guard let value = name.withCString({ xmlGetProp(n, UnsafeRawPointer($0).assumingMemoryBound(to: xmlChar.self)) }) else { return nil }
+            defer { xmlFree(value) }
+            return String(cString: value)
+        }
+        func children(_ n: xmlNodePtr, _ visit: (xmlNodePtr) -> Void) {
+            var child = n.pointee.children
+            while let node = child {
+                if node.pointee.type == XML_ELEMENT_NODE { visit(node) }
+                child = node.pointee.next
             }
         }
-        flush()
-        return out
+        func add(_ value: String, section: String = "") {
+            let clean = replace(footnote, replace(responsiveBreak, value, " "), "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !clean.isEmpty, blocks.count < 800 else { return }
+            let words = clean.split(whereSeparator: \.isWhitespace)
+            guard words.count >= 3,
+                  !clean.lowercased().hasPrefix("explore the "),
+                  !(words.count < 16 && boiler.contains(where: clean.lowercased().hasPrefix)),
+                  seen.insert(clean).inserted else { return }
+            let prefix = section.isEmpty ? "" : String(section.split(separator: " ").prefix(8).joined(separator: " ")) + " — "
+            // Keep long paragraphs searchable beyond their opening lines.
+            let limit = min(words.count, 900)
+            var start = 0
+            while start < limit && blocks.count < 800 {
+                let end = min(start + 60, limit)
+                blocks.append(prefix + words[start..<end].joined(separator: " "))
+                if end == limit { break }
+                start += 44
+            }
+        }
+        func scan(_ node: xmlNodePtr, depth: Int) {
+            guard depth < 80 else { return }
+            let name = tag(node)
+            if name == "title", title.isEmpty { title = text(node) }
+            if name == "main", main == nil { main = node }
+            children(node) { scan($0, depth: depth + 1) }
+        }
+        func table(_ node: xmlNodePtr, depth: Int) {
+            var labels: [String] = [], caption = heading
+            func row(_ child: xmlNodePtr, level: Int) {
+                guard level < 8, blocks.count < 800 else { return }
+                switch tag(child) {
+                case "caption": caption = text(child)
+                case "tr":
+                    var cells: [String] = []
+                    var headers = 0
+                    children(child) {
+                        let name = tag($0)
+                        if name == "th" { headers += 1 }
+                        if name == "th" || name == "td" { cells.append(text($0)) }
+                    }
+                    if !cells.isEmpty && headers == cells.count { labels = cells }
+                    else if !cells.isEmpty {
+                        let values = cells.enumerated().map { i, cell in
+                            labels.indices.contains(i) && !labels[i].isEmpty ? "\(labels[i]): \(cell)" : cell
+                        }
+                        add(values.joined(separator: " | "), section: caption)
+                    }
+                case "thead", "tbody", "tfoot", "table":
+                    children(child) { row($0, level: level + 1) }
+                default: break
+                }
+            }
+            row(node, level: depth)
+        }
+        func walk(_ node: xmlNodePtr, depth: Int) {
+            guard depth < 80, blocks.count < 800 else { return }
+            let name = tag(node)
+            if excluded.contains(name) || attribute(node, "hidden") != nil || attribute(node, "aria-hidden") == "true" || attribute(node, "role") == "navigation" { return }
+            if name == "script" { return }
+            if headings.contains(name) {
+                heading = String(text(node).prefix(100))
+                excludedSection = ["references", "external links", "further reading", "see also", "notes",
+                                   "media", "press contacts", "related articles", "site navigation", "contents", "table of contents"].contains(heading.lowercased())
+                return
+            }
+            if name == "table", !excludedSection {
+                table(node, depth: 0)
+            } else if content.contains(name) {
+                if !excludedSection {
+                    // textContent does not insert spaces at inline element boundaries such as <br>.
+                    add(text(node), section: heading)
+                }
+            } else {
+                var hasElements = false
+                children(node) { _ in hasElements = true }
+                if !hasElements && ["div", "article", "main", "section", "span"].contains(name) {
+                    let value = text(node)
+                    if !excludedSection && (name != "span" || value.split(separator: " ").count >= 8) {
+                        add(value, section: heading)
+                    }
+                } else {
+                    children(node) { walk($0, depth: depth + 1) }
+                }
+            }
+        }
+        guard let root = xmlDocGetRootElement(doc) else { return Page(title: "", blocks: [], url: url, renderable: true) }
+        scan(root, depth: 0)
+        walk(main ?? root, depth: 0)
+        if main != nil && blocks.isEmpty {
+            heading = ""
+            excludedSection = false
+            walk(root, depth: 0)
+        }
+
+        // Only accept an actual article body from structured metadata, not a title or description.
+        for payload in groups(jsonLD, html, 1).prefix(12) {
+            guard let value = try? JSONSerialization.jsonObject(with: Data(payload.utf8)) else { continue }
+            var queue: [Any] = [value]
+            for _ in 0..<64 {
+                guard let next = queue.popLast() else { break }
+                if let list = next as? [Any] { queue.append(contentsOf: list.prefix(32)) }
+                if let fields = next as? [String: Any] {
+                    if let body = fields["articleBody"] as? String {
+                        for paragraph in body.components(separatedBy: .newlines).prefix(100) { add(WebSearch.plain(paragraph)) }
+                    }
+                    if let graph = fields["@graph"] { queue.append(graph) }
+                }
+            }
+        }
+        return Page(title: title, blocks: blocks, url: url, renderable: true)
+    }
+
+    private static let responsiveBreak = re(#":br\([a-z]+\):"#)
+    private static let jsonLD = re(#"<script\b[^>]*type\s*=\s*['"]application/ld\+json['"][^>]*>(.*?)</script\s*>"#)
+
+    @MainActor
+    private final class BrowserNavigation: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                     decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            let allowed = action.targetFrame?.isMainFrame == true
+                && action.request.url.flatMap { Readable.safeURL($0.absoluteString) } != nil
+            decisionHandler(allowed ? .allow : .cancel)
+        }
+    }
+
+    @MainActor
+    static func render(_ page: Page, terms: [String: Double], requireStateNames: Bool) async -> Page? {
+        guard let url = page.url, safeURL(url.absoluteString) != nil, !Task.isCancelled else { return nil }
+        let config = WKWebViewConfiguration()
+        config.websiteDataStore = .nonPersistent()
+        let browser = WKWebView(frame: .zero, configuration: config)
+        let navigation = BrowserNavigation()
+        browser.navigationDelegate = navigation
+        defer { browser.stopLoading(); browser.navigationDelegate = nil }
+        browser.load(URLRequest(url: url))
+        for _ in 0..<6 {
+            do { try await Task.sleep(nanoseconds: 500_000_000) } catch { return nil }
+            guard let current = browser.url, safeURL(current.absoluteString) != nil else { continue }
+            let js = "document.documentElement?.outerHTML.slice(0, 1048576) ?? ''"
+            guard let html = try? await browser.evaluateJavaScript(js) as? String, !html.isEmpty else { continue }
+            let result = await Task.detached { extractPage(html, url: current) }.value
+            if Passages.evidence(result, terms: terms, requireStateNames: requireStateNames) != nil { return result }
+        }
+        return nil
     }
 
     static func plainBlocks(_ s: String) -> [String] {
@@ -795,6 +1080,7 @@ enum Passages {
         var sentences: [Sentence]
         var read: Bool
         var maxKeep: Int
+        var pageID: UUID? = nil
         var kept: [Sentence] = []
     }
 
@@ -820,6 +1106,7 @@ enum Passages {
         s.lowercased().split(whereSeparator: { !($0.isLetter || $0.isNumber || $0 == "°") }).map(String.init)
     }
     static func norm(_ w: String) -> String {
+        if w == "democratic" { return "democrat" }
         var t = w
         if t.count > 4 && t.hasSuffix("ies") { t = String(t.dropLast(3)) + "y" }
         else if t.count > 3 && t.hasSuffix("s") && !t.hasSuffix("ss") { t.removeLast() }
@@ -838,6 +1125,27 @@ enum Passages {
         }
         return out
     }
+
+    static func asksForUSStates(_ question: String) -> Bool {
+        let lower = question.lowercased()
+        return (lower.contains("which states") || lower.contains("list the states") || lower.contains("what states"))
+            && ["senate", "united states", "u.s.", "democrat", "republican"].contains(where: lower.contains)
+    }
+
+    private static let usStates = try! NSRegularExpression(pattern: #"\b(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)\b"#)
+
+    private static func hasUSState(_ text: String) -> Bool {
+        usStates.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+    }
+
+    static func questionTerms(_ text: String) -> [String: Double] {
+        let range = NSRange(text.startIndex..., in: text)
+        let clean = urls.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+        return terms(clean).filter { !readWords.contains($0.key) }
+    }
+
+    private static let urls = try! NSRegularExpression(pattern: #"https?://[^\s]+"#, options: .caseInsensitive)
+    private static let readWords: Set<String> = ["read", "open", "page", "website", "link", "detail", "give", "more", "summarize"]
 
     static func cut(_ s: String, words n: Int) -> String {
         let w = s.split(separator: " ")
@@ -861,22 +1169,26 @@ enum Passages {
 
     /// Every sentence of `blocks`, scored and ranked (best first). `snippet`: the backend's snippet, already chosen for
     /// the query (a bonus, so it ranks by position when nothing matches).
-    static func rank(blocks: [String], terms: [String: Double], lead snippet: Bool, title: String = "") -> [Sentence] {
+    static func rank(blocks: [String], terms: [String: Double], lead snippet: Bool, title: String = "", passages: Bool = false, requireStateNames: Bool = false) -> [Sentence] {
         var out: [Sentence] = []
         var seen = Set<String>()
         let titleWords = Set(words(title).map(norm))
         var pos = 0
         for b in blocks {
-            for s0 in sentences(b) {
-                let s = cut(s0, words: 30)
-                let ws = words(s)
+            for s0 in (passages ? [b] : sentences(b)) {
+                let s = cut(s0, words: passages ? 70 : 30)
+                let body = passages ? passageBody(s) : s
+                if requireStateNames && !hasUSState(body) { continue }
+                let ws = words(body)
                 guard ws.count >= 3, seen.insert(s).inserted else { continue }
                 let set = Set(ws.map(norm))
                 var sc = 0.0
-                let low = s.lowercased()
+                let low = body.lowercased()
                 for (t, w) in terms where t.contains("°") ? low.contains(t) : set.contains(t) { sc += w }
-                if s.contains(where: \.isNumber) { sc += 0.3 }
+                if passages && !terms.isEmpty && sc == 0 { continue }
+                if body.contains(where: \.isNumber) { sc += 0.3 }
                 if ws.count < 5 { sc -= 0.3 }
+                if passages && ws.count >= 12 { sc += 0.45 }
                 sc += 0.4 * max(0, 1 - Double(pos) / 40) + (pos < 3 && !snippet ? 0.6 : 0)  // a page's lead defines its subject
                 // a heading (few words, no sentence end, no number) or a repeat of the title carries no fact
                 let numeric = s.contains(where: \.isNumber)
@@ -894,6 +1206,53 @@ enum Passages {
         return out.sorted { $0.score != $1.score ? $0.score > $1.score : $0.pos < $1.pos }
     }
 
+    static func preview(_ passage: String, terms: [String: Double]) -> String {
+        let body = passageBody(passage)
+        let chunks = sentences(body)
+        guard chunks.count > 1 else { return cut(passage, words: 46) }
+        func score(_ sentence: String) -> Double {
+            Set(words(sentence).map(norm)).reduce(0) { $0 + (terms[$1] ?? 0) }
+        }
+        let best = chunks.indices.max { score(chunks[$0]) < score(chunks[$1]) } ?? 0
+        let prefix = String(passage.prefix(passage.count - body.count))
+        if best > 0 {
+            let withPrevious = prefix + chunks[(best - 1)...best].joined(separator: " ")
+            if withPrevious.split(separator: " ").count <= 46 { return withPrevious }
+        }
+        let end = min(chunks.count, best + 2)
+        return cut(prefix + chunks[best..<end].joined(separator: " "), words: 46)
+    }
+
+    private static func passageBody(_ block: String) -> String {
+        guard let boundary = block.range(of: " — "), block.distance(from: block.startIndex, to: boundary.lowerBound) <= 100 else {
+            return block
+        }
+        return String(block[boundary.upperBound...])
+    }
+
+    /// Require query words in a real body passage. A matching title alone cannot qualify a result.
+    static func evidence(_ page: Readable.Page, terms: [String: Double], requireStateNames: Bool = false) -> Double? {
+        let title = Set(words(page.title).map(norm))
+        let exact = terms.filter { $0.value == 1 }
+        var best = 0.0
+        for block in page.blocks {
+            let body = passageBody(block)
+            if requireStateNames && !hasUSState(body) { continue }
+            let wordsInBody = words(body)
+            guard wordsInBody.count >= 5 else { continue }
+            let set = Set(wordsInBody.map(norm))
+            guard set.subtracting(title).count >= 3 else { continue }
+            if terms.isEmpty { return 1 }
+            let hits = terms.reduce(0.0) { sum, term in
+                sum + ((term.key.contains("°") ? body.lowercased().contains(term.key) : set.contains(term.key)) ? term.value : 0)
+            }
+            let titleHits = exact.keys.filter { title.contains($0) }.count
+            guard hits >= 1, hits + Double(titleHits) >= Double(min(2, exact.count)) else { continue }
+            best = max(best, hits + 0.25 * Double(titleHits))
+        }
+        return best > 0 ? best : nil
+    }
+
     /// The model's text: `Answer: …` (Tavily), then per source `[i] Title (host)` and its kept sentences in page order.
     static func render(_ sources: [Source], answer: String?) -> String {
         var lines: [String] = []
@@ -904,8 +1263,15 @@ enum Passages {
             lines.append("[\(i)] \(s.title) (\(s.host))")
             lines.append(s.kept.sorted { $0.pos < $1.pos }.map(\.text).joined(separator: " "))
         }
-        return lines.joined(separator: "\n")
+        let text = lines.joined(separator: "\n")
+        let range = NSRange(text.startIndex..., in: text)
+        return controlTags.stringByReplacingMatches(in: text, range: range, withTemplate: "[markup]")
     }
+
+    private static let controlTags = try! NSRegularExpression(
+        pattern: #"<\|[^<>\s]{1,40}\|>|</?(?:tool_call|tool_response|think)(?:\s[^<>]*)?>|</?(?:parameter|function)(?:=[^<>]*)?>"#,
+        options: .caseInsensitive
+    )
 
     /// Fits the sources to `budget` tokens: each source's first one or two sentences (two for a page read), then the best
     /// remaining sentences of any source while they fit (an estimate calibrated on this text by one count), then exact
@@ -924,7 +1290,8 @@ enum Passages {
             while next[i] < src[i].sentences.count {
                 let s = src[i].sentences[next[i]]
                 next[i] += 1
-                let c = est(s.text + " ") + (src[i].kept.isEmpty ? headerCost(src[i]) : 0)
+                let header = src[i].kept.isEmpty ? headerCost(src[i]) : 0
+                let c = est(s.text + " ") + header
                 if used + c <= target { src[i].kept.append(s); used += c; return true }
             }
             return false
@@ -954,8 +1321,9 @@ enum Passages {
             text = render(src, answer: answer)
             toks = count(text)
         }
+        if let toks, toks > budget { return ("", [], 0) }
         let kept = src.filter { !$0.kept.isEmpty }.map {
-            SearchResult(title: $0.title, url: $0.url, snippet: $0.kept.sorted { $0.pos < $1.pos }.map(\.text).joined(separator: " "), read: $0.read)
+            SearchResult(title: $0.title, url: $0.url, snippet: $0.kept.sorted { $0.pos < $1.pos }.map(\.text).joined(separator: " "), read: $0.read, pageID: $0.pageID)
         }
         return (text, kept, toks ?? est(text))
     }
@@ -963,17 +1331,18 @@ enum Passages {
 
 // MARK: search pre-check
 
-/// A deterministic check on the user's message: a message about live or changing facts
+/// A deterministic check on the user's message (docs/TOOLS.md "Search decision"): a message about live or changing facts
 /// (weather, news, prices, scores, office holders, "right now" / today / latest ...) gets a one-line hint appended in the
 /// engine's copy of the user turn, "(Use web_search.)", so the model calls the tool instead of answering from memory. The
 /// displayed message and the conversation file are unchanged; the hint is a pure function of the message text, so every
 /// later render of the same history gives the same tokens (the live prefix and the prefix cache still match).
+/// `-searchHint 0|1` overrides the default.
 enum SearchHint {
     static let hint = "(Use web_search.)"
-    static var enabled: Bool {
-        defaultOn
-    }
-    static let defaultOn = true
+    static let localDateQuestion = try! NSRegularExpression(
+        pattern: #"^\s*(what (is|day is)|what'?s) (the date( today)?|today'?s date|today)\s*[?.!]?\s*$"#,
+        options: [.caseInsensitive]
+    )
 
     static let triggers: [NSRegularExpression] = [
         // time: the answer is about now
@@ -990,8 +1359,10 @@ enum SearchHint {
     }
 
     /// The user turn as the engine is given it.
-    static func engineContent(_ text: String) -> String {
-        guard enabled, applies(text), !text.contains(hint) else { return text }
+    static func engineContent(_ text: String, hasDeviceDate: Bool = false) -> String {
+        guard applies(text), !text.contains(hint) else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        if hasDeviceDate, localDateQuestion.firstMatch(in: text, range: range) != nil { return text }
         return text.trimmingCharacters(in: .whitespacesAndNewlines) + "\n" + hint
     }
 }

@@ -127,6 +127,7 @@ struct ConversationFile: Codable {
         var id: UUID
         var role: ChatMessage.Role
         var content: String
+        var modelNote: String?
         var meta: MessageMeta?
     }
     var format = ConversationStore.format
@@ -146,7 +147,9 @@ struct ConversationFile: Codable {
         id = c.id; title = c.title; titleIsCustom = c.titleIsCustom; created = c.created; updated = c.updated
         systemPrompt = c.systemPrompt; thinking = c.thinking; tools = c.tools; contextTokens = c.contextTokens
         model = c.model.rawValue
-        messages = c.visible.map { Message(id: $0.id, role: $0.role, content: $0.content, meta: c.meta[$0.id]) }
+        messages = c.visible.map {
+            Message(id: $0.id, role: $0.role, content: $0.content, modelNote: $0.modelNote, meta: c.meta[$0.id])
+        }
     }
 
     var conversation: Conversation {
@@ -156,7 +159,7 @@ struct ConversationFile: Codable {
         c.tools = tools
         c.model = model.flatMap(ModelKind.init(rawValue:)) ?? .qwen36
         for m in messages where m.role != .system {
-            c.messages.append(ChatMessage(id: m.id, role: m.role, content: m.content))
+            c.messages.append(ChatMessage(id: m.id, role: m.role, content: m.content, modelNote: m.modelNote))
             if let x = m.meta { c.meta[m.id] = x }
         }
         return c

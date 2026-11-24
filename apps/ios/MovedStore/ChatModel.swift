@@ -481,8 +481,9 @@ final class ChatModel: ObservableObject {
         if ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue { return }
         let t = String(text.drop(while: { $0.isWhitespace }))
         let id = conv.id
+        let dateNote = ToolSettings.dateNote()
         func msgs(_ c: Conversation, _ content: String) -> [ChatMessage] {
-            engineMessages(c.messages + [ChatMessage(role: .user, content: content)], tools: c.toolsOn)
+            engineMessages(c.messages + [ChatMessage(role: .user, content: content, modelNote: dateNote)], tools: c.toolsOn)
         }
         // after a pause (300 ms without a keystroke): the whole prompt as it would be sent now, with its logits
         let whole = t.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -729,7 +730,7 @@ final class ChatModel: ObservableObject {
         let assistant = ChatMessage(role: .assistant, content: "")
         var aid = assistant.id
         updateConv(convID) { c in
-            c.messages.append(ChatMessage(role: .user, content: prompt))
+            c.messages.append(ChatMessage(role: .user, content: prompt, modelNote: ToolSettings.dateNote()))
             if !c.titleIsCustom && c.title.isEmpty { c.title = Conversation.title(from: prompt) }
         }
         let history = conv.messages
@@ -851,7 +852,8 @@ final class ChatModel: ObservableObject {
                        meta.pages ?? 0, meta.pagesMs ?? 0, meta.resultTokens.map(String.init) ?? "n/a", meta.budget.map(String.init) ?? "n/a",
                        meta.ms, meta.backend, meta.error.map { ", error " + $0 } ?? "",
                        text.replacingOccurrences(of: "\n", with: " | ")))
-            let toolMsg = ChatMessage(role: .tool, content: text)
+            let note = ToolSettings.toolNote(meta, canCallAgain: calls < ToolSettings.maxCalls)
+            let toolMsg = ChatMessage(role: .tool, content: text, modelNote: note)
             let next = ChatMessage(role: .assistant, content: "")
             var tm = MessageMeta()
             tm.tool = meta
@@ -929,22 +931,20 @@ final class ChatModel: ObservableObject {
         return rounds.last!
     }
 
-    /// The engine's input for a round: empty assistant messages dropped; with tools, the system
-    /// message carries the template's tools block (ToolSettings.systemContent; one is added when the chat has no system
-    /// prompt); a tool-call turn of the current round (after the last user message) gets the generation prompt's empty think
-    /// block it was generated after when it has none (thinking off), so the template renders it as the engine fed it and
-    /// the next round continues the live state. Earlier rounds' turns are left to the history mode
-    /// (templateMessages).
+    /// Render hidden app notes and preserve the assistant prefix across tool calls.
     func engineMessages(_ msgs: [ChatMessage], tools: Bool) -> [ChatMessage] {
         var out = msgs.filter { !($0.role == .assistant && $0.content.isEmpty) }
-        if tools {
-            if out.first?.role == .system {
-                out[0].content = ToolSettings.systemContent(out[0].content, tools: true)
-            } else {
-                out.insert(ChatMessage(role: .system, content: ToolSettings.systemContent("", tools: true)), at: 0)
+        if out.first?.role == .system {
+            out[0].content = ToolSettings.systemContent(out[0].content, tools: tools)
+        } else {
+            let system = ToolSettings.systemContent("", tools: tools)
+            if !system.isEmpty { out.insert(ChatMessage(role: .system, content: system), at: 0) }
+        }
+        for i in out.indices {
+            if tools && out[i].role == .user {
+                out[i].content = SearchHint.engineContent(out[i].content, hasDeviceDate: out[i].modelNote != nil)
             }
-            // the search pre-check's hint on user turns about live facts (deterministic: the same on every render)
-            for i in out.indices where out[i].role == .user { out[i].content = SearchHint.engineContent(out[i].content) }
+            if let note = out[i].modelNote { out[i].content += "\n\n" + note }
         }
         if let u = out.lastIndex(where: { $0.role == .user }) {
             for i in out.indices where i > u && out[i].role == .assistant && !out[i].content.contains("</think>") {
@@ -954,7 +954,7 @@ final class ChatModel: ObservableObject {
         return out
     }
 
-    /// The effective system content of a chat (what the warm-up caches): the tools block when tools are on.
+    /// The effective system content of a chat (what the warm-up caches).
     func effectiveSystem(_ c: Conversation) -> String {
         ToolSettings.systemContent(c.systemPrompt, tools: c.toolsOn)
     }
@@ -993,7 +993,9 @@ final class ChatModel: ObservableObject {
         for (i, r) in rounds.enumerated() {
             let p = r.prefill ?? [:]
             let decode = r.seconds
-            log("TOOLTRIP reply=\(replyNo) round=\(i + 1)/\(rounds.count) kind=\(r.prefillKind ?? "n/a") prompt_tokens=\(r.promptTokens ?? 0) reused=\((r.promptTokens ?? 0) - Int(p["prefill_tokens"] ?? 0)) prefilled=\(Int(p["prefill_tokens"] ?? 0)) prefill_s=\(f(p["prefill_s"], 1)) prefill_mb=\(f(p["prefill_mb_read"], 1)) phone_read_s=\(f(p["prefill_mb_read"], 750)) restore_s=\(f(p["prefix_restore_ms"])) first_token_s=\(f(r.firstTokenMs)) generated=\(r.tokens) decode_s=\(String(format: "%.2f", decode)) wall_s=\(f(r.wallMs)) reason=\(r.reason)")
+            let computed = Int(p["prefill_computed"] ?? p["prefill_tokens"] ?? 0)
+            let reused = Int(p["prefill_reused"] ?? Double(max(0, (r.promptTokens ?? 0) - computed)))
+            log("TOOLTRIP reply=\(replyNo) round=\(i + 1)/\(rounds.count) kind=\(r.prefillKind ?? "n/a") prompt_tokens=\(r.promptTokens ?? 0) reused=\(reused) prefilled=\(computed) prefill_s=\(f(p["prefill_s"], 1)) prefill_mb=\(f(p["prefill_mb_read"], 1)) phone_read_s=\(f(p["prefill_mb_read"], 750)) restore_s=\(f(p["prefix_restore_ms"])) first_token_s=\(f(r.firstTokenMs)) generated=\(r.tokens) decode_s=\(String(format: "%.2f", decode)) wall_s=\(f(r.wallMs)) reason=\(r.reason)")
         }
         for (i, m) in searches.enumerated() {
             log("TOOLTRIP reply=\(replyNo) search=\(i + 1) tool=\(m.name) query=\"\(m.query)\" backend=\(m.backend) results=\(m.results.count) pages=\(m.pages ?? 0) pages_s=\(f(m.pagesMs)) result_tokens=\(m.resultTokens.map(String.init) ?? "n/a") budget=\(m.budget.map(String.init) ?? "n/a") search_s=\(f(m.ms))\(m.error.map { " error=" + $0 } ?? "")")

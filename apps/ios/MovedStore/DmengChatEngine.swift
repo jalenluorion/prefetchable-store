@@ -408,8 +408,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     }
 
     func cancel() {
-        let m = lock.withLock { () -> DmengModel? in cancelled = true; return model }
-        m?.cancel()
+        lock.withLock {
+            cancelled = true
+            model?.cancel()
+        }
     }
 
     /// Bring the system prompt's state into the engine (idle time: at launch and when a new chat opens).
@@ -496,7 +498,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
             if let h = head { lock.withLock { taHeadKey = hkey; taHead = h } }
         }
         guard let head, !text.isEmpty else { return }
-        let body = c.encode(full == nil ? text : (a.last?.content.dropLast(2)).map(String.init) ?? text)
+        let body = c.encode(text)
         let n = head.count + body.count - 1
         guard n > head.count else { return }
         var ids = Array((head + body).prefix(n))
@@ -584,8 +586,14 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
             guard let m, let c else { cont.finish(throwing: EngineError.notLoaded); return }
             let gen = GenSettings.current(defaults: c.generationDefaults)
             m.queue.async { [weak self] in
+                guard let self else { cont.finish(); return }
+                // The tool-call terminator cancels the previous decode. Reset its native flag on the engine
+                // queue before this round's sync, while preserving a Stop that arrived after generate().
+                self.lock.withLock {
+                    if self.cancelled { m.cancel() } else { m.clearCancel() }
+                }
                 do {
-                    try self?.reply(m, c, msgs: msgs, thinking: think, maxNew: maxNew, gen: gen, cont: cont)
+                    try self.reply(m, c, msgs: msgs, thinking: think, maxNew: maxNew, gen: gen, cont: cont)
                     cont.finish()
                 } catch {
                     cont.finish(throwing: error)

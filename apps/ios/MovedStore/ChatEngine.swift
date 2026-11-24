@@ -10,11 +10,14 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var role: Role
     var content: String
+    /// App-supplied context appended only to the engine copy of the message.
+    var modelNote: String?
 
-    init(id: UUID = UUID(), role: Role, content: String) {
+    init(id: UUID = UUID(), role: Role, content: String, modelNote: String? = nil) {
         self.id = id
         self.role = role
         self.content = content
+        self.modelNote = modelNote
     }
 
     /// The chat-template input.
