@@ -31,6 +31,7 @@ struct GpuHalf {
   bool wrap(const void* base, size_t bytes);
   bool holds(const Weight& w) const;  // an 8- or 4-bit affine matrix inside one wrapped region
   size_t wrapped_bytes() const;
+  void touch();  // one GPU use of every wrapped buffer (their pages made resident for the GPU now)
   // ---- gemm sets
   void begin();
   int input(const float* const* rows, int n, int K);  // n fp32 rows of K values (pointers kept until run())
@@ -84,6 +85,7 @@ struct GpuHalf {
   bool wrap(const void*, size_t) { return false; }
   bool holds(const Weight&) const { return false; }
   size_t wrapped_bytes() const { return 0; }
+  void touch() {}
   void begin() {}
   int input(const float* const*, int, int) { return -1; }
   int add(const Weight&, int, int, int, const int* = nullptr) { return -1; }

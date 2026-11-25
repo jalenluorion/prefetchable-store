@@ -1158,6 +1158,25 @@ void Cache::lock_start(int64_t bytes) {
   apply_budget();  // the slots past the start budget: never locked, given back as reusable
 }
 
+void Cache::lend(int64_t bytes) {
+  bytes = std::max<int64_t>(0, bytes);
+  if (bytes == lent) return;
+  if (lent == 0) lend_base = budget_bytes();  // the budget without the loan (restored exactly: no slot lost to rounding)
+  const int64_t base = lend_base;
+  lent = bytes;
+  set_budget(std::max<int64_t>(0, base - bytes));
+  apply_budget();
+}
+
+void Cache::lend_hold() {
+  if (!lent || mem == Mem::FILE || mem == Mem::PURGEABLE) return;
+  for (int p = 0; p < npools; p++) {
+    SlotPool& S = P[p];
+    for (int i = S.cap; i < S.n; i++)
+      if (S.s[i].layer < 0 && S.s[i].pins == 0 && S.pending[i].load(std::memory_order_acquire) == 0) slot_memory(p, i, false);
+  }
+}
+
 int64_t Cache::budget_bytes() const {
   int64_t b = 0;
   for (int p = 0; p < npools; p++) b += (int64_t)P[p].cap * (int64_t)P[p].rec;

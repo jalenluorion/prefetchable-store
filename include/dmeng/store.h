@@ -196,6 +196,14 @@ struct Cache {
   bool defer_lock = false;
   void lock_start(int64_t bytes);
   void apply_budget();
+  // a loan of memory for a prompt's transient buffers (its scratch, the GPU path's buffers, its cancel snapshot): the
+  // budget falls by `bytes` at once (call on the compute thread between passes; slots past the lowered budget are given
+  // back as at any budget change, and the prompt's own reads refill what is left) and comes back with lend(0)
+  void lend(int64_t bytes);
+  int64_t lent = 0, lend_base = 0;
+  // while lent: the slots past the budget given back again (measured on macOS: the GPU's first use of a wrapped buffer
+  // faults its given-back pages in and charges them to the process again); idempotent, cheap (call between layers)
+  void lend_hold();
   std::vector<double> share_;    // the budget split init was given
   int64_t budget_bytes() const;  // the budget in force (slots in use x record bytes)
   // Mem::FILE adaptive budget: the believed set follows what the OS keeps. Each token a rotating sample of held records

@@ -787,7 +787,8 @@
   "scratch_mb": 768,
   "fast": 1,
   "drop_upto": 64,
-  "apart": 1
+  "apart": 1,
+  "lend": 1
  },
  "drafting": {
   "cost_prior": null,

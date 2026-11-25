@@ -1,5 +1,6 @@
 // The prefix cache (include/dmeng/session.h).
 #include "dmeng/session.h"
+#include "dmeng/pagevec.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -19,15 +20,15 @@ namespace dm {
 using sclk = std::chrono::steady_clock;
 static double ms_from(sclk::time_point t) { return std::chrono::duration<double, std::milli>(sclk::now() - t).count(); }
 
-struct PrefixCache::Ckpt {
+struct PrefixCache::Ckpt {  // (state blobs in pages from the system: a dropped one is given back, dmeng/pagevec.h)
   int pos = 0;
-  std::vector<uint8_t> fixed;
+  PageVec<uint8_t> fixed;
   uint64_t used = 0;
   bool pinned = false;
 };
 struct PrefixCache::Parked {
   std::vector<int> toks;
-  std::vector<uint8_t> fixed, posd;
+  PageVec<uint8_t> fixed, posd;
   std::vector<float> logits;
   int logits_k = 0;                       // the head k they were computed with (LM::set_head_k; 0 = every logit)
   std::vector<std::unique_ptr<Ckpt>> ck;  // the live sequence's checkpoints, moved with it

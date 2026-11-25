@@ -263,6 +263,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "fast": 1,
    "gpu_min": 64,
    "join": 0.25,
+   "lend": 1,
    "scratch_mb": 768,
    "short_names": "router",
    "span": 32768,

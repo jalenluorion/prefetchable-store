@@ -35,6 +35,7 @@ struct GpuGemm {
   bool ok() const { return impl != nullptr; }
   bool holds(const void* p, size_t n) const;       // [p, p + n) inside one wrapped buffer
   size_t wrapped_bytes() const;
+  void touch();  // one GPU use of every wrapped buffer (their pages made resident for the GPU now)
   // 1 (default): the matrix-unit kernel (gm: fp32 simdgroup multiply-accumulate on exact small integers); 0: the
   // integer kernel (gd). The same bits either way; set between sets.
   void set_kernel(int k);
@@ -68,6 +69,7 @@ struct GpuGemm {  // built without Metal: never ok, so never used
   bool ok() const { return false; }
   bool holds(const void*, size_t) const { return false; }
   size_t wrapped_bytes() const { return 0; }
+  void touch() {}
   void set_kernel(int) {}
   int kernel() const { return -1; }
   void begin() {}

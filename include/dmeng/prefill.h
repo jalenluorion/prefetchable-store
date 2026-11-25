@@ -55,6 +55,10 @@ struct PrefillOpts {
   // policy's statistics, its positions do not move the policy's clock, and its reads take the slots of its own earlier
   // reads before any record held before it. Placement only. false: every family's default
   bool apart = false;
+  // the prompt's transient memory (its scratch, the GPU path's buffers, its cancel snapshot) lent by the cache for the
+  // prefill (Cache::lend; with release only): the process's peak through a prompt stays the decode's. false: every
+  // family's default
+  bool lend = false;
   // the early names of a span of n positions (multi: several sub-chunks): 0 none, 1 whole next layer, 2 router picks
   int names_for(int n, bool multi) const {
     if (stream != 3) return stream;

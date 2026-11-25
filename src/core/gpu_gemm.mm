@@ -481,6 +481,18 @@ static int find_wb(const GImpl& g, const void* p, size_t n) {
 
 bool GpuGemm::holds(const void* p, size_t n) const { return impl && find_wb(*(const GImpl*)impl, p, n) >= 0; }
 
+void GpuGemm::touch() {
+  if (!impl) return;
+  GImpl& g = *(GImpl*)impl;
+  id<MTLBuffer> o = [g.dev newBufferWithLength:16384 options:MTLResourceStorageModeShared];
+  id<MTLCommandBuffer> cb = [g.q commandBuffer];
+  id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
+  for (auto& w : g.wb) [bl copyFromBuffer:w.b sourceOffset:0 toBuffer:o destinationOffset:0 size:16];
+  [bl endEncoding];
+  [cb commit];
+  [cb waitUntilCompleted];
+}
+
 size_t GpuGemm::wrapped_bytes() const {
   if (!impl) return 0;
   size_t s = 0;

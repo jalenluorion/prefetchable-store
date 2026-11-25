@@ -590,6 +590,18 @@ size_t GpuHalf::wrapped_bytes() const {
   return s;
 }
 
+void GpuHalf::touch() {
+  if (!impl) return;
+  HImpl& g = *(HImpl*)impl;
+  id<MTLBuffer> o = [g.dev newBufferWithLength:16384 options:MTLResourceStorageModeShared];
+  id<MTLCommandBuffer> cb = [g.q commandBuffer];
+  id<MTLBlitCommandEncoder> bl = [cb blitCommandEncoder];
+  for (auto& w : g.wb) [bl copyFromBuffer:w.b sourceOffset:0 toBuffer:o destinationOffset:0 size:16];
+  [bl endEncoding];
+  [cb commit];
+  [cb waitUntilCompleted];
+}
+
 void GpuHalf::begin() { ((HImpl*)impl)->clear(); }
 
 int GpuHalf::input(const float* const* rows, int n, int K) {

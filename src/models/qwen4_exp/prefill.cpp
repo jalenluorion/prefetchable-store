@@ -13,6 +13,7 @@
 
 #include "../../core/gpu_gemm.h"
 #include "../../core/gpu_half.h"
+#include "dmeng/pagevec.h"
 #include "qwen4_exp.h"
 
 namespace dm {
@@ -20,16 +21,17 @@ namespace qwen4 {
 
 struct Flash::Span {
   int n_cap = 0, sub_cap = 0;
-  std::vector<float> hyp;  // [n][N] the span's streams
-  std::vector<float> mixs, inj2s, ys;  // the fast path: every position's MoE input [n][H] and injection [n][64], a MoE block's outputs
+  // (pages from the system, given back at the release: dmeng/pagevec.h)
+  PageVec<float> hyp;  // [n][N] the span's streams
+  PageVec<float> mixs, inj2s, ys;  // the fast path: every position's MoE input [n][H] and injection [n][64], a MoE block's outputs
   // per position of a sub-chunk
-  std::vector<float> nrm, lo, up, r, mix, y, inj1, inj2, proj, cv, att, e, key, val, gated, normed, pout;
+  PageVec<float> nrm, lo, up, r, mix, y, inj1, inj2, proj, cv, att, e, key, val, gated, normed, pout;
   std::vector<XBuf> xa, xb, xc;
   XQB qa, qc;
   std::vector<std::vector<int>> sel;
   std::vector<int32_t> hist;  // [n + 2] the n-gram history: the two ids before the span, then the span's ids
   std::shared_ptr<RowStore::Batch> rows;
-  std::vector<uint8_t> snap;
+  PageVec<uint8_t> snap;
   size_t bytes() const {
     size_t b = 4 * (hyp.capacity() + mixs.capacity() + inj2s.capacity() + ys.capacity() + nrm.capacity() + lo.capacity() + up.capacity() + r.capacity() + mix.capacity() + y.capacity() + inj1.capacity() +
                     inj2.capacity() + proj.capacity() + cv.capacity() + att.capacity() + e.capacity() + key.capacity() + val.capacity() +
@@ -178,7 +180,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
     for (int i = 0; i < n + 2; i++) ver->hist[i] = P.hist[i];
   }
   T->embed += ms_since(t0);
-  if (cancel && multi) {  // a cancel inside the span puts the fixed state back here
+  if (cancel && multi && S->pos > 0) {  // a cancel inside the span puts the fixed state back here (at 0: the empty state)
     P.snap.resize(fixed_bytes(*S));
     save_fixed(*S, P.snap.data());
   }
@@ -202,6 +204,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
   for (int L = 0; L < NL; L++) {
     const Lw& W = lw[L];
     if (core->cache.budget_req.load(std::memory_order_relaxed) >= 0) core->cache.apply_budget();
+    core->cache.lend_hold();  // (a prompt's loan: what the GPU's first use of the slab faulted back in goes back again)
     // the fast path names this layer whole at its start (its attention runs while the records are read): the names the
     // layer before gave it were mostly refused, the cache holding that layer's pinned union
     if (GH && names == 1) core->span_name(L);
@@ -477,7 +480,8 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
     core->span_unname(L);  // its union pins and its names
     if (multi && progress && *progress) (*progress)(prog_base + (int)((long)n * (L + 1) / NL), prog_total, 0.0);
     if (cancel && multi && cancel->load() && L + 1 < NL) {  // stop: the fixed state back at the span's start, nothing else moved
-      load_fixed(*S, P.snap.data(), S->pos);
+      if (S->pos == 0) reset(*S);
+      else load_fixed(*S, P.snap.data(), S->pos);
       core->span_unname(L + 1);
       core->span_mode = false;
       return false;
@@ -581,6 +585,18 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
   const int span_cap = std::max(chunk_eff, (int)(rest / per));
   int span = std::min(std::max(chunk_eff, po.span), span_cap);
   if (n > span) span = (n + (n + span - 1) / span - 1) / ((n + span - 1) / span);  // equal spans
+  // the prompt's transient memory from the cache (PrefillOpts::lend): the span's streams, its sub-chunk and MoE-block
+  // buffers (the fast path's GPU block is sized by the same bound), the cancel snapshot when the span does not start empty
+  int64_t lent = 0;
+  if (po.lend && po.release) {
+    const int sl = std::min(n, span);
+    const double est = sl * per + std::min(chunk_eff, sl) * sub_bytes_per_pos() + std::min(sl, px.moe_block) * moe_bytes_per_pos() +
+                       (cancel && S->pos > 0 && sl > chunk_eff ? (double)fixed_bytes(*S) : 0.0) - (double)span_bytes();
+    lent = (int64_t)std::max(0.0, est);
+    if (fast) gpu.half()->touch();
+    if (gpu) gpu->touch();
+    core->cache.lend(lent);
+  }
   px.gdn_ms = px.qsa_ms = 0;
   const double hs0 = gpu.half() ? gpu.half()->ms_stage : 0, hg0 = gpu.half() ? gpu.half()->ms_gpu : 0, hf0 = gpu.half() ? gpu.half()->flops : 0;
   const double mh0 = core->moe_half_ms;
@@ -635,7 +651,7 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
         << ",\"sets\":" << core->moe_gpu_sets - me_n0 << ",\"failed\":" << core->moe_gpu_failed - me_f0 << "}}";
     // what this prefill held before the release below: the span's scratch and the GPU paths' buffers (MB)
     o << ",\"held_mb\":{\"scratch\":" << span_bytes() / MB << ",\"gpu_split\":" << (gpu ? gpu->buffer_bytes() / MB : 0.0)
-      << ",\"gpu_half\":" << (gpu.half() ? gpu.half()->buffer_bytes() / MB : 0.0) << "}";
+      << ",\"gpu_half\":" << (gpu.half() ? gpu.half()->buffer_bytes() / MB : 0.0) << ",\"lent\":" << lent / MB << "}";
     o << "}";
     st->json = o.str();
   }
@@ -646,6 +662,7 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     if (gpu) gpu->trim();
     if (gpu.half()) gpu.half()->trim();
   }
+  if (lent) core->cache.lend(0);
   if (ok && fast_head && want_logits) greedy_ = argmax();
   return ok;
 }
