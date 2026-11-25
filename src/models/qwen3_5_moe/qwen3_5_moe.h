@@ -10,6 +10,7 @@
 
 #include "dmeng/model.h"
 #include "dmeng/screen_head.h"
+#include "../common/gdn.h"
 
 namespace dm {
 struct GpuGemm;  // src/core/gpu_gemm.h
@@ -176,6 +177,9 @@ struct Qwen35 : Model {
   std::unique_ptr<GpuGemm> gpu;  // the Metal share of the prefill's products (po.gpu_frac(_experts) > 0), kept across prefills
   bool set_gpu_frac(double f, bool experts, std::string& err);  // prefill.cpp
   std::vector<size_t> fixed_off;  // [NL] byte offset of a DeltaNet layer's conv state in the fixed blob
+  gdn::Dims gd;                   // the Gated DeltaNet's shape (silu gate)
+  // a DeltaNet layer's fork-join context for one position (gdn.h): the state of S, the layer's weights, the buffers
+  void lin_ctx(gdn::Ctx& X, int L, float* qkv, float* z, float* bb, float* aa, float* cv, float* o, bool quant_heads);
   void attn_linear(int L, const float* hin, float* rout);
   void attn_full(int L, const float* hin, float* rout);
   void attn_full_core(int L, int pos, const float* qg, const float* kp, const float* vp, float* ob, XBuf& xo);
@@ -203,36 +207,9 @@ struct Qwen35 : Model {
   std::string verify_json() const;  // verify statistics (steps, rollbacks, ms of state copies and replays)
 };
 
-// the decode path's Gated DeltaNet phases (qwen3_5_moe.cpp), also run by the verify for each of its positions
-struct LinCtx {
-  Qwen35* M;
-  int L;
-  float *qkv, *z, *bb, *aa, *cv, *o;
-  bool quant_heads;
-  std::atomic<int> qk_done[64];  // phase_lin_conv_heads: the conv of key head kh's q and k channels is done
-  // phase_lin_conv_heads: the output projection after the heads in the same fork-join (row chunks of 32 once every head
-  // is done; the heads quantise their own outputs), its rows as run_rows computes them
-  const Weight* wo = nullptr;
-  float* rout = nullptr;
-  int o_chunks = 0, o_nb = 0;  // claims of the output projection: o_nb of 32 rows, then 8-row claims (a short tail)
-  std::atomic<int> heads_left{0};
-  alignas(128) std::atomic<int> next{0};
-};
-void phase_conv(void* p, int tid, int nt);
-void phase_lin_heads(void* p, int, int);
-void phase_lin_conv_heads(void* p, int, int);  // the decode path: both in one fork-join
-
-// one channel of the causal convolution for one position, as the decode path computes it: the taps over the state
-// (oldest first) as a fused multiply-add chain, the newest input's product rounded on its own and added; then the state
-// shifts by one
-inline float conv_channel(float* st, const float* wc, float x, int C, int CK, int ch) {
-  float v = 0;
-  for (int k = 0; k < CK - 1; k++) v = __builtin_fmaf(st[(size_t)k * C + ch], wc[k], v);
-  v = add_unfused(v, x, wc[CK - 1]);
-  for (int k = 0; k + 1 < CK - 1; k++) st[(size_t)k * C + ch] = st[(size_t)(k + 1) * C + ch];
-  st[(size_t)(CK - 2) * C + ch] = x;
-  return silu(v);
-}
+// the Gated DeltaNet's convolution channel and value head are the shared ones (src/models/common/gdn.h): the decode path,
+// the verify and the batched prefill all compute through them
+using gdn::conv_channel;
 
 }  // namespace qwen35
 }  // namespace dm

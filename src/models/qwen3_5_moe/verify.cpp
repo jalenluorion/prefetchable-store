@@ -6,7 +6,7 @@
 //   - resident matrices (attention projections, o projections, head): run_rows_n, whose multi-vector and packed i8mm
 //     kernels are bit-identical per position to the one-vector mv the single step calls; bf16 rows through dot_bf16 per
 //     position (the same function);
-//   - the Gated DeltaNet conv and heads: the decode path's own phase_conv / phase_lin_heads, run once per position in order;
+//   - the Gated DeltaNet conv and heads: the decode path's own gdn::phase_conv / gdn::phase_heads, run once per position in order;
 //   - full attention: attn_full_core, the one body decode calls too (KV write at the position, attention over 0..pos);
 //   - the MoE block: Core::moe_chunk (each position's released routing, expert arithmetic and combination order are the
 //     single step's; the union of the positions' experts is read once);
@@ -187,9 +187,10 @@ bool Qwen35::verify(State& s0, const int32_t* ids, int n) {
       auto tc = clk::now();
       W8.ms_snap += ms_between(tb, tc);
       for (int i = 0; i < n; i++) {  // positions in order through the decode path's phases
-        LinCtx X{this, L, qkv[i], z[i], bb[i], aa[i], W8.cv.data(), ob[i], false};
-        pool.run(phase_conv, &X);
-        pool.run(phase_lin_heads, &X);
+        gdn::Ctx X;
+        lin_ctx(X, L, qkv[i], z[i], bb[i], aa[i], W8.cv.data(), ob[i], false);
+        pool.run(gdn::phase_conv, &X);
+        pool.run(gdn::phase_heads, &X);
         W8.xo[i].prep(ob[i], ZD);
       }
       auto td = clk::now();
@@ -269,9 +270,10 @@ void Qwen35::commit(State& s0, int a) {
         float* z = qkv + C;
         float* bb = z + ZD;
         float* aa = bb + c.NVH;
-        LinCtx X{this, L, qkv, z, bb, aa, W8.cv.data(), W8.ob.data(), false};
-        pool.run(phase_conv, &X);
-        pool.run(phase_lin_heads, &X);
+        gdn::Ctx X;
+        lin_ctx(X, L, qkv, z, bb, aa, W8.cv.data(), W8.ob.data(), false);
+        pool.run(gdn::phase_conv, &X);
+        pool.run(gdn::phase_heads, &X);
       }
     }
     S->pos = W8.pos0 + a;

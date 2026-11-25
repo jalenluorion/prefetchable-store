@@ -55,6 +55,13 @@ bool Qwen35::load(const LoadOpts& op, std::string& err) {
     w.sd = R.weight(s + "sd");
     w.shgate = R.bf16_row(s + "shgate");
   }
+  gd.NKH = c.NKH;
+  gd.NVH = c.NVH;
+  gd.DK = c.DK;
+  gd.DV = c.DV;
+  gd.CK = c.CK;
+  gd.eps = c.eps;
+  gd.sigmoid_gate = false;
   fnorm = (const float*)R.ptr("norm");
   head = R.weight("head");
   if (!rows.open(c.emb_file[0] == '/' ? c.emb_file : op.dir + "/" + c.emb_file, c.emb_off, c.H, err)) return false;
@@ -238,111 +245,21 @@ bool Qwen35::load_pos(State& s0, int p0, int p1, const void* src) {
 }
 
 // ------------------------------------------------------------------------------------------------ Gated DeltaNet
-void phase_conv(void* p, int tid, int nt) {
-  LinCtx& X = *(LinCtx*)p;
-  Qwen35& M = *X.M;
-  const QCfg& c = M.c;
-  const int C = c.conv_dim(), CK = c.CK;
-  float* st = M.S->ls[X.L].conv.data();
-  const float* w = M.lw[X.L].conv;
-  const int a = (int)((long)C * tid / nt), b = (int)((long)C * (tid + 1) / nt);
-  for (int ch = a; ch < b; ch++) {
-    X.cv[ch] = conv_channel(st, w + (size_t)ch * CK, X.qkv[ch], C, CK, ch);
-  }
-}
-// one value head of the Gated DeltaNet (its convolved q, k, v in X.cv): the head loop's arithmetic, shared by both phases
-static void lin_head(LinCtx& X, int h) {
-  Qwen35& M = *X.M;
-  const QCfg& c = M.c;
-  const Lw& W = M.lw[X.L];
-  const int DK = c.DK, DV = c.DV, rep = c.NVH / c.NKH;
-  const int kh = h / rep;
-  std::vector<float> q(DK), k(DK);
-  const float* qs = X.cv + kh * DK;
-  const float* ks = X.cv + c.NKH * DK + kh * DK;
-  const float* v = X.cv + 2 * c.NKH * DK + h * DV;
-  float qq = 0, kk = 0;
-  for (int i = 0; i < DK; i++) {
-    qq += qs[i] * qs[i];
-    kk += ks[i] * ks[i];
-  }
-  // mlx-vlm: q = Dk^-1 rms_norm(q, eps 1e-6 / Dk), k = Dk^-1/2 rms_norm(k, ...) == l2 normalisation (+1e-6), q / sqrt(Dk)
-  const float rq = 1.f / std::sqrt(qq + 1e-6f) / std::sqrt((float)DK), rk = 1.f / std::sqrt(kk + 1e-6f);
-  for (int i = 0; i < DK; i++) {
-    q[i] = qs[i] * rq;
-    k[i] = ks[i] * rk;
-  }
-  const float beta = sigm(X.bb[h]);
-  const float xa = X.aa[h] + W.dt_bias[h];
-  const float sp = xa > 20.f ? xa : std::log1p(std::exp(xa));
-  const float g = std::exp(-std::exp(W.A_log[h]) * sp);
-  float* St = M.S->ls[X.L].S.data() + (size_t)h * DV * DK;
-  float* o = X.o + h * DV;
-  for (int vi = 0; vi < DV; vi++) {
-    float* s = St + (size_t)vi * DK;
-    float32x4_t acc = vdupq_n_f32(0), gv = vdupq_n_f32(g);
-    for (int i = 0; i < DK; i += 4) {
-      float32x4_t sv = vmulq_f32(vld1q_f32(s + i), gv);
-      vst1q_f32(s + i, sv);
-      acc = vfmaq_f32(acc, sv, vld1q_f32(k.data() + i));
-    }
-    const float delta = (v[vi] - vaddvq_f32(acc)) * beta;
-    float32x4_t dv = vdupq_n_f32(delta), oa = vdupq_n_f32(0);
-    for (int i = 0; i < DK; i += 4) {
-      float32x4_t sv = vfmaq_f32(vld1q_f32(s + i), vld1q_f32(k.data() + i), dv);
-      vst1q_f32(s + i, sv);
-      oa = vfmaq_f32(oa, sv, vld1q_f32(q.data() + i));
-    }
-    o[vi] = vaddvq_f32(oa);
-  }
-  // gated RMSNorm over the head (weight one-centred), times silu(z)
-  float ss = 0;
-  for (int i = 0; i < DV; i++) ss += o[i] * o[i];
-  const float r = 1.f / std::sqrt(ss / DV + c.eps);
-  const float* z = X.z + h * DV;
-  for (int i = 0; i < DV; i++) o[i] = o[i] * r * W.gnorm[i] * silu(z[i]);
-  if (X.quant_heads)
-    for (int j = 0; j < DV / XB; j++) xq_block(M.xatt.q, (h * DV) / XB + j, o + j * XB);
-}
-void phase_lin_heads(void* p, int, int) {
-  LinCtx& X = *(LinCtx*)p;
-  for (int h; (h = X.next.fetch_add(1, std::memory_order_relaxed)) < X.M->c.NVH;) lin_head(X, h);
-}
-// The convolution and the heads in one fork-join: jobs [0, NKH) convolve key head kh's q and k channels (flagged when
-// done), then one job per value head convolves its own v channels, waits for its key head's flag and runs the head.
-// Every channel's conv_channel call and every head's arithmetic are phase_conv's and phase_lin_heads'.
-void phase_lin_conv_heads(void* p, int, int) {
-  LinCtx& X = *(LinCtx*)p;
-  Qwen35& M = *X.M;
-  const QCfg& c = M.c;
-  const int DK = c.DK, DV = c.DV, rep = c.NVH / c.NKH, C = c.conv_dim(), CK = c.CK;
-  float* cst = M.S->ls[X.L].conv.data();
-  const float* cw = M.lw[X.L].conv;
-  for (int job; (job = X.next.fetch_add(1, std::memory_order_relaxed)) < c.NKH + c.NVH + X.o_chunks;) {
-    if (job >= c.NKH + c.NVH) {
-      while (X.heads_left.load(std::memory_order_acquire) > 0) __builtin_arm_yield();
-      const int oc = job - c.NKH - c.NVH;
-      const int r0 = oc < X.o_nb ? oc * 32 : X.o_nb * 32 + (oc - X.o_nb) * 8, r1 = std::min(X.wo->rows, r0 + (oc < X.o_nb ? 32 : 8));
-      mv(*X.wo, r0, r1, &M.xatt.q, nullptr, X.rout + r0);
-      continue;
-    }
-    if (job < c.NKH) {
-      for (int part = 0; part < 2; part++) {  // q channels of key head kh, then its k channels
-        const int c0 = part * c.NKH * DK + job * DK;
-        for (int ch = c0; ch < c0 + DK; ch++) X.cv[ch] = conv_channel(cst, cw + (size_t)ch * CK, X.qkv[ch], C, CK, ch);
-      }
-      X.qk_done[job].store(1, std::memory_order_release);
-      continue;
-    }
-    const int h = job - c.NKH;
-    {
-      const int c0 = 2 * c.NKH * DK + h * DV;
-      for (int ch = c0; ch < c0 + DV; ch++) X.cv[ch] = conv_channel(cst, cw + (size_t)ch * CK, X.qkv[ch], C, CK, ch);
-    }
-    while (X.qk_done[h / rep].load(std::memory_order_acquire) == 0) __builtin_arm_yield();
-    lin_head(X, h);
-    if (X.o_chunks) X.heads_left.fetch_sub(1, std::memory_order_release);
-  }
+// (the convolution channel, the value head and the fork-joins: src/models/common/gdn.h, shared with qwen4_exp)
+void Qwen35::lin_ctx(gdn::Ctx& X, int L, float* qkv, float* z, float* bb, float* aa, float* cv, float* o, bool quant_heads) {
+  const Lw& W = lw[L];
+  X.d = &gd;
+  X.w = {W.conv, W.A_log, W.dt_bias, W.gnorm};
+  X.conv_st = S->ls[L].conv.data();
+  X.S = S->ls[L].S.data();
+  X.qkv = qkv;
+  X.z = z;
+  X.bb = bb;
+  X.aa = aa;
+  X.cv = cv;
+  X.o = o;
+  X.xq = &xatt.q;
+  X.quant_heads = quant_heads;
 }
 
 void Qwen35::attn_linear(int L, const float* hin, float* rout) {
@@ -365,7 +282,8 @@ void Qwen35::attn_linear(int L, const float* hin, float* rout) {
   auto t1 = clk::now();
   T->attn_proj += ms_between(t0, t1);
   stage_mark(ST_ATTN_CORE);
-  LinCtx X{this, L, qkv, z, bb, aa, cv, o.data(), c.DV % XB == 0, {}};
+  gdn::Ctx X;
+  lin_ctx(X, L, qkv, z, bb, aa, cv, o.data(), c.DV % XB == 0);
   if (c.NKH > 64) {
     fprintf(stderr, "more than 64 key heads\n");
     abort();
@@ -380,7 +298,7 @@ void Qwen35::attn_linear(int L, const float* hin, float* rout) {
     X.o_chunks = X.o_nb + (U - 4 * X.o_nb);
     X.heads_left.store(c.NVH, std::memory_order_relaxed);
   }
-  core->pool->run(phase_lin_conv_heads, &X);
+  core->pool->run(gdn::phase_conv_heads, &X);
   auto t2 = clk::now();
   T->attn_core += ms_between(t1, t2);  // (fused: the heads and the output projection together)
   if (!X.quant_heads) {

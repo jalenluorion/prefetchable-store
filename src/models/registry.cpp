@@ -13,12 +13,13 @@ namespace dm {
 
 std::unique_ptr<Model> make_qwen3_5_moe();
 std::unique_ptr<Model> make_inkling2_loop();
+std::unique_ptr<Model> make_qwen4_exp();
 
 std::unique_ptr<Model> make_model(const std::string& family, std::string& err) {
   if (family == "qwen3_5_moe") return make_qwen3_5_moe();
   if (family == "inkling2_loop") return make_inkling2_loop();
-  // qwen4_exp (Qwen3.8-Flash-Next): the published numbers come from the Python reference runner in reference/flash/
-  err = "unknown model family '" + family + "' (this build: qwen3_5_moe, inkling2_loop)";
+  if (family == "qwen4_exp") return make_qwen4_exp();
+  err = "unknown model family '" + family + "' (this build: qwen3_5_moe, inkling2_loop, qwen4_exp)";
   return nullptr;
 }
 

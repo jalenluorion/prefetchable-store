@@ -480,7 +480,7 @@ int main(int argc, char** argv) {
     if (!has("--gpu-experts")) a.gpu_experts = P.gpu_experts;
     if (!has("--cache-gb")) a.cache_auto = true;
     if (!has("--disk")) a.s.disk_dir = P.cache_dir + "/prefix";
-    if (!has("--disk-every") && P.family == "inkling2_loop") a.s.disk_every = 1024;  // its fixed state is 173 MB
+    if (!has("--disk-every") && (P.family == "inkling2_loop" || P.family == "qwen4_exp")) a.s.disk_every = 1024;  // fixed states of 173 / 118 MB
     if (!has("--hotset")) a.hotset = P.cache_dir + "/hotset.bin";
     if (!has("--verify-names")) a.verify_names = 0;
     if (a.drafts < 0) a.drafts = P.drafts ? 1 : 0;

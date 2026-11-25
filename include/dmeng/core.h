@@ -44,6 +44,10 @@ struct ModelInfo {
   // batches (phone sizes): the pools' run-time floor (min_cap) is then one step's pins (2K + 2), not a prefill layer's
   // union (Inkling; the 35B's batched prefill has its own MoE with no batches yet)
   bool union_batches = false;
+  // Core::moe_chunk computes this model's 4-bit affine experts with the packed batched kernels (gemm_aff4_i16, inputs a
+  // multiple of 256) from PACK_MIN users and gives the GPU its share of them (moe_gpu): the same bits as the multi-vector
+  // path. Off: the multi-vector path, as before (the 35B's verify)
+  bool chunk_aff4 = false;
 };
 
 // Read-only description of one MoE application, so the core can run the block itself.

@@ -14,7 +14,9 @@ tests/draft_check.sh Q36_TINY INK_TINY INK_RES0 INK_RES8      # needs the tiny m
 The scripts print a verdict line and exit 0 only when they pass; `dmeng --verify-check` reports in its JSON line and
 exits 3 on a difference; `dm_gate` writes ids for a comparison. A real model folder is a weight repository downloaded
 from the Hub (the README's quick start). The tiny random models the `tiny_check.py` and `draft_check.sh` checks use are
-made by generator scripts that are not in this repository yet; those checks need them passed in.
+made by generator scripts that are not in this repository yet; those checks need them passed in. Qwen3.8-Flash-Next's
+is made here: `python tests/qwen4_exp/make_tiny.py OUT` (a synthetic release through the published converter, a random
+router set in the trainer's npz layout, the manifest).
 
 The binaries come from `build/` (configure and build the repo first); `DMENG_BIN` / `DMSERVE_BIN` point a check at
 another build. The checks print a verdict line and exit 0 only when they pass; the two drivers write ids or decision
@@ -25,6 +27,9 @@ lines for a comparison made outside them.
 | check | what it compares | needs |
 |---|---|---|
 | `qwen3_5_moe/tiny_check.py` | dmeng on a tiny random Qwen3.6-geometry model against transformers / MLX references, every precision and several expert budgets | `Q36_TINY` (the tiny model and its references), numpy, torch |
+| `qwen4_exp/tiny_check.py` | dmeng on the tiny random Qwen3.8-Flash-Next against transformers' Qwen4ExpForCausalLM (float32, the engine's 8-bit codes, the store's experts and n-gram rows): the reference path within 1e-4 of max \|logit\|; exact mode bit-identical across budgets, threads, routers (lag 4, from the npz), run-ahead and oracle replays; fast mode; batched prefill == single steps (CPU and GPU share); the prefix cache's checkpoints and a restored state | `FLASH_TINY` (make_tiny.py's OUT), numpy, torch, transformers |
+| `qwen4_exp/server_check.py` | the OpenAI-compatible server on the tiny Flash-Next: /v1/models, a completion with tools, the same streamed, a follow-up from the prefix cache | `FLASH_TINY`, tokenizers, jinja2 |
+| `qwen4_exp/chat_check.py FOLDER` | Flash-Next's chat format (python/serve/qwen4_exp) against transformers' apply_chat_template on the release's text files: token ids of conversations with tools, tool results and every reasoning effort; parsing a generated turn | the release's tokenizer and template files, transformers |
 | `inkling2_loop/tiny_check.py` | dmeng on the tiny random Inkling against the MLX model of the release, exact across budgets and oracle replays | `INK_TINY`, `INK_RES0`, `INK_RES8`, numpy, mlx |
 | `draft_check.sh Q36_TINY INK_TINY INK_RES0 INK_RES8` | draft and verify: kept logits and the final state bit-identical through verify passes with rollbacks (both tiny models, several precisions, split-K attention); ids with drafting on equal plain decoding in dmeng and in the server worker | the tiny models |
 | `preset_check.sh Q36_TINY` | the settings' precedence (explicit option > profile > manifest default > built-in) in dmeng, the C API (`dm_gate`) and the server worker: mode, names on / off, names rule, router file, cache size, eviction, drafting, GPU share, each read back from the run's `"resolved"` JSON | the tiny Qwen3.6 model and its `routers_full_k4_h512.dmr` |

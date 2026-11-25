@@ -1,5 +1,5 @@
 // File readers and writers the format needs: safetensors (header + tensor reads), the engine's DMENGRES1 files
-// (reader and the streaming writer, the layout of python/derive/qwen3_5_moe.py's Writer), sha256 (CommonCrypto).
+// (reader and the streaming writer, the layout of python/derive/qwen3_5_moe.py's Writer), sha256 (CommonCrypto on Apple platforms, a portable one elsewhere).
 #pragma once
 #include <cstdint>
 #include <map>
@@ -32,6 +32,22 @@ struct SafeTensors {
   uint64_t data_offset(const StTensor& t) const { return 8 + header_len + t.begin; }  // absolute file offset
   bool read(const StTensor& t, void* dst, std::string& err) const;  // the whole tensor (F_NOCACHE reads)
   std::string meta(const std::string& k, const std::string& d = "") const;
+};
+
+// ---------------------------------------------------------------------------------------------- npz
+// numpy's np.savez archive read where it lies: the zip's central directory (zip64 included, as numpy writes it) gives
+// each member's local header, each member must be stored (not deflated), and its .npy header gives dtype and shape. A
+// tensor is then a byte range of the archive, read like a safetensors tensor. Names drop the ".npy"; dtypes are named as
+// safetensors names them (F32, F16, I64, ...); begin / end are absolute file offsets. C order only.
+struct Npz {
+  std::string path;
+  std::vector<StTensor> tensors;
+  std::map<std::string, size_t> index;
+  int fd = -1;
+  bool open(const std::string& p, std::string& err);
+  ~Npz();
+  const StTensor* find(const std::string& n) const;
+  bool read(const StTensor& t, void* dst, std::string& err) const;
 };
 
 // ---------------------------------------------------------------------------------------------- DMENGRES1

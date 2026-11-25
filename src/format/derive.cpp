@@ -273,6 +273,79 @@ bool resident_inkling2_loop(Ctx& c, const Manifest& m, int bits = 8, const SafeT
   return true;
 }
 
+// Qwen3.8-Flash-Next (qwen4_exp). The 8-bit rule is the Python runner's (reference/flash/mlx_run.py qpred, the manifest's
+// resident.q8_rule): every linear with >= 64 outputs and inputs % 64 == 0, except the released router (mlp.gate),
+// quantised from its f16 cast with f16 scales (Rule F16); every other linear kept as released (bf16): the router, the
+// shared expert's scalar gate [1, H], the hyper-connections' injection weights [4, 4H], the Gated DeltaNet's a and b
+// [NVH, H]. Zero-centred norms (hc_norm, q_norm, k_norm, the indexer's q / k layernorms, the PLE's three norms) + 1 in
+// f32; the Gated DeltaNet's norm, conv weights, A_log, dt_bias widened to f32 as released. The embedding is not copied
+// (one bf16 row per token is read from resident.safetensors); the n-gram table is the store's ngram/ parts. The release's
+// three hashing-constant tensors are copied (int64) so the engine can check its own construction against them.
+bool resident_qwen4_exp(Ctx& c, const Manifest& m) {
+  const std::string P = "model.language_model.";
+  const Json& tc = m.config.get("text_config") ? m.config["text_config"] : m.config;
+  auto lin = [&](const std::string& name, const std::string& key) {  // the 8-bit rule, from the tensor's shape
+    const StTensor* t = need(c, key);
+    if (!t) return false;
+    if (t->shape.size() != 2) return fail(c, key + ": not a matrix");
+    const bool q8 = t->shape[0] >= 64 && t->shape[1] % 64 == 0;
+    return q8 ? put_q(c, name, key, Rule::F16) : put_bf16(c, name, key);
+  };
+  auto hc = [&](const std::string& name, const std::string& pre, bool combine) {
+    return put_f32(c, name + "_n", pre + ".hc_norm.weight", true) && lin(name + "_d", pre + ".input_mix_weight_down.weight") &&
+           lin(name + "_u", pre + ".input_mix_weight_up.weight") && (!combine || lin(name + "_i", pre + ".block_inject_weight.weight"));
+  };
+  auto put_i64 = [&](const std::string& name, const std::string& key) {
+    const StTensor* t = need(c, key);
+    if (!t) return false;
+    if (t->dtype != "I64") return fail(c, key + ": expected int64");
+    std::vector<int64_t> v(t->numel());
+    if (!c.st.read(*t, v.data(), c.err)) return false;
+    c.s.tensors++;
+    return c.w.add(name, "i64", v.data(), v.size() * 8, t->shape) || fail(c, "write failed: " + name);
+  };
+  int ple = -1;
+  for (auto& x : tc["ple_layer_ids"].arr) ple = (int)x.i() - 1;  // the layer whose index + 1 is listed
+  for (int L = 0; L < m.physical_layers; L++) {
+    const std::string p = P + "layers." + std::to_string(L) + ".", s = std::to_string(L) + ".";
+    if (!hc(s + "ahc", p + "attn_hyper_connection", true) || !hc(s + "mhc", p + "mlp_hyper_connection", true)) return false;
+    if (m.layer_types[L] == 'L') {
+      const std::string a = p + "linear_attn.";
+      const StTensor* cw = need(c, a + "conv1d.weight");
+      if (!cw) return false;
+      if (!lin(s + "qkv", a + "in_proj_qkv.weight") || !lin(s + "z", a + "in_proj_z.weight") || !lin(s + "a", a + "in_proj_a.weight") ||
+          !lin(s + "b", a + "in_proj_b.weight") || !put_f32(c, s + "conv", a + "conv1d.weight", false, {cw->shape[0], cw->shape[2]}) ||
+          !put_f32(c, s + "A_log", a + "A_log") || !put_f32(c, s + "dt_bias", a + "dt_bias") || !put_f32(c, s + "gnorm", a + "norm.weight") ||
+          !lin(s + "o", a + "out_proj.weight"))
+        return false;
+    } else {
+      const std::string a = p + "self_attn.";
+      if (!lin(s + "q", a + "q_proj.weight") || !lin(s + "k", a + "k_proj.weight") || !lin(s + "v", a + "v_proj.weight") ||
+          !lin(s + "o", a + "o_proj.weight") || !put_f32(c, s + "qn", a + "q_norm.weight", true) ||
+          !put_f32(c, s + "kn", a + "k_norm.weight", true) || !lin(s + "ix", a + "indexer.index_qk_proj.weight") ||
+          !put_f32(c, s + "ixqn", a + "indexer.q_layernorm.weight", true) || !put_f32(c, s + "ixkn", a + "indexer.k_layernorm.weight", true))
+        return false;
+    }
+    const std::string mm = p + "mlp.";
+    if (!put_bf16(c, s + "router", mm + "gate.weight") || !lin(s + "sg", mm + "shared_expert.gate_proj.weight") ||
+        !lin(s + "su", mm + "shared_expert.up_proj.weight") || !lin(s + "sd", mm + "shared_expert.down_proj.weight") ||
+        !lin(s + "shgate", mm + "shared_expert_gate.weight"))
+      return false;
+    if (L == ple) {
+      const std::string q = p + "ple.";
+      const StTensor* pc = need(c, q + "conv1d.weight");
+      if (!pc) return false;
+      if (!lin(s + "pk", q + "key_proj.weight") || !lin(s + "pv", q + "value_proj.weight") || !put_f32(c, s + "pnk", q + "norm_key.weight", true) ||
+          !put_f32(c, s + "pnq", q + "norm_query.weight", true) || !put_f32(c, s + "pnc", q + "norm_conv.weight", true) ||
+          !put_f32(c, s + "pconv", q + "conv1d.weight", false, {pc->shape[0], pc->shape[2]}) ||
+          !put_i64(s + "ng_mult", q + "ple_embedding.layer_multipliers") || !put_i64(s + "ng_sizes", q + "ple_embedding.ngram_heads_vocab_sizes") ||
+          !put_i64(s + "ng_offs", q + "ple_embedding.ngram_heads_offsets"))
+        return false;
+    }
+  }
+  return hc("fhc", P + "hyper_connection_mixer", false) && lin("head", "lm_head.weight");
+}
+
 }  // namespace
 
 bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats& st, std::string& err, int bits,
@@ -317,6 +390,12 @@ bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats
         ok = false;
       }
     }
+  } else if (m.family == "qwen4_exp") {
+    if (bits != 8) {
+      err = "qwen4_exp: an 8-bit resident only";
+      return false;
+    }
+    ok = resident_qwen4_exp(c, m);
   } else {
     err = "no resident recipe for family " + m.family;
     return false;
@@ -333,10 +412,40 @@ bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats
 
 bool derive_router(const std::string& path, const std::string& out_path, int bits, bool split, DeriveStats& st, std::string& err) {
   auto t0 = std::chrono::steady_clock::now();
+  // the source: the router container (routers/<id>.safetensors: f16 matrices, f32 vectors, the manifest entry as
+  // metadata), or the trainer's npz as the weight repos publish it (routers_k4.npz: f32, keys L.emb_norm.weight,
+  // L.lin.weight, ... and __lag__; matrices cast to f16 before quantising, as the Python converters' mx.quantize of
+  // w.astype(float16) does), read in place
+  const bool npz = path.size() > 4 && path.compare(path.size() - 4, 4, ".npz") == 0;
   SafeTensors z;
-  if (!z.open(path, err)) return false;
-  std::string fam = z.meta("family");
-  int lag = atoi(z.meta("lag").c_str()), targets = atoi(z.meta("targets").c_str()), hid = atoi(z.meta("hidden").c_str());
+  Npz zn;
+  std::string fam;
+  int lag = 0, targets = 0, hid = 0;
+  if (npz) {
+    if (!zn.open(path, err)) return false;
+    const StTensor* lt = zn.find("__lag__");
+    int64_t lv = 0;
+    if (!lt || lt->dtype != "I64" || lt->numel() != 1 || !zn.read(*lt, &lv, err)) {
+      if (err.empty()) err = path + ": no int64 __lag__ (not a router npz)";
+      return false;
+    }
+    lag = (int)lv;
+    for (auto& t : zn.tensors) {
+      const size_t dot = t.name.find('.');
+      if (t.name.compare(0, 2, "__") != 0 && dot != std::string::npos) targets = std::max(targets, atoi(t.name.substr(0, dot).c_str()) + 1);
+    }
+    if (const StTensor* m0 = zn.find("0.mlp.0.weight")) hid = (int)m0->shape[0];
+    if (const StTensor* fe = zn.find("__feats__")) {
+      (void)fe;
+      err = path + ": a __feats__ key (a feature set other than the full one) is not read";
+      return false;
+    }
+    fam = "npz";
+  } else {
+    if (!z.open(path, err)) return false;
+    fam = z.meta("family");
+    lag = atoi(z.meta("lag").c_str()), targets = atoi(z.meta("targets").c_str()), hid = atoi(z.meta("hidden").c_str());
+  }
   if (fam.empty() || targets <= 0) {
     err = path + ": no router metadata";
     return false;
@@ -345,7 +454,7 @@ bool derive_router(const std::string& path, const std::string& out_path, int bit
     err = "split router files exist for qwen3_5_moe only";
     return false;
   }
-  auto T = [&](const std::string& k) { return z.find(k); };
+  auto T = [&](const std::string& k) { return npz ? zn.find(k) : z.find(k); };
   const StTensor* en0 = T("0.emb_norm.weight");
   const StTensor* lb0 = T("0.lin.bias");
   if (!en0 || !lb0) {
@@ -368,14 +477,19 @@ bool derive_router(const std::string& path, const std::string& out_path, int bit
   }
   std::string widths;
   auto rd16 = [&](const StTensor* t, std::vector<uint16_t>& v) {
-    if (!t || t->dtype != "F16") return false;
+    if (!t) return false;
     v.resize(t->numel());
-    return z.read(*t, v.data(), err);
+    if (t->dtype == "F16") return npz ? zn.read(*t, v.data(), err) : z.read(*t, v.data(), err);
+    if (!npz || t->dtype != "F32") return false;
+    std::vector<float> f(t->numel());  // the npz's f32 matrix, cast to f16 (round to nearest even)
+    if (!zn.read(*t, f.data(), err)) return false;
+    for (size_t i = 0; i < f.size(); i++) v[i] = f32_to_f16_bits(f[i]);
+    return true;
   };
   auto rd32 = [&](const StTensor* t, std::vector<float>& v) {
     if (!t || t->dtype != "F32") return false;
     v.resize(t->numel());
-    return z.read(*t, v.data(), err);
+    return npz ? zn.read(*t, v.data(), err) : z.read(*t, v.data(), err);
   };
   for (int L = 0; L < targets; L++) {
     std::string p = std::to_string(L) + ".";

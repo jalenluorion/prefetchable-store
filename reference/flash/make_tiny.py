@@ -14,7 +14,8 @@ zero-centred RMSNorm weights (the model computes x * (1 + w)), conv1d weights as
 model.visual.* tensors that every consumer must skip. Sizes: hidden 128, 4 streams, 8 layers (3 Gated DeltaNet + 1 QSA,
 twice), 16 experts top-2 (intermediate 64, shared 64), PLE at layer index 1 (ple_layer_ids [2]) with 2 heads per n-gram
 over primes above 1000 (4 heads x 32 dims, 4096 rows in 4 shards), vocab 512, QSA budget 16 (a 40-token prompt crosses
-it, so the sparse path runs).
+it, so the sparse path runs). TINY_H, TINY_LOW, TINY_NE, TINY_TOPK, TINY_I and TINY_SH override hidden size, the hyper-connections'
+low rank, experts, top-k, expert and shared-expert intermediate sizes (the n-gram rows are then hidden / 4 wide).
 """
 import json, math, os, sys
 
@@ -53,7 +54,8 @@ json.dump({"do_sample": True, "temperature": 0.7, "top_p": 0.8, "top_k": 20, "eo
 open(os.path.join(OUT, "LICENSE"), "w").write("Synthetic test weights (random). No license terms.\n")
 
 # ---------------------------------------------------------------------------------------------------- config
-H, HC, LOW, NL, NE, TOPK, I, SH = 128, 4, 64, 8, 16, 2, 64, 64
+E = lambda k, d: int(os.environ.get("TINY_" + k, d))  # overrides of the sizes (the engine's check: tests/qwen4_exp/make_tiny.py)
+H, HC, LOW, NL, NE, TOPK, I, SH = E("H", 128), 4, E("LOW", 64), 8, E("NE", 16), E("TOPK", 2), E("I", 64), E("SH", 64)
 NKH, NVH, DK, DV, CONVK = 2, 4, 32, 32, 4
 NH, NKV, HD = 4, 2, 64
 IXH, IXKV, IXD = 2, 1, 32

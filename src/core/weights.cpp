@@ -60,7 +60,10 @@ size_t Weight::bytes() const {
 
 void mv(const Weight& w, int r0, int r1, const XQ* xq, const float* xf, float* y, bool ref) {
   switch (w.kind) {
-    case Weight::AFF4: mv_aff4(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *xq, y); break;
+    case Weight::AFF4:
+      if (ref && xf) kref_aff4(w, r0, r1, xf, y);
+      else mv_aff4(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *xq, y);
+      break;
     case Weight::AFF8S:
       if (!ref && xq && xq->prec == Prec::I16) {
         mv_aff8s_i16(w.c, w.srows, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *xq, y);
@@ -668,6 +671,27 @@ void kref_aff8(const Weight& w, int r0, int r1, const float* x, float* y) {
       for (int i = 0; i < 64; i++) {
         d += (float)c[64 * g + i] * x[64 * g + i];
         sx += x[64 * g + i];
+      }
+      t += (float)s[(size_t)r * NG + g] * d + (float)b[(size_t)r * NG + g] * sx;
+    }
+    y[r - r0] = (float)t;
+  }
+}
+
+// the same for 4-bit codes (element 2j in the low nibble of byte j): w = code * scale + bias per group of 64
+void kref_aff4(const Weight& w, int r0, int r1, const float* x, float* y) {
+  const int K = w.cols, NG = K / 64;
+  const _Float16* s = (const _Float16*)w.s;
+  const _Float16* b = (const _Float16*)w.b;
+  for (int r = r0; r < r1; r++) {
+    const uint8_t* c = w.c + (size_t)r * (K / 2);
+    double t = 0;
+    for (int g = 0; g < NG; g++) {
+      float d = 0, sx = 0;
+      for (int i = 0; i < 64; i++) {
+        const int k = 64 * g + i;
+        d += (float)((c[k >> 1] >> ((k & 1) * 4)) & 15) * x[k];
+        sx += x[k];
       }
       t += (float)s[(size_t)r * NG + g] * d + (float)b[(size_t)r * NG + g] * sx;
     }

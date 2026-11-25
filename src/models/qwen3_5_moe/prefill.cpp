@@ -369,57 +369,13 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       k.ms_conv += msd(tb);
       auto th0 = clk::now();
       stage_mark(ST_ATTN_CORE);
-      // heads: head by head, positions in order (phase_lin_heads per position)
-      const int DK = c.DK, DV = c.DV, rep = c.NVH / c.NKH;
+      // heads: head by head, positions in order (the decode path's gdn::head per position)
+      const gdn::Weights gw{W.conv, W.A_log, W.dt_bias, W.gnorm};
       pfor(pool, c.NVH, [&](int h) {
-        int kh = h / rep;
-        std::vector<float> q(DK), kv(DK);
-        float* S = Sst.ls[L].S.data() + (size_t)h * DV * DK;
-        float beta0 = 0;
-        (void)beta0;
-        for (int i = 0; i < n; i++) {
-          const float* cv = Cv.data() + (size_t)i * C;
-          const float* qs = cv + kh * DK;
-          const float* ks = cv + c.NKH * DK + kh * DK;
-          const float* v = cv + 2 * c.NKH * DK + h * DV;
-          float qq = 0, kk2 = 0;
-          for (int j = 0; j < DK; j++) {
-            qq += qs[j] * qs[j];
-            kk2 += ks[j] * ks[j];
-          }
-          float rq = 1.f / std::sqrt(qq + 1e-6f) / std::sqrt((float)DK), rk = 1.f / std::sqrt(kk2 + 1e-6f);
-          for (int j = 0; j < DK; j++) {
-            q[j] = qs[j] * rq;
-            kv[j] = ks[j] * rk;
-          }
-          float beta = sigm(BB[(size_t)i * c.NVH + h]);
-          float xa = AA[(size_t)i * c.NVH + h] + W.dt_bias[h];
-          float sp = xa > 20.f ? xa : std::log1p(std::exp(xa));
-          float g = std::exp(-std::exp(W.A_log[h]) * sp);
-          float* o = O.data() + (size_t)i * ZD + h * DV;
-          for (int vi = 0; vi < DV; vi++) {
-            float* s = S + (size_t)vi * DK;
-            float32x4_t acc = vdupq_n_f32(0), gv = vdupq_n_f32(g);
-            for (int j = 0; j < DK; j += 4) {
-              float32x4_t sv = vmulq_f32(vld1q_f32(s + j), gv);
-              vst1q_f32(s + j, sv);
-              acc = vfmaq_f32(acc, sv, vld1q_f32(kv.data() + j));
-            }
-            float delta = (v[vi] - vaddvq_f32(acc)) * beta;
-            float32x4_t dv = vdupq_n_f32(delta), oa = vdupq_n_f32(0);
-            for (int j = 0; j < DK; j += 4) {
-              float32x4_t sv = vfmaq_f32(vld1q_f32(s + j), vld1q_f32(kv.data() + j), dv);
-              vst1q_f32(s + j, sv);
-              oa = vfmaq_f32(oa, sv, vld1q_f32(q.data() + j));
-            }
-            o[vi] = vaddvq_f32(oa);
-          }
-          float ss = 0;
-          for (int j = 0; j < DV; j++) ss += o[j] * o[j];
-          float r = 1.f / std::sqrt(ss / DV + c.eps);
-          const float* z = Z.data() + (size_t)i * ZD + h * DV;
-          for (int j = 0; j < DV; j++) o[j] = o[j] * r * W.gnorm[j] * silu(z[j]);
-        }
+        float* S = Sst.ls[L].S.data() + (size_t)h * c.DV * c.DK;
+        for (int i = 0; i < n; i++)
+          gdn::head(Mo.gd, gw, S, Cv.data() + (size_t)i * C, Z.data() + (size_t)i * ZD + h * c.DV, BB[(size_t)i * c.NVH + h],
+                    AA[(size_t)i * c.NVH + h], h, O.data() + (size_t)i * ZD + h * c.DV);
       });
       k.ms_heads += msd(th0);
       qo.reserve(ZD, n);

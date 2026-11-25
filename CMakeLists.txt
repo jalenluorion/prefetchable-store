@@ -18,13 +18,29 @@ set(DM_CONTRACT "-ffp-contract=fast" CACHE STRING "floating-point contraction fl
 # derivations of the engine's files. One IEEE float32 operation per source operation, as in MLX's kernel.
 add_library(msfmt STATIC src/format/json.cpp src/format/files.cpp src/format/manifest.cpp src/format/quant.cpp src/format/derive.cpp)
 target_compile_options(msfmt PRIVATE -O2 -ffp-contract=off -fno-fast-math -Wall -Wno-deprecated-declarations)
+# The format tools alone (any platform: a Linux x86 machine can make the engine's derived files where the bf16 sources
+# are, so they need not sit on the Mac; the quantiser is IEEE float32 operations only, the same bits everywhere):
+#   cmake -S . -B build-fmt -DDM_FORMAT_ONLY=ON && cmake --build build-fmt --target ms_derive manifest_dump
+if(NOT APPLE)
+  set(DM_FORMAT_ONLY ON)
+endif()
+option(DM_FORMAT_ONLY "build only the format library and its tools (ms_derive, manifest_dump)" OFF)
+if(DM_FORMAT_ONLY)
+  foreach(t manifest_dump ms_derive)
+    add_executable(${t} tools/${t}.cpp)
+    target_include_directories(${t} PRIVATE src/format)
+    target_link_libraries(${t} PRIVATE msfmt)
+  endforeach()
+  return()
+endif()
 
 add_library(dmengcore STATIC
   src/core/kernels.cpp src/core/pool.cpp src/core/weights.cpp src/core/store.cpp src/core/moe.cpp src/core/moe_chunk.cpp src/core/greedy_head.cpp src/core/screen_head.cpp
   src/core/address.cpp src/core/planner.cpp src/core/presets.cpp src/core/sampler.cpp src/core/draft.cpp src/core/model_lm.cpp src/core/kernels_batch.cpp src/core/kernels_sme.cpp
-  src/core/gpu_check.cpp src/core/gpu_split.cpp
-  src/models/registry.cpp src/models/qwen3_5_moe/qwen3_5_moe.cpp src/models/qwen3_5_moe/prefill.cpp src/models/qwen3_5_moe/verify.cpp
-  src/models/inkling2_loop/inkling2_loop.cpp src/models/inkling2_loop/ink_draft.cpp)
+  src/core/gpu_check.cpp src/core/gpu_split.cpp src/core/rowstore.cpp
+  src/models/registry.cpp src/models/common/gdn.cpp src/models/qwen3_5_moe/qwen3_5_moe.cpp src/models/qwen3_5_moe/prefill.cpp src/models/qwen3_5_moe/verify.cpp
+  src/models/inkling2_loop/inkling2_loop.cpp src/models/inkling2_loop/ink_draft.cpp
+  src/models/qwen4_exp/qwen4_exp.cpp src/models/qwen4_exp/prefill.cpp)
 target_include_directories(dmengcore PUBLIC include)
 target_link_libraries(dmengcore PUBLIC msfmt)
 target_include_directories(dmengcore PRIVATE src/format)

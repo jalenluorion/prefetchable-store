@@ -38,7 +38,7 @@ ap.add_argument("--mode", default=None, choices=["exact", "fast"], help="exact: 
 ap.add_argument("--profile", default="auto", help="mac | phone | phone-small (default: from the device); none: the worker's built-in values")
 ap.add_argument("--drafts", type=int, default=0, help="1: draft and verify for greedy requests (lookup + tool-call skeletons), experimental (default 0)")
 ap.add_argument("--format", default=None, help=adv("folder holding the model's chat_format.py (default: python/serve/<family> if it exists, else python/serve/generic, which reads the model folder's own template and response format)"))
-ap.add_argument("--model-id", default="qwen3.6-35b-a3b", help=adv("the model name /v1/models reports"))
+ap.add_argument("--model-id", default=None, help=adv("the model name /v1/models reports (default: qwen3.6-35b-a3b; qwen3.8-flash-next for a qwen4_exp folder)"))
 ap.add_argument("--worker", default=os.path.join(REPO, "build", "dmserve"), help=adv("the worker binary"))
 ap.add_argument("--log", default="server.jsonl", help=adv("request log (JSON lines)"))
 ap.add_argument("--max-new-cap", type=int, default=0, help=adv("cap on max_tokens (0: the client's value); the replay uses it to bound decode"))
@@ -59,6 +59,10 @@ if a.format is None:
     except Exception:
         fam = ""
     a.format = os.path.join(HERE, fam) if fam and os.path.exists(os.path.join(HERE, fam, "chat_format.py")) else os.path.join(HERE, "generic")
+    if a.model_id is None and fam == "qwen4_exp":
+        a.model_id = "qwen3.8-flash-next"
+if a.model_id is None:
+    a.model_id = "qwen3.6-35b-a3b"
 sys.path.insert(0, a.format)
 import chat_format as CF  # noqa: E402
 sys.path.insert(0, HERE)

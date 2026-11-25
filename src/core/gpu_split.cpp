@@ -25,7 +25,9 @@ void run_rows_n_split(Pool& pool, GpuGemm* gpu, double frac, const JobN* jobs, i
   for (int i = 0; i < nj; i++) {
     JobN& j = J[i];
     const Weight& m = *j.w;
-    const bool fits = j.xb && j.n > 0 && j.r0 == 0 && j.r1 < 0 && m.kind == Weight::AFF8;  // the CPU's packed path is gemm_aff8_i16 (8-bit)
+    // the CPU's packed path is gemm_aff8_i16 (8-bit, inputs a multiple of 256): the GPU's bits are that kernel's, which
+    // are mv's only there (other input widths stay on the CPU)
+    const bool fits = j.xb && j.n > 0 && j.r0 == 0 && j.r1 < 0 && m.kind == Weight::AFF8 && m.cols % 256 == 0;
     const int rg = fits ? ((int)(m.rows * frac) / 64) * 64 : 0;
     if (rg <= 0) continue;
     const int s = gpu->stage(*j.xb);

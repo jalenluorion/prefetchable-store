@@ -14,6 +14,8 @@ MODEL/dmeng_resident.bin), else --family. --chat renders the template the releas
   inkling2_loop  MODEL/chat_template.jinja, one user turn, rendered as the MLX runner renders it (plain jinja2, the
                  {% generation %} block renders its body, no generation prompt); --reasoning-effort is the template's
                  reasoning_effort (default none)
+  qwen4_exp      python/serve/qwen4_exp/chat_format.py (the server's: MODEL/chat_template.jinja), one user turn with the
+                 generation prompt; --reasoning-effort xhigh (the release's default) | medium | low, none turns thinking off
 --out PREFIX writes PREFIX.json (dmeng's statistics + the text) and PREFIX.ids. --bin (or DMENG_BIN) picks the binary,
 default build/dmeng of this repo. MODEL may also come from DM_MODEL.
 
@@ -23,7 +25,7 @@ import argparse, json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-FAMILIES = ("qwen3_5_moe", "inkling2_loop")
+FAMILIES = ("qwen3_5_moe", "inkling2_loop", "qwen4_exp")
 
 ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter, allow_abbrev=False)
 ap.add_argument("--model", default=os.environ.get("DM_MODEL"), help="the model folder (default: $DM_MODEL)")
@@ -106,6 +108,11 @@ def render(family, prompt):
         return CF.Tok(a.model).render(msgs, **kw)
     if family == "inkling2_loop":
         return render_inkling(a.model, msgs, reasoning_effort=a.reasoning_effort or "none")
+    if family == "qwen4_exp":
+        sys.path.insert(0, os.path.join(REPO, "python", "serve", "qwen4_exp"))
+        import chat_format as CF  # noqa: E402
+
+        return CF.Tok(a.model).render(msgs, **CF.effort_kwargs(a.reasoning_effort))
     raise SystemExit(f"--chat: no chat format for family {family}")
 
 

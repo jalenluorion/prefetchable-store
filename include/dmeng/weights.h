@@ -70,6 +70,7 @@ inline const uint8_t* aff8s_lo(const Weight& w, int r) {
 
 // exact reference kernels (fp32 activations)
 void kref_aff8(const Weight& w, int r0, int r1, const float* x, float* y);
+void kref_aff4(const Weight& w, int r0, int r1, const float* x, float* y);
 void kref_nvfp4(const uint8_t* codes, const uint8_t* sc, float gmul, int K, int r0, int r1, const float* x, float* y);
 void kref_mxfp8(const uint8_t* codes, const uint8_t* sc, int K, int r0, int r1, const float* x, float* y);
 

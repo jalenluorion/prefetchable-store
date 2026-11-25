@@ -101,8 +101,24 @@ reads about a fifth of the router bytes per token (44 against 222 MB). The MLP s
 (`--routers FILE`, `routers_id = "mlp_k2_h512"`); the built-in list is `["linear_k2", "mlp_k2_h512"]` (the MLP when the
 linear file is absent).
 
-Built-in values, used when the manifest has no `defaults` (and for any key it leaves out), are the two objects above
-by family (`qwen3_5_moe`, `inkling2_loop`). The names rule is a per-profile default: the 35B names a top 8 on `mac`
+Qwen3.8-Flash-Next (`qwen4_exp`; one profile, `mac`: exact, 8-bit in-memory weights, cache auto, the GPU's share of the
+prefill 0.4 / 0.4, run-ahead naming 10 at depth 1):
+
+```json
+"defaults": {
+  "routers": ["mlp_k4"],
+  "names": {"rule": "top", "m": 10},
+  "cross_token": null,
+  "eviction": "auto",
+  "drafts": false
+}
+```
+
+Its router entry `mlp_k4` points at `routers_k4.npz`, the lag-4 set as the trainer exported it (float32): the engine reads
+the npz in place and derives its 8-bit file from it (step 5 below), the same bytes as the Python converter's.
+
+Built-in values, used when the manifest has no `defaults` (and for any key it leaves out), are the objects above
+by family (`qwen3_5_moe`, `inkling2_loop`, `qwen4_exp`). The names rule is a per-profile default: the 35B names a top 8 on `mac`
 and `phone` and uses the confidence rule on `phone-small` (its built-in profile carries `names`); Inkling uses the
 confidence rule on every profile.
 
@@ -116,8 +132,9 @@ For a router id `X` (or a cross-token id), the engine looks, in order, for:
 3. a few built-in locations of research folders (for example `routers/lin/q36_router_lin_k2.dmr`), which hold the
    files the defaults were measured with;
 4. the same name as in 2 in the engine's own cache folder, `DIR/.dmeng/`;
-5. otherwise it derives the file from `routers/X.safetensors` into `DIR/.dmeng/` (routers only; cross-token files are
-   not derived by the engine, and the default is skipped with a note if none is found).
+5. otherwise it derives the file from `routers/X.safetensors` (or the router entry's `path`: an `.npz` is read in place)
+   into `DIR/.dmeng/` (routers only; cross-token files are not derived by the engine, and the default is skipped with a
+   note if none is found).
 
 `<hash>` is the first 12 hex digits of the sha256 of the source part (`from[0]`). The in-memory weights follow
 steps 1, 2 and 4 the same way; `resident_q8` is derived from `resident.safetensors` when missing, `resident_q4` is not

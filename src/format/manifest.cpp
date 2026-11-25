@@ -382,6 +382,104 @@ bool Manifest::engine_cfg(Cfg& out, std::string& err) const {
     }
     return err.empty();
   }
+  if (family == "qwen4_exp") {  // Qwen3.8-Flash-Next: config.json's text_config, store/meta.json's record, extras.ngram
+    const Json& tc = config.get("text_config") ? config["text_config"] : config;
+    if (need(tc, "hidden_size").i() != hidden || need(tc, "vocab_size").i() != vocab || need(tc, "num_experts").i() != experts ||
+        need(tc, "num_experts_per_tok").i() != top_k || need(tc, "num_hidden_layers").i() != physical_layers) {
+      if (err.empty()) err = "manifest model / experts disagree with config.json";
+      return false;
+    }
+    const RecordFormat* f = format(layer_format.at(0));
+    if (!f || f->kind != "affine" || f->bits != 4 || f->group != 64) {
+      err = "qwen4_exp expects one affine 4-bit group-64 record format";
+      return false;
+    }
+    const Json& rp = tc["rope_parameters"];
+    const std::string rt = rp.get("rope_type") ? rp["rope_type"].s() : rp.get("type") ? rp["type"].s() : "default";
+    if (rt != "default") {
+      err = "qwen4_exp: rope type " + rt + " (default only)";
+      return false;
+    }
+    int ple = -1, nple = 0;
+    for (auto& x : tc["ple_layer_ids"].arr) ple = (int)x.i() - 1, nple++;
+    if (nple != 1) {
+      err = "qwen4_exp: one PLE layer expected (the n-gram store holds one table), config lists " + I(nple);
+      return false;
+    }
+    const Json& ng = raw["extras"]["ngram"];
+    if (ng.is_null()) {
+      err = "qwen4_exp: the manifest has no extras.ngram (the n-gram rows are part of the model)";
+      return false;
+    }
+    const Json& eos = tc["eos_token_id"];
+    const int64_t hd = need(tc, "head_dim").i();
+    const double prf = rp.get("partial_rotary_factor") ? rp["partial_rotary_factor"].f() : tc["partial_rotary_factor"].f(0.25);
+    std::string ngf = ng["files"].s();
+    const size_t q = ngf.find("{P:02d}");
+    if (q != std::string::npos) ngf.replace(q, 7, "%02d");
+    const std::string gate = tc["output_gate_type"].str_or("sigmoid");
+    out = {{"model", family},
+           {"hidden", I(hidden)},
+           {"hc", I(tc["hc_count"].i(4))},
+           {"hc_low", I(tc["hc_lowrank"].i(320))},
+           {"layers", I(physical_layers)},
+           {"layer_types", layer_types},
+           {"experts", I(experts)},
+           {"topk", I(top_k)},
+           {"moe_inter", py_str(need(tc, "moe_intermediate_size"))},
+           {"shared_inter", py_str(need(tc, "shared_expert_intermediate_size"))},
+           {"norm_topk", I(tc.get("norm_topk_prob") ? (int64_t)tc["norm_topk_prob"].i() : 1)},
+           {"lin_nk", py_str(need(tc, "linear_num_key_heads"))},
+           {"lin_nv", py_str(need(tc, "linear_num_value_heads"))},
+           {"lin_dk", py_str(need(tc, "linear_key_head_dim"))},
+           {"lin_dv", py_str(need(tc, "linear_value_head_dim"))},
+           {"conv_k", py_str(need(tc, "linear_conv_kernel_dim"))},
+           {"gate", gate},
+           {"n_heads", py_str(need(tc, "num_attention_heads"))},
+           {"n_kv", py_str(need(tc, "num_key_value_heads"))},
+           {"head_dim", I(hd)},
+           {"rot_dim", I((int64_t)(hd * prf))},
+           {"rope_theta", rp.get("rope_theta") ? py_str(rp["rope_theta"]) : "10000000"},
+           {"ix_heads", I(tc["indexer_n_heads"].i(4))},
+           {"ix_kv", I(tc["indexer_kv_heads"].i(1))},
+           {"ix_dim", I(tc["indexer_head_dim"].i(128))},
+           {"ix_budget", I(tc["indexer_budget"].i(2048))},
+           {"ix_ratio", I(tc["indexer_compress_ratio"].i(4))},
+           {"ple_layer", I(ple)},
+           {"ple_dim", I(tc["ple_embed_dim"].i(hidden))},
+           {"ple_conv_k", I(tc["ple_conv_kernel_size"].i(4))},
+           {"ng_size", I(tc["ngram_size"].i(3))},
+           {"ng_hpn", I(tc["heads_per_ngram"].i(8))},
+           {"ng_base", I(tc["ngram_vocab_size_base"].i(20000000))},
+           {"ng_div", I(tc["make_ngram_vocab_size_divisible_by"].i(128))},
+           {"ng_seed", I(tc["seed"].i(1234))},
+           {"eos", eos.kind == Json::ARR ? py_str(eos[0]) : py_str(need(tc, "eos_token_id"))},
+           {"ng_files", ngf},
+           {"ng_parts", I(ng["parts"].i())},
+           {"ng_rows", I(ng["rows"].i())},
+           {"ng_rows_per_part", I(ng["rows_per_part"].i())},
+           {"ng_dim", I(ng["dim"].i())},
+           {"ng_bpr", I(ng["bytes_per_row"].i())},
+           {"eps", py_str(need(tc, "rms_norm_eps"))},
+           {"vocab", I(vocab)},
+           {"emb_file", emb_file},
+           {"emb_off", I(eoff)},
+           {"rec_bytes", I(f->record_bytes)},
+           {"store_layer_file", layer_file_printf()}};
+    const char* kinds[3] = {"gate_proj", "up_proj", "down_proj"};
+    const char* mats[3] = {"gate", "up", "down"};
+    for (int i = 0; i < 3; i++) {
+      const MatrixLayout* L = f->matrix(mats[i]);
+      if (!L) {
+        err = std::string("record format has no matrix ") + mats[i];
+        return false;
+      }
+      out.push_back({std::string("off_") + kinds[i], I(L->codes)});
+      out.push_back({std::string("soff_") + kinds[i], I(L->scales)});
+      out.push_back({std::string("boff_") + kinds[i], I(L->biases)});
+    }
+    return err.empty();
+  }
   err = "engine_cfg: no engine reads family " + family + " yet";
   return false;
 }
@@ -404,9 +502,21 @@ const std::vector<std::pair<std::string, char>>& cfg_keys(const std::string& fam
       {"layer_format", 's'}, {"nv_rec", 'i'}, {"nv_gu_c", 'i'}, {"nv_gu_s", 'i'}, {"nv_dn_c", 'i'}, {"nv_dn_s", 'i'},
       {"mx_rec", 'i'}, {"mx_gu_c", 'i'}, {"mx_gu_s", 'i'}, {"mx_dn_c", 'i'}, {"mx_dn_s", 'i'}, {"nv_trailer", 'i'},
       {"emb_off", 'i'}, {"emb_file", 's'}, {"layer_file", 's'}};
+  static const std::vector<std::pair<std::string, char>> flash = {
+      {"hidden", 'i'}, {"hc", 'i'}, {"hc_low", 'i'}, {"layers", 'i'}, {"experts", 'i'}, {"topk", 'i'}, {"moe_inter", 'i'},
+      {"shared_inter", 'i'}, {"norm_topk", 'i'}, {"lin_nk", 'i'}, {"lin_nv", 'i'}, {"lin_dk", 'i'}, {"lin_dv", 'i'},
+      {"conv_k", 'i'}, {"n_heads", 'i'}, {"n_kv", 'i'}, {"head_dim", 'i'}, {"rot_dim", 'i'}, {"ix_heads", 'i'}, {"ix_kv", 'i'},
+      {"ix_dim", 'i'}, {"ix_budget", 'i'}, {"ix_ratio", 'i'}, {"ple_layer", 'i'}, {"ple_dim", 'i'}, {"ple_conv_k", 'i'},
+      {"ng_size", 'i'}, {"ng_hpn", 'i'}, {"ng_base", 'i'}, {"ng_div", 'i'}, {"ng_seed", 'i'}, {"eos", 'i'}, {"ng_parts", 'i'},
+      {"ng_rows", 'i'}, {"ng_rows_per_part", 'i'}, {"ng_dim", 'i'}, {"ng_bpr", 'i'}, {"vocab", 'i'}, {"eps", 'f'},
+      {"rope_theta", 'd'}, {"layer_types", 's'}, {"gate", 's'}, {"ng_files", 's'}, {"rec_bytes", 'i'}, {"off_gate_proj", 'i'},
+      {"soff_gate_proj", 'i'}, {"boff_gate_proj", 'i'}, {"off_up_proj", 'i'}, {"soff_up_proj", 'i'}, {"boff_up_proj", 'i'},
+      {"off_down_proj", 'i'}, {"soff_down_proj", 'i'}, {"boff_down_proj", 'i'}, {"emb_off", 'i'}, {"emb_file", 's'},
+      {"store_layer_file", 's'}};
   static const std::vector<std::pair<std::string, char>> none;
   if (family == "qwen3_5_moe") return q36;
   if (family == "inkling2_loop") return ink;
+  if (family == "qwen4_exp") return flash;
   return none;
 }
 

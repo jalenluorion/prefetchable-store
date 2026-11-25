@@ -41,14 +41,23 @@ For Inkling 2 Mini, download `jalenluorion/Inkling-2-Mini-prefetchable-store` in
 downloaded from the Hub runs as it is. Each weight repo's card lists the files one device needs, so a Mac does not
 download the phone's files.
 
-**The 180B model.** Qwen3.8-Flash-Next runs through the Python runner in [reference/flash](reference/flash); it needs
-about 140 GB of free disk:
+**The 180B model.** Qwen3.8-Flash-Next (family `qwen4_exp`) runs in the engine as well: the store and the n-gram rows
+are read as published, the in-memory weights and the lag-4 routers are derived on first use from `resident.safetensors`
+and `routers_k4.npz`. It is checked on a tiny random model against transformers' own implementation
+([tests/qwen4_exp](tests/qwen4_exp)); its first run at full size on a Mac is still to come, so the numbers below are the
+Python runner's. It needs about 140 GB of free disk (and, for the first run's derivation, 5 GB more; the derived files can
+be made on any machine, Linux included, by `ms_derive` from `cmake -S . -B build-fmt -DDM_FORMAT_ONLY=ON`). The weight
+repo has no `moved-store.json` yet: copy [python/convert/qwen4_exp/moved-store.json](python/convert/qwen4_exp/moved-store.json)
+into the folder.
 
 ```bash
-cd reference/flash && pip install -r requirements.txt
 hf download jalenluorion/Qwen3.8-Flash-Next-prefetchable-store --local-dir model --exclude "routers3/*"
-python mlx_run.py --dir model --prompt "Explain what a mixture of experts is." --max-new 200
+cp python/convert/qwen4_exp/moved-store.json model/
+build/dmeng --model model --chat --prompt "Explain what a mixture of experts is." --n 200
 ```
+
+The Python runner it was first published with is [reference/flash](reference/flash)
+(`cd reference/flash && pip install -r requirements.txt && python mlx_run.py --dir ../../model --prompt "..." --max-new 200`).
 
 **On an iPhone.** [apps/ios](apps/ios/README.md) is a chat app that runs either model on the phone: open
 `apps/ios/MovedStore.xcodeproj` in Xcode, set your own signing team and bundle identifier, and run it on an iPhone with
@@ -232,7 +241,7 @@ compared with each release on the weight repos' model cards.
 |---|---|---|
 | Qwen3.6-35B-A3B | [jalenluorion/Qwen3.6-35B-A3B-prefetchable-store](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-prefetchable-store) | Mac and iPhone |
 | Inkling 2 Mini | [jalenluorion/Inkling-2-Mini-prefetchable-store](https://huggingface.co/jalenluorion/Inkling-2-Mini-prefetchable-store) | Mac and iPhone |
-| Qwen3.8-Flash-Next (180B) | [jalenluorion/Qwen3.8-Flash-Next-prefetchable-store](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-prefetchable-store) | Mac, through the Python runner in [reference/flash](reference/flash) |
+| Qwen3.8-Flash-Next (180B) | [jalenluorion/Qwen3.8-Flash-Next-prefetchable-store](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-prefetchable-store) | Mac; the engine (checked on the tiny model; experts named four layers ahead) or the Python runner in [reference/flash](reference/flash) |
 
 A model family is a short description of its layers, state and expert block in `src/models/<family>/`; the store, the
 step, the routers and the serving are shared. The weight repos share one layout and one manifest
@@ -243,7 +252,7 @@ step, the routers and the serving are shared. The weight repos share one layout 
 | path | what it is |
 |---|---|
 | `include/dmeng/`, `src/core/` | the engine: expert store and readers, the expert step, early routers, run-ahead, kernels |
-| `src/models/` | one folder per model family (`qwen3_5_moe`, `inkling2_loop`) |
+| `src/models/` | one folder per model family (`qwen3_5_moe`, `inkling2_loop`, `qwen4_exp`); `common/` the Gated DeltaNet both Qwen families share |
 | `src/serving/` | prefix cache, idle-time prefill, memory watcher |
 | `tools/` | `dmeng` (command line), `dmserve` (model worker), `ms_derive` (engine-ready files from a weight repo) |
 | `python/` | text in and out, the OpenAI-compatible front end, conversion from released weights |

@@ -730,7 +730,7 @@ int main(int argc, char** argv) {
   // drafting or the verify check, or top-k sampling with k <= 64; --fast-head 0 = the full head, 1 / 2 asked explicitly
   // (2 also checks every token against the full head)
   const bool fh_auto = a.fast_head < 0;
-  const bool fh_family = family == "qwen3_5_moe" || family == "inkling2_loop";
+  const bool fh_family = family == "qwen3_5_moe" || family == "inkling2_loop" || family == "qwen4_exp";
   if (fh_auto) a.fast_head = fh_family ? 1 : 0;
   const bool fh_greedy_ok = a.temp <= 0 && a.draft == "none" && a.verify_check <= 0 && a.draft_check.empty();
   bool head_topk = a.fast_head > 0 && a.temp > 0 && a.top_k > 0 && a.top_k <= 64 && fh_family;

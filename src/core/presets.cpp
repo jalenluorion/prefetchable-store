@@ -44,6 +44,15 @@ static const char* BUILTIN_INK = R"({
  "defaults": {"routers": ["linear_k2", "mlp_k2_h512"], "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
   "cross_token": {"routers": ["xtok_s47_h512"], "source": 47, "tau": 0.5, "priority_reads": true}, "eviction": "auto", "drafts": false}})";
 
+// Qwen3.8-Flash-Next: the Mac only (its 68 GB of experts and 52 GB of n-gram rows are not a phone's); its trained routers
+// are the lag-4 set the repo publishes as the trainer's npz (routers_k4.npz), derived in place on first use; top-k is 10
+static const char* BUILTIN_FLASH = R"({
+ "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
+ "profiles": {
+  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
+          "run_ahead": {"picks": 10, "depth": 1}}},
+ "defaults": {"routers": ["mlp_k4"], "names": {"rule": "top", "m": 10}, "cross_token": null, "eviction": "auto", "drafts": false}})";
+
 static bool exists(const std::string& p) {
   struct stat st;
   return stat(p.c_str(), &st) == 0;
@@ -164,7 +173,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     Json cfg;
     std::string cerr;
     if (ms::json_load(dir + "/config.json", cfg, cerr)) p.family = cfg["model_type"].str_or("");
-    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop") {
+    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop" && p.family != "qwen4_exp") {
       err = "profile " + profile_req + ": no moved-store.json and no known model_type in config.json";
       return false;
     }
@@ -172,7 +181,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   }
   Json bi;
   std::string jerr;
-  if (!ms::json_parse(p.family == "inkling2_loop" ? BUILTIN_INK : BUILTIN_Q36, bi, jerr)) {
+  if (!ms::json_parse(p.family == "inkling2_loop" ? BUILTIN_INK : p.family == "qwen4_exp" ? BUILTIN_FLASH : BUILTIN_Q36, bi, jerr)) {
     err = "built-in presets: " + jerr;
     return false;
   }
@@ -265,7 +274,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   if (const Json* pg = prof("prefill_gpu"); pg && pg->kind == Json::OBJ) {  // per profile only (the device decides)
     p.gpu_frac = (*pg)["projections"].f(0);
     p.gpu_experts = (*pg)["experts"].f(0);
-    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop" && (p.gpu_frac > 0 || p.gpu_experts > 0)) {
+    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop" && p.family != "qwen4_exp" && (p.gpu_frac > 0 || p.gpu_experts > 0)) {
       p.notes.push_back("prefill_gpu: this model's prefill has no GPU split, CPU only");
       p.gpu_frac = p.gpu_experts = 0;
     }
