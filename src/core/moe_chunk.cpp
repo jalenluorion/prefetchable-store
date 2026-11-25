@@ -110,7 +110,7 @@ static void chunk_gu(void* p, int, int) {
       gemm_nvfp4_i16(E.gu.c, (const uint8_t*)E.gu.s, E.gu.gmul, E.gu.cols, fused ? 2 * j0 : j0, fused ? 2 * j0 + 2 * XB : j0 + XB, E.xg, 0, nu,
                      g.data(), gw);
       if (!fused) gemm_nvfp4_i16(E.up.c, (const uint8_t*)E.up.s, E.up.gmul, E.up.cols, j0, j0 + XB, E.xg, 0, nu, u.data(), XB);
-    } else if (E.packed && E.gu.kind == Weight::AFF4 && !fused && E.gu.cols % 256 == 0) {  // ModelInfo::chunk_aff4
+    } else if (E.packed && E.gu.kind == Weight::AFF4 && !fused && E.gu.cols % XB == 0) {  // ModelInfo::chunk_aff4
       gemm_aff4_i16(E.gu.c, (const _Float16*)E.gu.s, (const _Float16*)E.gu.b, E.gu.cols, j0, j0 + XB, E.xg, 0, nu, g.data(), gw);
       gemm_aff4_i16(E.up.c, (const _Float16*)E.up.s, (const _Float16*)E.up.b, E.up.cols, j0, j0 + XB, E.xg, 0, nu, u.data(), XB);
     } else if (fused) {
@@ -137,7 +137,7 @@ static void chunk_dn(void* p, int, int) {
     const int a = (ch % nch) * CH, b = std::min(X.H, a + CH), nu = (int)E.users.size();
     if (!X.dlo.empty() && (a < X.dlo[ch / nch] || a >= X.dhi[ch / nch])) continue;  // the GPU's rows
     const bool aff4 = E.packed && E.dn.kind == Weight::AFF4;  // ModelInfo::chunk_aff4
-    if (E.packed && !(a & 3) && !(b & 3) && (!aff4 || E.dn.cols % 256 == 0)) {
+    if (E.packed && !(a & 3) && !(b & 3) && (!aff4 || E.dn.cols % XB == 0)) {
       tmp.resize((size_t)nu * CH);
       if (aff4) gemm_aff4_i16(E.dn.c, (const _Float16*)E.dn.s, (const _Float16*)E.dn.b, E.dn.cols, a, b, E.xd, 0, nu, tmp.data(), CH);
       else gemm_nvfp4_i16(E.dn.c, (const uint8_t*)E.dn.s, E.dn.gmul, E.dn.cols, a, b, E.xd, 0, nu, tmp.data(), CH);
@@ -463,9 +463,9 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (size_t k = 0; k < run.size(); k++) {
         Chunk::Ent& E = C.ent[run[k]];
         const bool nv = E.gu.kind == Weight::NVFP4 && E.dn.kind == Weight::NVFP4;
-        // ModelInfo::chunk_aff4: the GPU's 4-bit bits are gemm_aff4_i16's, the one-vector kernel's only for inputs a multiple
-        // of 256 (gate / up here; the down rows below likewise)
-        const bool af = E.gu.kind == Weight::AFF4 && E.dn.kind == Weight::AFF4 && E.up.kind == Weight::AFF4 && E.gu.cols % 256 == 0;
+        // ModelInfo::chunk_aff4: the GPU's 4-bit bits are gemm_aff4_i16's, which are the one-vector kernel's for inputs a
+        // multiple of 64 (whole fours of groups, then the one-vector kernel's scalar tail)
+        const bool af = E.gu.kind == Weight::AFF4 && E.dn.kind == Weight::AFF4 && E.up.kind == Weight::AFF4 && E.gu.cols % XB == 0;
         if (!E.packed || !(nv || af)) continue;
         const int nch = E.inter / XB, cg = (int)(nch * moe_gpu_frac), nu = (int)E.users.size();
         if (cg <= 0) continue;
@@ -558,7 +558,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (GT r : gt) {
         Chunk::Ent& E = C.ent[run[r.k]];
         r.rd = ((int)(H * moe_gpu_frac) / 64) * 64;
-        if (r.rd <= 0 || (E.dn.kind == Weight::AFF4 && E.dn.cols % 256 != 0)) continue;
+        if (r.rd <= 0 || (E.dn.kind == Weight::AFF4 && E.dn.cols % XB != 0)) continue;
         r.td = E.dn.kind == Weight::AFF4
                    ? G->add(4, E.dn.c, (const _Float16*)E.dn.s, (const _Float16*)E.dn.b, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd))
                    : G->add_nvfp4(E.dn.c, (const uint8_t*)E.dn.s, E.dn.gmul, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd));

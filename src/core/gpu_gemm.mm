@@ -17,8 +17,10 @@ namespace dm {
 //   dot_g  = sum over the group of int(code) * int(act), act = hi * 256 + lo (the XQB natural-order planes): an exact
 //            int32, as the CPU's USMMLA (8-bit codes) / SMMLA (4-bit codes) sums ((hi sum) << 8 + lo sum), in any order
 //            (|dot| < 64 * 255 * 32767 < 2^31)
-//   lane   = g mod 4;  a = fma(float(dot), float(scale_g) * d_g, a);  a = fma(float(bias_g), gsum_g, a)
+//   lane   = g mod 4;  a = fma(float(dot), float(scale_g) * d_g, a);  a = fma(float(bias_g), gsum_g, a)   (groups in whole fours)
 //   y      = (lane0 + lane1) + (lane2 + lane3)
+//   tail   (K not a multiple of 256: 1-3 groups more) y = y + fma(float(dot) * float(scale_g), d_g, float(bias_g) * gsum_g)
+//            in group order: the one-vector kernels' scalar tail
 // which is gemm_tile_loop's epilogue (vfmaq_f32 per lane, vaddvq_f32 at the end) operation for operation, compiled with
 // MTLMathModeSafe so no operation is reassociated, contracted or approximated: the same bits.
 //
@@ -35,7 +37,7 @@ kernel void gd(device const uchar* w [[buffer(0)]], device const uchar* st [[buf
                uint tid [[thread_index_in_threadgroup]]) {
   const uint t = t0 + tgi.x;
   const Job j = jobs[tj[t]];
-  const uint R = j.R, K = j.K, N = j.N, NG = K / 64, KB = K / 8, local = t - j.tbase;
+  const uint R = j.R, K = j.K, N = j.N, NG = K / 64, NG4 = NG & ~3u, KB = K / 8, local = t - j.tbase;
   const uint rt = local % j.tr, qt = local / j.tr;
   const ulong rb = j.fmt == 8 ? (ulong)K : (ulong)K / 2;
   device const uchar* codes = w + j.co;
@@ -57,6 +59,7 @@ kernel void gd(device const uchar* w [[buffer(0)]], device const uchar* st [[buf
   threadgroup_barrier(mem_flags::mem_threadgroup);
   const uint r = rt * 16 + lt.x, q = qt * 16 + lt.y, sq = src[lt.y];
   float4 acc = float4(0.0f);
+  float y = 0.0f;
   for (uint g = 0; g < NG; g++) {
     for (uint k = tid; k < 1024; k += 256) {
       const uint rr = k / 64, kk = k % 64, row = rt * 16 + rr, pos = qt * 16 + rr;
@@ -83,15 +86,22 @@ kernel void gd(device const uchar* w [[buffer(0)]], device const uchar* st [[buf
     for (uint kk = 0; kk < 64; kk++) dot += int(wt[lt.x][kk]) * int(xt[lt.y][kk]);
     threadgroup_barrier(mem_flags::mem_threadgroup);
     if (r < R && q < N) {
-      const uint lane = g & 3;
-      float m = float(sc[(ulong)r * NG + g]) * d[(ulong)sq * NG + g];
-      float a = acc[lane];
-      a = fma(float(dot), m, a);
-      a = fma(float(bi[(ulong)r * NG + g]), gs[(ulong)sq * NG + g], a);
-      acc[lane] = a;
+      if (g < NG4) {
+        const uint lane = g & 3;
+        float m = float(sc[(ulong)r * NG + g]) * d[(ulong)sq * NG + g];
+        float a = acc[lane];
+        a = fma(float(dot), m, a);
+        a = fma(float(bi[(ulong)r * NG + g]), gs[(ulong)sq * NG + g], a);
+        acc[lane] = a;
+      } else {
+        if (g == NG4) y = (acc.x + acc.y) + (acc.z + acc.w);
+        const float ds = float(dot) * float(sc[(ulong)r * NG + g]);
+        const float bg = float(bi[(ulong)r * NG + g]) * gs[(ulong)sq * NG + g];
+        y = y + fma(ds, d[(ulong)sq * NG + g], bg);
+      }
     }
   }
-  if (r < R && q < N) out[j.y + (ulong)q * R + r] = (acc.x + acc.y) + (acc.z + acc.w);
+  if (r < R && q < N) out[j.y + (ulong)q * R + r] = NG4 == NG ? (acc.x + acc.y) + (acc.z + acc.w) : y;
 }
 
 // The same products through the GPU's fp32 matrix units (simdgroup 8 x 8 multiply-accumulate). Per 64-input group the
@@ -106,7 +116,7 @@ static void gm_impl(device const uchar* w, device const uchar* st, device const 
                     threadgroup float* cs, threadgroup uint* src) {
   constexpr uint TR = 16 * SR, TQ = 16 * SQ, NT = 128;
   const Job j = jobs[tj[t]];
-  const uint R = j.R, K = j.K, N = j.N, NG = K / 64, KB = K / 8, local = t - j.tbase;
+  const uint R = j.R, K = j.K, N = j.N, NG = K / 64, NG4 = NG & ~3u, KB = K / 8, local = t - j.tbase;
   const uint rt = local % j.tr, qt = local / j.tr;
   const ulong rb = j.fmt == 8 ? (ulong)K : (ulong)K / 2;
   device const uchar* codes = w + j.co;
@@ -126,7 +136,8 @@ static void gm_impl(device const uchar* w, device const uchar* st, device const 
   const uint sr = (sg % SR) * 16, sp = (sg / SR) * 16;  // this simdgroup's 16 x 16 block inside the tile
   threadgroup float* csh = cs + sg * 512;              // its plane sums: hi [16][16], then lo [16][16] (over the tiles)
   float4 acc[8];
-  for (uint i = 0; i < 8; i++) acc[i] = float4(0.0f);
+  float yt[8];
+  for (uint i = 0; i < 8; i++) acc[i] = float4(0.0f), yt[i] = 0.0f;
   for (uint g = 0; g < NG; g++) {
     for (uint k = tid; k < TR * 64; k += NT) {  // weights [row][k] (zero past R)
       const uint rr = k / 64, kk = k % 64, row = rt * TR + rr;
@@ -185,18 +196,25 @@ static void gm_impl(device const uchar* w, device const uchar* st, device const 
       if (row < R && pos < N) {
         const int dot = int(csh[e]) * 256 + int(csh[256 + e]);
         const uint sq = src[pl], lane = g & 3;
-        float m = float(sc[(ulong)row * NG + g]) * d[(ulong)sq * NG + g];
-        float v = acc[i][lane];
-        v = fma(float(dot), m, v);
-        v = fma(float(bi[(ulong)row * NG + g]), gs[(ulong)sq * NG + g], v);
-        acc[i][lane] = v;
+        if (g < NG4) {
+          float m = float(sc[(ulong)row * NG + g]) * d[(ulong)sq * NG + g];
+          float v = acc[i][lane];
+          v = fma(float(dot), m, v);
+          v = fma(float(bi[(ulong)row * NG + g]), gs[(ulong)sq * NG + g], v);
+          acc[i][lane] = v;
+        } else {  // the scalar tail
+          if (g == NG4) yt[i] = (acc[i].x + acc[i].y) + (acc[i].z + acc[i].w);
+          const float ds = float(dot) * float(sc[(ulong)row * NG + g]);
+          const float bg = float(bi[(ulong)row * NG + g]) * gs[(ulong)sq * NG + g];
+          yt[i] = yt[i] + fma(ds, d[(ulong)sq * NG + g], bg);
+        }
       }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
   for (uint i = 0; i < 8; i++) {
     const uint e = ln + 32 * i, row = rt * TR + sr + e / 16, pos = qt * TQ + sp + e % 16;
-    if (row < R && pos < N) out[j.y + (ulong)pos * R + row] = (acc[i].x + acc[i].y) + (acc[i].z + acc[i].w);
+    if (row < R && pos < N) out[j.y + (ulong)pos * R + row] = NG4 == NG ? (acc[i].x + acc[i].y) + (acc[i].z + acc[i].w) : yt[i];
   }
 }
 #define GM(NAME, SR, SQ)                                                                                                         \

@@ -90,11 +90,14 @@ static inline void tr4(const int32x4_t* V, int32x4_t* W) {
 }
 
 // Tile: 4 rows (2 row pairs) x 8 positions (4 position pairs). FMT 8 = AFF8 (USMMLA, natural order), 4 = AFF4 (SMMLA, perm).
+// Inputs K a multiple of 64. The groups in whole fours update the four lanes (the batch-1 kernels' vector loop); a tail of
+// 1-3 groups (K not a multiple of 256: Flash-Next's 640-wide expert and shared down projections, its 320-wide mixer)
+// follows the batch-1 kernels' scalar tail: t = the lanes' sum, then per group t + fma(dot * scale, d, bias * gsum).
 template <int FMT>
 static void gemm_tile_loop(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1,
                            const XQB& x, int p0, int p1, float* Y, size_t ldy) {
-  const int NG = K / XB, KB = K / 8;
-  if (NG % 4 != 0 || (r0 & 3) || (r1 & 3) || (p0 & 1)) {
+  const int NG = K / XB, NG4 = NG & ~3, KB = K / 8;
+  if (K % XB != 0 || (r0 & 3) || (r1 & 3) || (p0 & 1)) {
     fprintf(stderr, "gemm: unsupported shape (K %d, rows %d-%d, p0 %d)\n", K, r0, r1, p0);
     abort();
   }
@@ -109,57 +112,58 @@ static void gemm_tile_loop(const uint8_t* codes, const _Float16* scales, const _
       const uint8_t* c[4] = {codes + (size_t)r * rb, codes + (size_t)(r + 1) * rb, codes + (size_t)(r + 2) * rb, codes + (size_t)(r + 3) * rb};
       for (int a = 0; a < 4; a++)
         for (int b = 0; b < 8; b++) F[a][b] = vdupq_n_f32(0);
-      for (int g0 = 0; g0 < NG; g0 += 4) {
-        for (int gg = 0; gg < 4; gg++) {
-          const int g = g0 + gg;
-          int32x4_t ah[2][4], al[2][4];
-          for (int i = 0; i < 2; i++)
-            for (int j = 0; j < 4; j++) ah[i][j] = al[i][j] = vdupq_n_s32(0);
-          const int8_t* xh = XH + ((size_t)(pt >> 1) * KB + (size_t)g * 8) * 16;
-          const int8_t* xl = XL + ((size_t)(pt >> 1) * KB + (size_t)g * 8) * 16;
-          const size_t pstride = (size_t)KB * 16;  // next position pair
-          if (FMT == 8) {
-            for (int kb = 0; kb < 8; kb++) {
-              uint8x16_t w0 = vcombine_u8(vld1_u8(c[0] + 64 * g + 8 * kb), vld1_u8(c[1] + 64 * g + 8 * kb));
-              uint8x16_t w1 = vcombine_u8(vld1_u8(c[2] + 64 * g + 8 * kb), vld1_u8(c[3] + 64 * g + 8 * kb));
+      // the exact int32 dots of group g for the tile: out[i][j] = (row 2i, pos 2j), (2i, 2j+1), (2i+1, 2j), (2i+1, 2j+1)
+      auto group_dots = [&](int g, int32x4_t (&out)[2][4]) {
+        int32x4_t ah[2][4], al[2][4];
+        for (int i = 0; i < 2; i++)
+          for (int j = 0; j < 4; j++) ah[i][j] = al[i][j] = vdupq_n_s32(0);
+        const int8_t* xh = XH + ((size_t)(pt >> 1) * KB + (size_t)g * 8) * 16;
+        const int8_t* xl = XL + ((size_t)(pt >> 1) * KB + (size_t)g * 8) * 16;
+        const size_t pstride = (size_t)KB * 16;  // next position pair
+        if (FMT == 8) {
+          for (int kb = 0; kb < 8; kb++) {
+            uint8x16_t w0 = vcombine_u8(vld1_u8(c[0] + 64 * g + 8 * kb), vld1_u8(c[1] + 64 * g + 8 * kb));
+            uint8x16_t w1 = vcombine_u8(vld1_u8(c[2] + 64 * g + 8 * kb), vld1_u8(c[3] + 64 * g + 8 * kb));
+            for (int j = 0; j < 4; j++) {
+              int8x16_t vh = vld1q_s8(xh + j * pstride + kb * 16), vl = vld1q_s8(xl + j * pstride + kb * 16);
+              ah[0][j] = vusmmlaq_s32(ah[0][j], w0, vh);
+              al[0][j] = vusmmlaq_s32(al[0][j], w0, vl);
+              ah[1][j] = vusmmlaq_s32(ah[1][j], w1, vh);
+              al[1][j] = vusmmlaq_s32(al[1][j], w1, vl);
+            }
+          }
+        } else {
+          const uint8x16_t m = vdupq_n_u8(0x0F);
+          for (int half = 0; half < 2; half++) {  // bytes 0-15 then 16-31 of the group
+            uint8x16_t b0 = vld1q_u8(c[0] + 32 * g + 16 * half), b1 = vld1q_u8(c[1] + 32 * g + 16 * half);
+            uint8x16_t b2 = vld1q_u8(c[2] + 32 * g + 16 * half), b3 = vld1q_u8(c[3] + 32 * g + 16 * half);
+            // pair rows: [row a bytes 0-7 | row b bytes 0-7] and [.. 8-15 | .. 8-15]
+            uint8x16_t p0lo = vreinterpretq_u8_u64(vzip1q_u64(vreinterpretq_u64_u8(b0), vreinterpretq_u64_u8(b1)));
+            uint8x16_t p0hi = vreinterpretq_u8_u64(vzip2q_u64(vreinterpretq_u64_u8(b0), vreinterpretq_u64_u8(b1)));
+            uint8x16_t p1lo = vreinterpretq_u8_u64(vzip1q_u64(vreinterpretq_u64_u8(b2), vreinterpretq_u64_u8(b3)));
+            uint8x16_t p1hi = vreinterpretq_u8_u64(vzip2q_u64(vreinterpretq_u64_u8(b2), vreinterpretq_u64_u8(b3)));
+            // k-blocks of this half: low nibbles of bytes 0-7, 8-15, then high nibbles of bytes 0-7, 8-15
+            for (int q = 0; q < 4; q++) {
+              const int kb = half * 4 + q;
+              uint8x16_t s0 = q == 0 ? p0lo : q == 1 ? p0hi : q == 2 ? p0lo : p0hi;
+              uint8x16_t s1 = q == 0 ? p1lo : q == 1 ? p1hi : q == 2 ? p1lo : p1hi;
+              int8x16_t w0 = vreinterpretq_s8_u8(q < 2 ? vandq_u8(s0, m) : vshrq_n_u8(s0, 4));
+              int8x16_t w1 = vreinterpretq_s8_u8(q < 2 ? vandq_u8(s1, m) : vshrq_n_u8(s1, 4));
               for (int j = 0; j < 4; j++) {
                 int8x16_t vh = vld1q_s8(xh + j * pstride + kb * 16), vl = vld1q_s8(xl + j * pstride + kb * 16);
-                ah[0][j] = vusmmlaq_s32(ah[0][j], w0, vh);
-                al[0][j] = vusmmlaq_s32(al[0][j], w0, vl);
-                ah[1][j] = vusmmlaq_s32(ah[1][j], w1, vh);
-                al[1][j] = vusmmlaq_s32(al[1][j], w1, vl);
-              }
-            }
-          } else {
-            const uint8x16_t m = vdupq_n_u8(0x0F);
-            for (int half = 0; half < 2; half++) {  // bytes 0-15 then 16-31 of the group
-              uint8x16_t b0 = vld1q_u8(c[0] + 32 * g + 16 * half), b1 = vld1q_u8(c[1] + 32 * g + 16 * half);
-              uint8x16_t b2 = vld1q_u8(c[2] + 32 * g + 16 * half), b3 = vld1q_u8(c[3] + 32 * g + 16 * half);
-              // pair rows: [row a bytes 0-7 | row b bytes 0-7] and [.. 8-15 | .. 8-15]
-              uint8x16_t p0lo = vreinterpretq_u8_u64(vzip1q_u64(vreinterpretq_u64_u8(b0), vreinterpretq_u64_u8(b1)));
-              uint8x16_t p0hi = vreinterpretq_u8_u64(vzip2q_u64(vreinterpretq_u64_u8(b0), vreinterpretq_u64_u8(b1)));
-              uint8x16_t p1lo = vreinterpretq_u8_u64(vzip1q_u64(vreinterpretq_u64_u8(b2), vreinterpretq_u64_u8(b3)));
-              uint8x16_t p1hi = vreinterpretq_u8_u64(vzip2q_u64(vreinterpretq_u64_u8(b2), vreinterpretq_u64_u8(b3)));
-              // k-blocks of this half: low nibbles of bytes 0-7, 8-15, then high nibbles of bytes 0-7, 8-15
-              for (int q = 0; q < 4; q++) {
-                const int kb = half * 4 + q;
-                uint8x16_t s0 = q == 0 ? p0lo : q == 1 ? p0hi : q == 2 ? p0lo : p0hi;
-                uint8x16_t s1 = q == 0 ? p1lo : q == 1 ? p1hi : q == 2 ? p1lo : p1hi;
-                int8x16_t w0 = vreinterpretq_s8_u8(q < 2 ? vandq_u8(s0, m) : vshrq_n_u8(s0, 4));
-                int8x16_t w1 = vreinterpretq_s8_u8(q < 2 ? vandq_u8(s1, m) : vshrq_n_u8(s1, 4));
-                for (int j = 0; j < 4; j++) {
-                  int8x16_t vh = vld1q_s8(xh + j * pstride + kb * 16), vl = vld1q_s8(xl + j * pstride + kb * 16);
-                  ah[0][j] = vmmlaq_s32(ah[0][j], w0, vh);
-                  al[0][j] = vmmlaq_s32(al[0][j], w0, vl);
-                  ah[1][j] = vmmlaq_s32(ah[1][j], w1, vh);
-                  al[1][j] = vmmlaq_s32(al[1][j], w1, vl);
-                }
+                ah[0][j] = vmmlaq_s32(ah[0][j], w0, vh);
+                al[0][j] = vmmlaq_s32(al[0][j], w0, vl);
+                ah[1][j] = vmmlaq_s32(ah[1][j], w1, vh);
+                al[1][j] = vmmlaq_s32(al[1][j], w1, vl);
               }
             }
           }
-          for (int i = 0; i < 2; i++)
-            for (int j = 0; j < 4; j++) T[gg][i][j] = vaddq_s32(vshlq_n_s32(ah[i][j], 8), al[i][j]);
         }
+        for (int i = 0; i < 2; i++)
+          for (int j = 0; j < 4; j++) out[i][j] = vaddq_s32(vshlq_n_s32(ah[i][j], 8), al[i][j]);
+      };
+      for (int g0 = 0; g0 < NG4; g0 += 4) {
+        for (int gg = 0; gg < 4; gg++) group_dots(g0 + gg, T[gg]);
         // epilogue for groups g0..g0+3: per (row, position) the batch-1 kernel's lane update
         for (int i = 0; i < 2; i++) {
           const float32x4_t sA = f16x4(scales + (size_t)(r + 2 * i) * NG + g0), sB = f16x4(scales + (size_t)(r + 2 * i + 1) * NG + g0);
@@ -185,11 +189,27 @@ static void gemm_tile_loop(const uint8_t* codes, const _Float16* scales, const _
           }
         }
       }
+      const int nt = NG - NG4;  // tail groups (0-3)
+      for (int t = 0; t < nt; t++) group_dots(NG4 + t, T[t]);
       for (int b = 0; b < 8; b++) {
         const int p = pt + b;
         if (p < p0 || p >= p1) continue;
         float* y = Y + (size_t)(p - p0) * ldy + (r - r0);
-        for (int a = 0; a < 4; a++) y[a] = vaddvq_f32(F[a][b]);
+        for (int a = 0; a < 4; a++) {
+          float v = vaddvq_f32(F[a][b]);
+          for (int t = 0; t < nt; t++) {
+            // the batch-1 tail (mv_aff8 / mv_aff4): t + fma(float(dot) * scale, d, bias * gsum), in group order
+#pragma clang fp contract(off)
+            const int g = NG4 + t;
+            alignas(16) int32_t lanes[4];
+            vst1q_s32(lanes, T[t][a >> 1][b >> 1]);
+            const int dot = lanes[(a & 1) * 2 + (b & 1)];
+            const float sc = (float)scales[(size_t)(r + a) * NG + g], bi = (float)biases[(size_t)(r + a) * NG + g];
+            const float ds = (float)dot * sc, bg = bi * x.gsum[(size_t)p * NG + g];
+            v = v + __builtin_fmaf(ds, x.d[(size_t)p * NG + g], bg);
+          }
+          y[a] = v;
+        }
       }
     }
   }
