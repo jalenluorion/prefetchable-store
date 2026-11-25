@@ -73,6 +73,8 @@ model and memory
                          DIR/embeddings.safetensors when that is absent)
   --cache-gb G|auto      byte budget of the expert slots (default auto under a profile: physical memory - --reserve-gb
                          - the process's other memory, capped by what is free at start; 5 with --profile none)
+  --cache-start-gb G     with --mem mlock: slots for --cache-gb reserved, only G locked at start (the serving worker's
+                         automatic rule does this); a lock the OS refuses stops the budget there (JSON "cache_lock")
   --pool-share A,B       budget share per record format (default: the model's; Inkling 0.8,0.2)
   --mem plain|mlock|purgeable|file   expert slots (default mlock); --res-mem plain|mlock resident weights (default mlock)
                          file: held records are views of the store files' pages in the OS file cache (--cache-gb is then
@@ -230,6 +232,7 @@ struct Args {
   int file_check = 1, file_hint = 0, file_skip_resident = 1, file_prefault = 1, file_adapt = 0;
   double file_min_gb = 1.0, file_core_gb = 0;
   double ra_budget = 0;
+  double cache_start_gb = 0;
   double temp = 0, top_p = 1.0, cache_gb = 5.0, half_life = 8.0, rt_tau = -1, read_w = -1, read_mass = -1;
   double plan_u = 0.9, plan_tau_long = 0.5, plan_tau = -1, plan_pin_p = 0.2, plan_revoke_p = 0.1;
   uint64_t seed = 0;
@@ -402,7 +405,8 @@ int main(int argc, char** argv) {
       const std::string x = v();
       a.cache_auto = x == "auto";
       if (!a.cache_auto) a.cache_gb = std::stod(x);
-    } else if (k == "--profile") a.profile = v();
+    } else if (k == "--cache-start-gb") a.cache_start_gb = std::stod(v());
+    else if (k == "--profile") a.profile = v();
     else if (k == "--drafts") a.drafts = std::stoi(v());
     else if (k == "--prompt") a.prompt_text = v();
     else if (k == "--chat") a.chat = true;
@@ -600,6 +604,7 @@ int main(int argc, char** argv) {
   co.prec = a.prec == "i8" ? Prec::I8 : a.prec == "f16" ? Prec::F16 : Prec::I16;
   co.ref = a.prec == "f32";
   co.cache_gb = a.cache_gb;
+  co.cache_start_gb = a.cache_start_gb;
   co.half_life = a.half_life;
   co.mem = mem_of(a.mem);
   co.skip_reads = a.skip_reads;
@@ -910,7 +915,7 @@ int main(int argc, char** argv) {
        << ",\"hit_rate_looped\":" << (double)CS.n_hit_r[0] / std::max<uint64_t>(1, CS.n_pick_r[0])
        << ",\"hit_rate_other\":" << (double)CS.n_hit_r[1] / std::max<uint64_t>(1, CS.n_pick_r[1])
        << ",\"looped_picks_used_by_an_earlier_pass\":" << (double)CS.n_reuse_hit / std::max<uint64_t>(1, CS.n_pick_r[0])
-       << ",\"pf_issued_per_token\":" << per(CS.n_pf_issued) << ",\"pf_dropped_per_token\":" << per(CS.n_pf_dropped) << ",\"pf_gated_per_token\":" << per(CS.n_pf_gated)
+       << ",\"cache_lock\":" << C.cache.lock_json() << ",\"pf_issued_per_token\":" << per(CS.n_pf_issued) << ",\"pf_dropped_per_token\":" << per(CS.n_pf_dropped) << ",\"pf_gated_per_token\":" << per(CS.n_pf_gated)
        << ",\"pf_evicted_unused_per_token\":" << per(CS.n_pf_unused_evicted) << ",\"pf_stolen_per_token\":" << per(CS.n_pf_stolen)
        << ",\"purged\":" << CS.n_purged << ",\"held_at_end\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.held(p);

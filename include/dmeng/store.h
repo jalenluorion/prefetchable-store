@@ -136,6 +136,7 @@ struct SlotPool {
   std::vector<int> free_;
   std::vector<uint8_t*> preg;  // purgeable mode: one VM object per slot
   std::vector<uint8_t> nonvol;
+  std::vector<uint8_t> locked;  // Mem::MLOCK: the slot's memory is locked now (mlock succeeded, not unlocked since)
   uint8_t* row(int i) const { return preg.empty() ? slab + (size_t)i * rec : preg[i]; }
 };
 
@@ -178,6 +179,11 @@ struct Cache {
   void file_hit_check(int L, int slot);  // a held, landed record: re-read it now (urgent) if its pages are gone
   uint64_t file_resident_bytes() const;  // mincore over every layer file (a sample: costs ~ms, not per token)
   uint64_t held_bytes() const;           // bytes of the records the policy holds now (all pools)
+  // Mem::MLOCK: the bytes of the cache's slots the OS has actually locked, and the locks it refused. A slot whose lock is
+  // refused is not taken into use: the budget stops below it (grow, lock_start), so the cache in use is what is locked.
+  int64_t locked_bytes = 0;
+  uint64_t lock_refused = 0;
+  std::string lock_json() const;
   // run-time budget: request from any thread (budget_req), applied by the compute thread at a token or prefill-layer
   // boundary (apply_budget). Lower: entries dropped, their memory given back (munlock + MADV_FREE_REUSABLE, purgeable
   // EMPTY; FILE: bookkeeping only); higher: up to the slots allocated at init.
@@ -496,7 +502,7 @@ struct Cache {
   void file_compact(int p, int want);                // FILE shrink: drop the lowest-value entries, pack below `want`
   void core_refresh();
   void drop(int L, int slot, bool count_pf_unused);  // the slot forgets its record
-  void slot_memory(int p, int i, bool keep);         // give a slot's memory back (keep = false) or take it again
+  bool slot_memory(int p, int i, bool keep);         // give a slot's memory back (keep = false) or take it again (false: the lock was refused)
 };
 
 }  // namespace dm

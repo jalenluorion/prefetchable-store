@@ -23,6 +23,8 @@ checked):
               copy with one byte changed is refused; the manifest declares its in-memory rule (resident.q8_rule)
   caps        per-layer caps of 2K + 4 slots with the routers naming K per step: the :fit reserve refuses almost no name (under
               1%: reads in flight; the fixed one refuses most), and the ids are the same with caps, fit caps and one pool
+  lock        the cache's slots locked one by one under a memory-lock limit below the start size: the refused lock stops the
+              budget there, the JSON reports what is locked, the ids are an unlimited run's
   counters    the stages (one set of names, Times::stages_json, in dmeng and the server) sum to the token's time within 1%,
               compute = time - wait - run-ahead, and the server's MB per token equals dmeng's (MB = 10^6 bytes in both)
 Writes OUT_DIR/family_check.json and prints one line per check; exit 1 if any check fails.
@@ -424,6 +426,38 @@ if wanted("caps"):
                     ", ".join(f"{k} {v[1]:.2f} / {v[2]:.2f}" for k, v in got.items()) + "; ids identical")
         except Exception as e:
             verdict("caps", "FAIL", str(e)[-400:])
+
+# ---------------------------------------------------------------------------------------------- lock
+if wanted("lock"):
+    try:
+        # the cache's slots locked one by one (--cache-start-gb: the serving worker's automatic rule does this) under a
+        # memory-lock limit (ulimit -l) below the start size: the lock the OS refuses stops the budget there, the JSON
+        # reports what is locked, and the ids are those of an unlimited run
+        start_gb = 0.8 * ALL_GB
+        lim_kb = int(0.9 * start_gb * 1e9 / 1024)  # (above every pool's floor: slots below it are used even unlocked, reported)
+        res = {}
+        for nm, lim in (("unlimited", "unlimited"), ("limited", str(lim_kb))):
+            op = os.path.join(T, f"lock_{nm}.ids")
+            jp = os.path.join(T, f"lock_{nm}.json")
+            cmd = " ".join([DMENG, "--model", M, *BASE, "--mem", "mlock", "--prompt-file", os.path.join(T, "ids300.txt"), "--n", "32",
+                            "--cache-gb", f"{ALL_GB:.6f}", "--cache-start-gb", f"{start_gb:.6f}", "--out-ids", op, "--json", jp])
+            r = run(["/bin/zsh", "-c", f"ulimit -l {lim}; exec {cmd}"])
+            if r.returncode:
+                raise RuntimeError(f"{nm}: {(r.stdout + r.stderr)[-400:]}")
+            res[nm] = (open(op).read(), json.load(open(jp))["cache_lock"])
+        bad = []
+        u, l = res["unlimited"][1], res["limited"][1]
+        if u["refused"] or abs(u["locked_gb"] - u["budget_gb"]) > 1e-6:
+            bad.append(f"unlimited: {u}")
+        if not l["refused"] or l["locked_gb"] * 1e9 > lim_kb * 1024 + max(rb) or abs(l["locked_gb"] - l["budget_gb"]) > 1e-6:
+            bad.append(f"limited: {l}")
+        if res["unlimited"][0] != res["limited"][0]:
+            bad.append("ids differ")
+        verdict("lock", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") +
+                f"start {start_gb * 1e3:.1f} MB under a {lim_kb / 1e3:.1f} MB lock limit: locked {l['locked_gb'] * 1e3:.1f} MB = the budget, "
+                f"{l['refused']} lock refused; unlimited: locked {u['locked_gb'] * 1e3:.1f} MB; ids identical")
+    except Exception as e:
+        verdict("lock", "FAIL", str(e)[-400:])
 
 # ---------------------------------------------------------------------------------------------- counters
 STAGES = ["embed", "depth_attn", "message_gates_norms", "attn_proj", "attn_core", "attn_out", "moe_router", "experts", "run_ahead", "wait",

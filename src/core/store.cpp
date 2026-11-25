@@ -357,6 +357,8 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
     } else if (S.n) {
       S.slab = alloc_region(S.slab_bytes, defer_lock && mode == Mem::MLOCK ? Mem::PLAIN : mode, &err);
       if (!S.slab) return false;
+      S.locked.assign(S.n, mode == Mem::MLOCK && !defer_lock ? 1 : 0);  // (alloc_region locked the whole slab, or failed)
+      if (mode == Mem::MLOCK && !defer_lock) locked_bytes += (int64_t)S.slab_bytes;
     }
     S.s.assign(S.n, Slot());
     S.pending.reset(new std::atomic<int>[std::max(1, S.n)]);
@@ -1032,23 +1034,42 @@ uint64_t Cache::held_bytes() const {
 }
 
 // ---------------------------------------------------------------------------------------------- run-time budget
-void Cache::slot_memory(int p, int i, bool keep) {
+bool Cache::slot_memory(int p, int i, bool keep) {
   SlotPool& S = P[p];
-  if (mem == Mem::FILE) return;  // bookkeeping only
+  if (mem == Mem::FILE) return true;  // bookkeeping only
   if (mem == Mem::PURGEABLE) {
     int state = keep ? VM_PURGABLE_NONVOLATILE : VM_PURGABLE_EMPTY;
     vm_purgable_control(mach_task_self(), (vm_address_t)S.preg[i], VM_PURGABLE_SET_STATE, &state);
     S.nonvol[i] = keep;
-    return;
+    return true;
   }
   uint8_t* r = S.slab + (size_t)i * S.rec;  // records are whole pages (FORMAT.md: multiples of 16 KB)
   if (keep) {
     madvise(r, S.rec, MADV_FREE_REUSE);
-    if (mem == Mem::MLOCK) mlock(r, S.rec);
+    if (mem == Mem::MLOCK && !S.locked[i]) {
+      if (mlock(r, S.rec) != 0) {
+        lock_refused++;
+        return false;
+      }
+      S.locked[i] = 1;
+      locked_bytes += (int64_t)S.rec;
+    }
   } else {
-    if (mem == Mem::MLOCK) munlock(r, S.rec);
+    if (mem == Mem::MLOCK && S.locked[i]) {
+      munlock(r, S.rec);
+      S.locked[i] = 0;
+      locked_bytes -= (int64_t)S.rec;
+    }
     madvise(r, S.rec, MADV_FREE_REUSABLE);
   }
+  return true;
+}
+
+std::string Cache::lock_json() const {
+  char b[160];
+  snprintf(b, sizeof b, "{\"locked\":%s,\"locked_gb\":%.4f,\"budget_gb\":%.4f,\"refused\":%llu}", mem == Mem::MLOCK ? "true" : "false",
+           locked_bytes / 1e9, budget_bytes() / 1e9, (unsigned long long)lock_refused);
+  return b;
 }
 
 void Cache::apply_budget() {
@@ -1062,7 +1083,11 @@ void Cache::apply_budget() {
     if (want > S.cap) {  // grow: slots [cap, want) come back (those still holding a record stay held)
       for (int i = S.cap; i < want; i++) {
         if (S.s[i].layer < 0 && S.s[i].pins == 0 && S.pending[i].load(std::memory_order_acquire) == 0) {
-          slot_memory(p, i, true);
+          if (!slot_memory(p, i, true)) {  // the OS refused the lock: the budget stops below this slot
+            slot_memory(p, i, false);
+            want = i;
+            break;
+          }
           S.free_.push_back(i);
         }
       }
@@ -1097,13 +1122,23 @@ void Cache::apply_budget() {
 }
 
 void Cache::lock_start(int64_t bytes) {
+  // a refused lock stops the start budget there (never below a pool's floor: those slots are used unlocked, reported)
+  int64_t got = 0;
+  bool refused = false;
   for (int p = 0; p < npools; p++) {
     SlotPool& S = P[p];
     if (!S.n) continue;
     const int want = std::max(S.min_cap, std::min(S.n, (int)std::floor((double)bytes * share_[p] / (double)S.rec)));
-    for (int i = 0; i < want; i++) slot_memory(p, i, true);
+    int i = 0;
+    for (; i < want; i++)
+      if (!slot_memory(p, i, true) && i >= S.min_cap) {
+        slot_memory(p, i, false);
+        refused = true;
+        break;
+      }
+    got += (int64_t)i * (int64_t)S.rec;
   }
-  set_budget(bytes);
+  set_budget(refused ? std::min(bytes, got) : bytes);
   apply_budget();  // the slots past the start budget: never locked, given back as reusable
 }
 

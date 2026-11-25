@@ -717,7 +717,7 @@ int main(int argc, char** argv) {
     s << "READY {\"model\":\"" << lm.info().name << "\",\"capabilities\":" << M->info().caps_json() << ",\"vocab\":" << lm.info().vocab << ",\"ctx\":" << lm.info().max_ctx << ",\"load_ms\":" << load_ms
       << ",\"cache_gb\":" << a.cache_gb << ",\"chunk\":" << a.chunk << ",\"stream\":" << a.stream
       << ",\"fixed_mb\":" << lm.info().fixed_bytes / 1e6 << ",\"pos_kb\":" << lm.info().pos_bytes / 1e3 << ",\"hotset\":" << (hot_loaded ? hot->size() : 0)
-      << ",\"cache_auto\":" << auto_why << ",\"mode\":\"" << a.mode << "\",\"preset\":" << (profiled ? P.json() : std::string("null"))
+      << ",\"cache_auto\":" << auto_why << ",\"cache_lock\":" << C.cache.lock_json() << ",\"mode\":\"" << a.mode << "\",\"preset\":" << (profiled ? P.json() : std::string("null"))
       << ",\"resolved\":" << [&] {
            RunOpts r = ro;  // as applied
            r.routers = a.routers;
@@ -743,7 +743,7 @@ int main(int argc, char** argv) {
     mw->retry_s = a.mem_retry_s;
     mw->wake = [&] { cv.notify_all(); };
     mw->kv_plan(M->pos_bytes(), a.cache_auto ? std::min(a.ctx, a.kv_plan) : a.ctx);
-    mw->note = [&](const std::string& j) { out("M 0 " + j.substr(0, j.size() - 1) + ",\"mem\":" + lm.mem_json() + "}"); };
+    mw->note = [&](const std::string& j) { out("M 0 " + j.substr(0, j.size() - 1) + ",\"mem\":" + lm.mem_json() + ",\"cache_lock\":" + C.cache.lock_json() + "}"); };
     mw->start();
     out("M 0 {\"watcher\":\"on\",\"floor_gb\":" + std::to_string(mw->floor_gb()) + ",\"start_gb\":" + std::to_string(mw->target() / 1e9) +
         ",\"ceiling_gb\":" + std::to_string(a.cache_gb) + "}");

@@ -719,6 +719,7 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"shrinks\":" << Ca.fa.shrinks << ",\"grows\":" << Ca.fa.grows << ",\"changes\":" << Ca.fa.trace.size() << "},\"core_gb\":" << Ca.core_slab_bytes / 1e9
       << ",\"core_records\":" << Ca.core_held();
   s << "}";
+  s << ",\"cache_lock\":" << Ca.lock_json();
   s << ",\"policy\":{\"evict\":\"" << e->C->o.evict << "\",\"hazard\":" << Ca.hazard_evict << ",\"layer_caps_opt\":\"" << e->C->o.layer_caps
     << "\",\"caps_auto\":" << Ca.caps_auto << ",\"caps_active\":" << !Ca.lcap.empty() << ",\"slots\":" << Ca.budget_bytes() / std::max<int64_t>(1, (int64_t)Ca.P[0].rec)
     << ",\"plan\":" << e->o.plan << ",\"routers\":\"" << e->routers_path << "\",\"router_m\":" << (e->R ? e->R->m : 0)
