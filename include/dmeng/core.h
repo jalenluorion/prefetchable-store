@@ -50,7 +50,7 @@ struct ModelInfo {
   // union (Inkling; the 35B's batched prefill has its own MoE with no batches yet)
   bool union_batches = false;
   // Core::moe_chunk computes this model's 4-bit affine experts with the packed batched kernels (gemm_aff4_i16, inputs a
-  // multiple of 256) from PACK_MIN users and gives the GPU its share of them (moe_gpu): the same bits as the multi-vector
+  // multiple of 64) from PACK_MIN users and gives the GPU its share of them (moe_gpu): the same bits as the multi-vector
   // path. Off: the multi-vector path, as before (the 35B's verify)
   bool chunk_aff4 = false;
 };
