@@ -37,6 +37,7 @@ generators and references), `MLX_PY` one with mlx and mlx-lm with the Inkling 2 
 | drafting | --verify-check (verify passes with rollbacks == single steps), --draft fixed / lookup == plain decoding (greedy, sampled), the server worker the same; a family without a verify pass: dmeng and dmserve must refuse `--draft`, `--drafts 1`, `--verify-check` |
 | presets | the precedence (explicit > profile > manifest > built-in) for every declared profile in dmeng, the C API and dmserve, read back from each one's `"resolved"` JSON, and the three printing the same settings |
 | files | every engine-ready file in the cache folder is listed in the manifest with its sha256, the manifest declares its 8-bit rule (`resident.q8_rule`), and a copy of the in-memory file with one byte changed is refused at load |
+| caps | per-layer caps of 2K + 4 slots, the routers naming K per step: `--layer-caps uniform:fit` refuses no name the layer can hold (the fixed reserve refuses most), ids identical with caps, fit caps and one pool |
 | counters | the stages sum to the token's time within 1%, compute = time - wait - run-ahead, and the server's MB per token equals dmeng's |
 
 `tests/fingerprint.py MODEL OUT.json [--against OLD.json]`: sha256 of the logits and ids of eleven fixed runs (every

@@ -21,7 +21,7 @@ void Naming::ensure(int steps) {
 void Naming::name(Core& c, int p, int step, int e, long deadline) {
   const int L = c.mi.step_layer[step];
   const long abs = deadline >= 0 ? deadline : (c.tok_clock + (p - c.pos)) * c.steps + step;
-  const int sl = c.cache.name(L, e, abs);
+  const int sl = c.cache.name(L, e, abs, -1, per_step);
   if (sl >= 0) pins[p & (PR - 1)][step].push_back({sl, e, clk::now()});
 }
 
@@ -73,6 +73,7 @@ bool Oracle::load(const std::string& path, int steps, int K, std::string& err) {
 void Oracle::name_step(Core& c, int p, int s, long deadline) {
   if (p >= npos || s >= ns) return;
   const int16_t* r = rec.data() + ((size_t)p * ns + s) * k;
+  per_step = k;
   for (int j = 0; j < k; j++) name(c, p, s, r[j], deadline);
 }
 
@@ -347,6 +348,7 @@ void Routers::finish_z(Core& c, int t, const float* pre, const float* lagr, int 
     }
   }
   if (!active) return;
+  per_step = tau < 0 ? std::min(m, keep) : std::min(cand, keep);
   for (int j = 0; j < keep; j++) {
     bool take;
     if (tau < 0) {

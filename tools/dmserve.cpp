@@ -163,7 +163,7 @@ model and memory
   --cache-gb G|auto      default auto under a profile (5 with --profile none); --reserve-gb G (5.5) --cache-min-gb G
                          --headroom-gb G; the watcher: --mem-watch 0|1 --mem-low-pct N --mem-high-pct N
                          --mem-grow-after-s S --mem-retry-s S
-  --evict auto|hazard|freq  --layer-caps auto|uniform|none (default: the profile's, else auto)
+  --evict auto|hazard|freq  --layer-caps auto|uniform|none[:fit] (default: the profile's, else auto)
 early names (lossless: names only schedule reads)
   --routers F|none --m M --rt-tau T --rt-cand C     the profile's routers and names rule by default
   --xtok F|none --xtok-tau T --rd-prio 0|1   cross-token names (Inkling: source 47 with priority reads by default)

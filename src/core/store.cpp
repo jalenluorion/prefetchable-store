@@ -442,11 +442,14 @@ void Cache::pre_use(int L, const int32_t* picks, int n, long t) {
   for (int j = 0; j < n; j++) hz_touch(L, picks[j], t);
 }
 
-int Cache::victim(int L, int reserve) {
+int Cache::victim(int L, int reserve, int fit_names) {
   PolicyTimer pt(st.policy_ms);
   const bool capped = !lcap.empty() && lheld[L] >= lcap[L];  // per-layer caps: at its cap a layer evicts its own
+  const bool for_name = reserve > 0;
+  if (capped && for_name && cap_fit && fit_names >= 0)
+    reserve = std::min(reserve, std::max(0, lcap[L] - fit_names - (layer_hold.empty() ? 0 : layer_hold[L])));
   int v = victim_in(L, reserve, capped);
-  if (v < 0 && capped && reserve <= 0) {  // the cap is soft for a slot the step needs now (its pins, a chunk's union):
+  if (v < 0 && capped && !for_name) {  // the cap is soft for a slot the step needs now (its pins, a chunk's union):
     v = victim_in(L, reserve, false);     // the pool's choice (a free slot first); names (reserve > 0) still refuse
     if (v >= 0) st.n_cap_borrow++;
   }
@@ -769,7 +772,7 @@ void Cache::use(int L, int slot, long t_use, long step) {
   }
 }
 
-int Cache::name(int L, int e, long step, int reserve) {
+int Cache::name(int L, int e, long step, int reserve, int fit_names) {
   SlotPool& S = pool(L);
   int sl = tab[(size_t)L * NE + e];
   if (sl >= 0) {
@@ -782,7 +785,7 @@ int Cache::name(int L, int e, long step, int reserve) {
     return -1;
   }
   evict_pf_ctx = true;
-  int v = victim(L, reserve >= 0 ? reserve : 2 * K + extra_reserve[layer_pool[L]]);  // a name leaves the slots the misses and holds need
+  int v = victim(L, reserve >= 0 ? reserve : 2 * K + extra_reserve[layer_pool[L]], fit_names);  // a name leaves the slots the misses and holds need
   evict_pf_ctx = false;
   if (v < 0) {
     st.n_pf_dropped++;

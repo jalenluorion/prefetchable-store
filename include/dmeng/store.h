@@ -293,6 +293,13 @@ struct Cache {
   // evenly over its layers (the remainder to the first layers). Off (one pool over all layers) unless set.
   std::vector<int> lcap, lheld;  // [NL]
   void uniform_layer_caps();
+  // the reserve a name leaves in a layer at its cap (layer_caps "...:fit"): the fixed rule leaves 2K + the loop holds
+  // unpinned, which a cap smaller than that plus the step's own names cannot give (Flash-Next, 24 slots, K = 10: 3 of 10
+  // names admitted); fit leaves min(2K + holds, cap - the names a step makes for that layer - the layer's own loop hold),
+  // so a layer whose cap holds its names and its hold admits them all. Unchanged
+  // wherever the cap is at least 2K + holds + the names per step + the layer's hold. Names only.
+  bool cap_fit = false;
+  std::vector<int> layer_hold;  // [NL] slots a layer's loop holds can pin (K per holding step of the layer, as extra_reserve)
   // P2: a batched prefill pass names the next layer's whole union, which a layer at its cap refuses (names never
   // borrow), so the reads run in series with compute. suspend lifts the caps for the pass; resume puts them back and
   // recounts what each layer holds (a layer over its cap then evicts its own records first). Placement only.
@@ -430,7 +437,8 @@ struct Cache {
   bool ready(int L, int slot) const { return pool(L).pending[slot].load(std::memory_order_acquire) == 0; }
   const std::atomic<int>* pending_of(int L, int slot) const { return &pool(L).pending[slot]; }
   Slot& slot(int L, int i) { return pool(L).s[i]; }
-  int victim(int L, int reserve);                             // smallest key among unpinned landed slots (free first)
+  // smallest key among unpinned landed slots (free first); fit_names: the names a step makes for layer L (cap_fit)
+  int victim(int L, int reserve, int fit_names = -1);
   int victim_in(int L, int reserve, bool capped);             // ... the layer's own records only when capped
   int pick_victim(int L, int reserve, double* val) const;     // value-ordered choice, no side effects; -1 if none
   void evict(int L, int slot);                                // take a slot chosen by pick_victim
@@ -443,7 +451,8 @@ struct Cache {
   void (*on_long_wait)(void*) = nullptr;
   void* long_wait_ctx = nullptr;
   void use(int L, int slot, long t, long step);
-  int name(int L, int e, long step, int reserve = -1);        // an early name: pins; the slot, or -1 if none could be had
+  // an early name: pins; the slot, or -1 if none could be had; fit_names: the naming hook's names per step (cap_fit)
+  int name(int L, int e, long step, int reserve = -1, int fit_names = -1);
   // name_gate: a name that needs a read is not issued while urgent reads wait for a reader (Readers::urgent_backlog):
   // the drive cannot serve it before them, and a read it starts now delays them (live sessions at small caches)
   bool name_gate = false;

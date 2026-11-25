@@ -108,7 +108,7 @@ Inkling 2 Mini:
 | `names` | object | how many experts the routers name per step: `{"rule": "top", "m": 8}` (a fixed top m) or `{"rule": "confidence", "tau": 0.5, "candidates": 16}` (the top candidates whose calibrated probability is at least tau) |
 | `cross_token` | object or `null` | routers that name the next token's first steps from a late step of this one: `routers` (ids from `cross_token_routers`), `source` (the step they read, informational; the file carries it), `tau` (threshold), `priority_reads` (speculative reads by priority instead of first in, first out) |
 | `eviction` | string | `auto`, `hazard` or `freq` |
-| `layer_caps` | string | per-layer slot caps: `auto` (the engine's rule), `uniform` or `none` (one pool); absent = `auto` |
+| `layer_caps` | string | per-layer slot caps: `auto` (the engine's rule), `uniform` or `none` (one pool), optionally with `:fit` (in a layer at its cap a name leaves min(2K + the loop holds, cap - names per step - the layer's own holds) slots free instead of 2K + the holds, so a layer whose cap holds its names admits them; the same wherever the cap is at least 2K + holds + names + the layer's holds); absent = `auto` |
 | `drafts` | bool | draft and verify on by default (`false` in v1; `--drafts 1` turns it on) |
 
 Inkling's `linear_k2` (one linear layer, lag 2; engine file 49 MB, source `routers/linear_k2.safetensors`) replaced the

@@ -21,6 +21,8 @@ checked):
               read back from its "resolved" JSON, and the three front ends printing the same resolved settings
   files       every engine-ready file the engine uses is listed in the manifest with its sha256 and checked at load: a
               copy with one byte changed is refused; the manifest declares its in-memory rule (resident.q8_rule)
+  caps        per-layer caps of 2K + 4 slots with the routers naming K per step: the :fit reserve refuses almost no name (under
+              1%: reads in flight; the fixed one refuses most), and the ids are the same with caps, fit caps and one pool
   counters    the stages (one set of names, Times::stages_json, in dmeng and the server) sum to the token's time within 1%,
               compute = time - wait - run-ahead, and the server's MB per token equals dmeng's (MB = 10^6 bytes in both)
 Writes OUT_DIR/family_check.json and prints one line per check; exit 1 if any check fails.
@@ -397,6 +399,31 @@ if wanted("files"):
                 f"{len(held)} engine-ready files listed with sha256; q8 rule {q8.get('input_cast')} cast; a corrupted resident refused: {refused}")
     except Exception as e:
         verdict("files", "FAIL", str(e)[-400:])
+
+# ---------------------------------------------------------------------------------------------- caps
+if wanted("caps"):
+    if not routers:
+        verdict("caps", "not supported for this family", "no router file: nothing names experts")
+    else:
+        try:
+            # per-layer caps of 2K + 4 slots, the routers naming K per step: the fixed reserve (2K + holds unpinned) refuses
+            # most names; :fit (min(2K + holds, cap - names per step - the layer's holds)) admits the names the layer can
+            # hold; ids unchanged
+            cap_gb = (2 * K + 4) * sum(rb) / 1e9
+            got = {}
+            for caps in ("none", "uniform", "uniform:fit"):
+                out, js = greedy("caps_" + caps.replace(":", "_"), "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K), "--layer-caps", caps, n=64)
+                got[caps] = (out, js["pf_dropped_per_token"], js["pf_issued_per_token"])
+            bad = []
+            if len({v[0] for v in got.values()}) != 1:
+                bad.append("ids differ between cap settings")
+            # (a slot whose read is still in flight cannot be given: timing leaves a few refusals, under 1% of the names)
+            if got["uniform:fit"][1] > 0.01 * got["none"][2]:
+                bad.append(f"fit still refuses {got['uniform:fit'][1]:.2f} names per token")
+            verdict("caps", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") + "names refused / issued per token at 2K + 4 slots per layer: " +
+                    ", ".join(f"{k} {v[1]:.2f} / {v[2]:.2f}" for k, v in got.items()) + "; ids identical")
+        except Exception as e:
+            verdict("caps", "FAIL", str(e)[-400:])
 
 # ---------------------------------------------------------------------------------------------- counters
 STAGES = ["embed", "depth_attn", "message_gates_norms", "attn_proj", "attn_core", "attn_out", "moe_router", "experts", "run_ahead", "wait",

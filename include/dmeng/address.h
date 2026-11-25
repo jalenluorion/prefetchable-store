@@ -27,6 +27,7 @@ struct Naming : Hook {
   // name expert e of `step` of the token at position p (c.pos <= p < c.pos + PR); deadline: the cache's step time the read
   // serves (default: that token's own step time; a verify's names pass the chunk's step, the order the pass runs them)
   void name(Core& c, int p, int step, int e, long deadline = -1);
+  int per_step = -1;  // the most names this hook makes for one step (the caps' fit reserve); -1 = not stated
   void release_at(Core& c, int p, int step, bool chunk);
   void release(Core& c, int step) override { release_at(c, c.pos, step, false); }
   void chunk_release(Core& c, int step, int n) override {

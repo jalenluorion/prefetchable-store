@@ -145,13 +145,21 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
     err = "evict: auto|freq|pred|hazard, got " + o.evict;
     return false;
   }
-  if (o.layer_caps == "uniform") {
+  // CAPS[:fit]: the caps, and with :fit the reserve a name leaves in a capped layer (Cache::cap_fit)
+  const size_t colon = o.layer_caps.find(':');
+  const std::string caps = o.layer_caps.substr(0, colon), rsv = colon == std::string::npos ? "" : o.layer_caps.substr(colon + 1);
+  if (rsv != "" && rsv != "fit") {
+    err = "layer caps: auto|uniform|none, optionally :fit, got " + o.layer_caps;
+    return false;
+  }
+  cache.cap_fit = rsv == "fit";
+  if (caps == "uniform") {
     cache.uniform_layer_caps();
-  } else if (o.layer_caps == "auto") {
+  } else if (caps == "auto") {
     cache.caps_auto = cache.hazard_evict;
     if (cache.caps_auto) cache.caps_auto_apply();
-  } else if (o.layer_caps != "none") {
-    err = "layer caps: auto|uniform|none, got " + o.layer_caps;
+  } else if (caps != "none") {
+    err = "layer caps: auto|uniform|none, optionally :fit, got " + o.layer_caps;
     return false;
   }
   next_same.assign(steps, -1);
@@ -161,9 +169,13 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
         next_same[s] = s2;
         break;
       }
+  cache.layer_hold.assign(mi.layers, 0);
   if (o.loop_hold)  // the loop hold's worst case: K slots per step that holds, in that step's pool
     for (int s = 0; s < steps; s++)
-      if (next_same[s] >= 0) cache.extra_reserve[mi.layer_fmt[mi.step_layer[s]]] += K;
+      if (next_same[s] >= 0) {
+        cache.extra_reserve[mi.layer_fmt[mi.step_layer[s]]] += K;
+        cache.layer_hold[mi.step_layer[s]] += K;  // the same worst case, per layer: K per holding step of the layer
+      }
   I_ = 0;
   for (auto& f : mi.formats) I_ = std::max(I_, f.I);
   sh_inter_ = mi.shared_inter;
