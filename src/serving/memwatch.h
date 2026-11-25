@@ -27,13 +27,20 @@ struct MemRule {
   double min_gb = 2.0;        // the least cache the watcher shrinks to
   double margin_gb = 0.3;     // the process's other memory: misc. margin
   double scratch_gb = 0.5;    // prefill scratch while a prefill runs
-  double headroom_gb = 3.0;   // (the old start rule's: free now minus this; kept for --headroom-gb, not used by the rule)
-  // The start: the size that leaves the kernel's free level (kern.memorystatus_level) at `floor_pct` once the cache and
-  // the process's other memory still to come are resident: (level now - floor_pct) % of physical memory - still to come.
-  // Measured on the base M4 16 GB with Flash-Next (9.8 GB in all at a 3.5 GB cache): from a 42-44% level at start, 3.5
-  // GB ran with no swap growth and 4.5 GB grew swap by 130-400 MB with compute 13-55% slower (the level fell to ~9%, as
-  // this rule predicts: 8.5%); the 14% floor gives 3.5 GB from a 43% start level (0.62 GB of routers and 0.81 GB of
-  // scratch, margin and KV still to come)
+  // The start, one of two rules (the manifest's profile "cache_start"; Preset::cache_start, set by set_start_rule):
+  //  headroom (built-in): what is free now (the resident weights already counted in it) less the process's memory still
+  //    to come and headroom_gb: the rule the 35B's and Inkling's published caches come from (6.6 and 7.8 GB on a quiet
+  //    16 GB Mac; macOS reports warn pressure / a free level under 20% with ~2.5-3.4 GB left on a 16 GB Mac, measured);
+  //  free_level: the size that leaves the kernel's free level (kern.memorystatus_level) at `floor_pct` once the cache and
+  //    the process's memory still to come are resident: (level now - floor_pct) % of physical memory - still to come.
+  //    Measured on the base M4 16 GB with Flash-Next only (9.8 GB in all at a 3.5 GB cache): from a 42-44% level at
+  //    start, 3.5 GB ran with no swap growth and 4.5 GB grew swap by 130-400 MB with compute 13-55% slower (the level
+  //    fell to ~9%, as this rule predicts: 8.5%); the 14% floor gives 3.5 GB from a 43% start level (0.62 GB of routers
+  //    and 0.81 GB of scratch, margin and KV still to come). Flash-Next's manifest declares it.
+  // No single rule reproduced all three models' measured sizes (engine/CONSISTENCY-AUDIT item 1; FINISH.md, the
+  // integration record): the rule is a declared per-model value until the two smaller models are measured under it.
+  std::string start_rule = "headroom";
+  double headroom_gb = 3.0;
   int floor_pct = 14;
   double later_gb = 0;        // memory the front end loads after sizing the cache (the router files), counted as to come
   // never a size the OS will not lock: the wired memory the system allows (vm.global_user_wire_limit) minus what is
@@ -55,6 +62,11 @@ MemSnap mem_snapshot();
 // the ceiling by the rule above (slots reserved), and the start (locked now): the ceiling, or what is free now minus the
 // process's memory still to come and the headroom, if less; why: the numbers that went into it (JSON)
 double auto_cache_gb(const MemRule& r, size_t pos_bytes, double ckpt_gb, double store_gb, double& start_gb, std::string& why);
+// the start rule from its resolved spelling (Preset::cache_start: "headroom:G" | "free_level:P"); false: not a rule
+bool set_start_rule(MemRule& r, const std::string& spec, std::string& err);
+// the memory watcher's shrink level for the start rule: below it the cache shrinks (headroom: 20, the level macOS warns
+// at with that rule's 2.5-3.4 GB left; free_level: the floor less 2)
+int watch_low_pct(const MemRule& r);
 double store_bytes_gb(const std::string& model_dir, const std::string& layer_file, int layers);
 
 class MemWatch {

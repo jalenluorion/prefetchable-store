@@ -201,6 +201,19 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   }
   const Json* pc = prof("cache");
   p.cache = pc ? pc->str_or("auto") : "auto";
+  if (const Json* cs = prof("cache_start"); cs && cs->kind == Json::OBJ) {
+    const std::string rule = (*cs)["rule"].str_or("");
+    char b[64];
+    if (rule == "free_level") {
+      snprintf(b, sizeof b, "free_level:%d", (int)(*cs)["floor_pct"].i(14));
+    } else if (rule == "headroom") {
+      snprintf(b, sizeof b, "headroom:%g", (*cs)["headroom_gb"].f(3.0));
+    } else {
+      err = "profile " + p.profile + ": cache_start.rule must be headroom or free_level";
+      return false;
+    }
+    p.cache_start = b;
+  }
   // names
   if (const Json* rt = dflt("routers")) {
     for (auto& id : rt->arr) {
@@ -289,7 +302,7 @@ static std::string q(const std::string& s) {
 std::string Preset::json() const {
   std::ostringstream o;
   o << "{\"profile\":" << q(profile) << ",\"profile_why\":" << q(profile_why) << ",\"mode\":" << q(mode) << ",\"engine_mode\":" << q(engine_mode)
-    << ",\"resident\":" << q(resident_id) << ",\"cache\":" << q(cache) << ",\"routers\":" << q(router_id) << ",\"routers_file\":" << q(routers)
+    << ",\"resident\":" << q(resident_id) << ",\"cache\":" << q(cache) << ",\"cache_start\":" << q(cache_start) << ",\"routers\":" << q(router_id) << ",\"routers_file\":" << q(routers)
     << ",\"names\":" << (tau > 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
@@ -320,6 +333,7 @@ std::string Resolved::json() const {
                         : tau >= 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                   : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << qq(xtok) << ",\"cache_gb\":" << cache_gb << ",\"cache_auto\":" << (cache_auto ? "true" : "false")
+    << ",\"cache_start\":" << (cache_auto ? qq(cache_start) : std::string("null"))
     << ",\"eviction\":" << qq(evict) << ",\"drafts\":" << drafts << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
@@ -352,6 +366,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.xtok = xtok;
   x.cache_gb = cache_gb_in_force;
   x.cache_auto = cache != "fixed";
+  x.cache_start = cache_start;
   x.evict = evict;
   x.drafts = drafts > 0 ? 1 : 0;
   x.gpu_frac = gpu_frac;
@@ -408,6 +423,7 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   if (g.cache_gb) r.cache = "fixed", r.cache_gb = *g.cache_gb;
   else if (g.cache_auto) r.cache = "auto";
   else if (pf) r.cache = P.cache;
+  if (pf) r.cache_start = P.cache_start;
   // the prompt path
   r.gpu_frac = g.gpu_frac ? *g.gpu_frac : pf ? P.gpu_frac : r.gpu_frac;
   r.gpu_experts = g.gpu_experts ? *g.gpu_experts : pf ? P.gpu_experts : r.gpu_experts;

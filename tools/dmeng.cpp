@@ -580,6 +580,7 @@ int main(int argc, char** argv) {
   a.m = ro.m, a.rt_tau = ro.tau, a.rt_cand = ro.cand, a.xtok_tau = ro.xtok_tau, a.rd_prio = ro.rd_prio;
   a.evict = ro.evict, a.layer_caps = ro.layer_caps;
   a.cache_auto = ro.cache != "fixed", a.cache_gb = ro.cache_gb;  // (dmeng is a macOS tool: slab, the iPhone rule, is the automatic one here)
+  if (!set_start_rule(a.mr, ro.cache_start, err)) return die("cache", err);
   a.prefill_gpu_frac = ro.gpu_frac, a.prefill_gpu_experts = ro.gpu_experts, a.prefill_chunk = ro.prefill_chunk;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
   a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts;

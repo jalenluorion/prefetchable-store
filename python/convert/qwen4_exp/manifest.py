@@ -210,7 +210,8 @@ if emb and "resident.safetensors" in shipped:
     mac = [p for p in mac if p["path"] != "resident.safetensors"] + [emb]
 m["profiles"]["mac"] = {"when": "macOS", "mode": "exact", "resident": "resident_q8", "precision": "8-bit", "precision_detail": "8-bit affine, groups of 64",
                         "names": {"rule": "top", "m": NAMES_M}, "cache": "auto",
-                        "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
+                        "cache_rule": "locked; the start keeps the kernel's free level at 14% once everything is in (cache_start), the ceiling physical memory - 5.5 GB - the process's other memory, never more than the system will lock; shrinks 1 GB per check under memory pressure and grows back",
+                        "cache_start": {"rule": "free_level", "floor_pct": 14, "measured": "base M4 16 GB, this model only: from a 42-44% free level at start, a 3.5 GB cache (9.8 GB in all) ran with no swap growth; 4.5 GB (10.8 GB) let the level fall to ~9% and compute slowed 13-55%; 5.75 GB could not be locked. The built-in headroom rule (what the 35B and Inkling use) is not measured on this model"},
                         "prefill_gpu": {"projections": 0.4, "experts": 0.4}, "run_ahead": {"picks": K, "depth": 1},
                         "parts": [{"path": p["path"], "bytes": p["bytes"], "sha256": p["sha256"]} for p in mac],
                         "bytes": sum(p["bytes"] for p in mac), "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"}

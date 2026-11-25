@@ -39,6 +39,7 @@ generators and references), `MLX_PY` one with mlx and mlx-lm with the Inkling 2 
 | files | every engine-ready file in the cache folder is listed in the manifest with its sha256, the manifest declares its 8-bit rule (`resident.q8_rule`), and a copy of the in-memory file with one byte changed is refused at load |
 | caps | per-layer caps of 2K + 4 slots, the routers naming K per step: `--layer-caps uniform:fit` refuses no name the layer can hold (the fixed reserve refuses most), ids identical with caps, fit caps and one pool |
 | lock | `--mem mlock --cache-start-gb` under `ulimit -l` below the start: the lock the OS refuses stops the budget there, `"cache_lock"` reports the bytes locked (= the budget) and the refusals, ids identical to an unlimited run |
+| cache | the automatic cache rule under one machine state (`DMENG_TEST_MEMSNAP`) in dmeng, dmserve and the C API: the start rule the manifest declares (`profiles.mac.cache_start`, else the built-in headroom rule), the printed ceiling and start recomputed from the printed inputs |
 | counters | the stages sum to the token's time within 1%, compute = time - wait - run-ahead, and the server's MB per token equals dmeng's |
 
 `tests/fingerprint.py MODEL OUT.json [--against OLD.json]`: sha256 of the logits and ids of eleven fixed runs (every

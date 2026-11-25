@@ -121,7 +121,8 @@ struct Args {
   bool cache_auto = false;    // --cache-gb auto: the size from the machine (src/serving/memwatch.h), then the watcher
   MemRule mr;                 // --reserve-gb, --cache-min-gb
   int mem_watch = -1;         // follow macOS memory pressure (default: on with --cache-gb auto)
-  int mem_low = 12, mem_high = 35;  // kern.memorystatus_level thresholds (shrink below low, grow back at or above high)
+  int mem_low = -1, mem_high = 35;  // kern.memorystatus_level thresholds (shrink below low, grow back at or above high);
+                                    // low -1: the start rule's (watch_low_pct: headroom 20, free_level its floor - 2)
   double mem_grow_s = 30, mem_retry_s = 600;
   std::string evict = "auto", xtok, layer_caps;
   double rt_tau = -1, xtok_tau = 0.5;
@@ -507,6 +508,16 @@ int main(int argc, char** argv) {
   a.m = ro.m, a.rt_tau = ro.tau, a.rt_cand = ro.cand, a.xtok_tau = ro.xtok_tau, a.rd_prio = ro.rd_prio;
   a.evict = ro.evict, a.layer_caps = ro.layer_caps;
   a.cache_auto = ro.cache != "fixed", a.cache_gb = ro.cache_gb;  // (a macOS tool: slab, the iPhone rule, is the automatic one here)
+  {
+    const double hr = a.mr.headroom_gb;  // (an explicit --headroom-gb wins over the rule's)
+    std::string e2;
+    if (!set_start_rule(a.mr, ro.cache_start, e2)) {
+      fprintf(stderr, "cache: %s\n", e2.c_str());
+      return 1;
+    }
+    if (has("--headroom-gb")) a.mr.headroom_gb = hr;
+    if (a.mem_low < 0) a.mem_low = watch_low_pct(a.mr);
+  }
   a.gpu_frac = ro.gpu_frac, a.gpu_experts = ro.gpu_experts;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
   a.readers = ro.readers, a.drafts = ro.drafts;

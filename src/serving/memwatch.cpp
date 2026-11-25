@@ -39,6 +39,13 @@ MemSnap mem_snapshot() {
   uint64_t wl = 0;
   n = sizeof wl;
   if (sysctlbyname("vm.global_user_wire_limit", &wl, &n, nullptr, 0) == 0) s.wire_limit_gb = wl / 1e9;
+  // tests (tests/family_check.py "cache"): the machine's numbers given as TOTAL,AVAIL,LEVEL,WIRED,WIRE_LIMIT (GB, GB, %,
+  // GB, GB), so every front end's rule can be checked on one state; the process's own footprint stays measured
+  if (const char* t = getenv("DMENG_TEST_MEMSNAP")) {
+    double v[5];
+    if (sscanf(t, "%lf,%lf,%lf,%lf,%lf", &v[0], &v[1], &v[2], &v[3], &v[4]) == 5)
+      s.total_gb = v[0], s.avail_gb = v[1], s.level_pct = (int)v[2], s.pressure = 1, s.wired_gb = v[3], s.wire_limit_gb = v[4];
+  }
   return s;
 }
 
@@ -73,13 +80,13 @@ double auto_cache_gb(const MemRule& r, size_t pos_bytes, double ckpt_gb, double 
   c = std::min(c, std::max(0.0, wire));
   // the start: the kernel's free level kept at floor_pct once the cache and the process's memory still to come are in
   const double to_come = other - s.footprint_gb;
-  const double start_raw = s.level_pct >= 0 ? (s.level_pct - r.floor_pct) / 100.0 * s.total_gb - to_come
-                                            : s.avail_gb - to_come - r.headroom_gb;
+  const bool level = r.start_rule == "free_level" && s.level_pct >= 0;
+  const double start_raw = level ? (s.level_pct - r.floor_pct) / 100.0 * s.total_gb - to_come : s.avail_gb - to_come - r.headroom_gb;
   start_gb = std::min(c, std::max(r.min_gb, start_raw));
   std::ostringstream o;
   o.setf(std::ios::fixed);
   o.precision(2);
-  o << "{\"rule\":\"physical - reserve - other\",\"physical_gb\":" << s.total_gb << ",\"reserve_gb\":" << r.reserve_gb << ",\"other_gb\":" << other
+  o << "{\"rule\":\"physical - reserve - other\",\"start_rule\":\"" << (level ? "free_level" : "headroom") << "\",\"physical_gb\":" << s.total_gb << ",\"reserve_gb\":" << r.reserve_gb << ",\"other_gb\":" << other
     << ",\"resident_now_gb\":" << s.footprint_gb << ",\"kv_gb\":" << kv << ",\"later_gb\":" << r.later_gb << ",\"ckpt_gb\":" << ckpt_gb << ",\"scratch_gb\":" << r.scratch_gb
     << ",\"margin_gb\":" << r.margin_gb << ",\"wire_room_gb\":" << wire << ",\"floor_pct\":" << r.floor_pct << ",\"unclamped_gb\":" << raw << ",\"store_gb\":" << store_gb << ",\"ceiling_gb\":" << c << ",\"headroom_gb\":" << r.headroom_gb << ",\"start_unclamped_gb\":" << start_raw
     << ",\"start_gb\":" << start_gb << ",\"at_start\":" << s.json()
@@ -87,6 +94,25 @@ double auto_cache_gb(const MemRule& r, size_t pos_bytes, double ckpt_gb, double 
   why = o.str();
   return c;
 }
+
+bool set_start_rule(MemRule& r, const std::string& spec, std::string& err) {
+  const size_t c = spec.find(':');
+  const std::string rule = spec.substr(0, c), arg = c == std::string::npos ? "" : spec.substr(c + 1);
+  if (rule == "headroom") {
+    r.start_rule = rule;
+    if (!arg.empty()) r.headroom_gb = std::stod(arg);
+    return true;
+  }
+  if (rule == "free_level") {
+    r.start_rule = rule;
+    if (!arg.empty()) r.floor_pct = std::stoi(arg);
+    return true;
+  }
+  err = "cache start rule: headroom[:GB] | free_level[:PCT], got " + spec;
+  return false;
+}
+
+int watch_low_pct(const MemRule& r) { return r.start_rule == "free_level" ? std::max(1, r.floor_pct - 2) : 20; }
 
 void MemWatch::start() {
   // the cache's own floor: each pool keeps at least what one step or one prefill layer pins (Cache::SlotPool::min_cap);

@@ -58,6 +58,7 @@ struct dm_engine {
   std::unique_ptr<ModelLM> lm;
   std::unique_ptr<PrefixCache> pc;
   std::string err, stats, routers_path, res_file, last_prefill = "{}";  // the caller's strings are not kept (only copies)
+  std::string cache_why = "null";  // the automatic cache rule's numbers (memwatch.h auto_cache_gb), as dmeng and dmserve print them
   dm_open_opts o{};
   qos_class_t qos = QOS_CLASS_USER_INTERACTIVE;
   uint64_t rs_urgent = 0, rs_pf = 0, rs_pf_n = 0, rs_unused = 0, rs_busy = 0, rs_bytes = 0, rs_steps = 0;  // reads at the last stats call
@@ -285,20 +286,30 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   co.readers = ro.readers;
   co.cache_gb = ro.cache_gb;
   co.mem = mem_c(o.memory_mode);
-  if (ro.cache != "fixed" && e->avail_open <= 0 && ro.cache != "auto") ro.cache = "fixed";  // (slab is the iPhone's rule)
+  // (slab is the iPhone's rule; on macOS a profile's slab is the Mac's automatic rule, as in dmeng and dmserve)
+  if (ro.cache == "slab" && e->avail_open <= 0) ro.cache = "auto";
   if (ro.cache == "auto" && (e->avail_open > 0 || co.mem != Mem::MLOCK)) ro.cache = "fixed";
   if (ro.cache == "auto") {  // the Mac rule
     const ModelInfo& mi0 = e->M->info();
     double start = 0;
     std::string why;
     MemRule mr;
+    if (!set_start_rule(mr, ro.cache_start, err)) {
+      g_err = "cache: " + err;
+      return nullptr;
+    }
     mr.kv_positions = o.ctx > 0 ? o.ctx : 16384;
+    {
+      struct stat rs;  // the router file is loaded after the cache is sized (as in dmeng and dmserve)
+      if (!e->routers_path.empty() && stat(e->routers_path.c_str(), &rs) == 0) mr.later_gb = rs.st_size / 1e9;
+    }
     const double ceil = auto_cache_gb(mr, e->M->pos_bytes(), std::max(o.ckpt_gb > 0 ? o.ckpt_gb : 0.25, SessionOptions().ckpt_min * [&] {  // the checkpoints' memory (a fresh
       std::string e2;                                                                // state's fixed part, only reserved)
       auto tmp = e->M->new_state(o.ctx > 0 ? o.ctx : 16384, e2);
       return tmp ? (double)e->M->fixed_bytes(*tmp) / 1e9 : 0.0;
     }()), store_bytes_gb(model_dir, mi0.layer_file, mi0.layers), start, why);
     co.cache_gb = std::min(ceil, start);
+    e->cache_why = why;
   }
   if (o.cache_bytes <= 0 && e->avail_open > 0 && co.mem != Mem::FILE) {  // iOS: the slab from the memory the app has
     ro.cache = "slab";
@@ -784,7 +795,7 @@ const char* dm_stats_json(dm_engine* e) {
     s << "}";
   }
   if (e->C->hook) s << ",\"hook\":" << e->C->hook->stats_json(*e->C, (int)std::max<int64_t>(1, e->steps));
-  s << ",\"resolved\":" << e->res.json() << ",\"capabilities\":" << e->M->info().caps_json() << "}";
+  s << ",\"cache_auto\":" << e->cache_why << ",\"resolved\":" << e->res.json() << ",\"capabilities\":" << e->M->info().caps_json() << "}";
   e->stats = s.str();
   e->lm->reset_stats();
   return e->stats.c_str();

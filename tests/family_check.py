@@ -25,6 +25,8 @@ checked):
               1%: reads in flight; the fixed one refuses most), and the ids are the same with caps, fit caps and one pool
   lock        the cache's slots locked one by one under a memory-lock limit below the start size: the refused lock stops the
               budget there, the JSON reports what is locked, the ids are an unlimited run's
+  cache       the automatic cache rule on one given machine state in dmeng, dmserve and the C API (mac profile): the start
+              rule the manifest declares, and the printed ceiling and start follow from the printed inputs in all three
   counters    the stages (one set of names, Times::stages_json, in dmeng and the server) sum to the token's time within 1%,
               compute = time - wait - run-ahead, and the server's MB per token equals dmeng's (MB = 10^6 bytes in both)
 Writes OUT_DIR/family_check.json and prints one line per check; exit 1 if any check fails.
@@ -473,6 +475,51 @@ if wanted("lock"):
                 f"{l['refused']} lock refused; unlimited: locked {u['locked_gb'] * 1e3:.1f} MB; ids identical")
     except Exception as e:
         verdict("lock", "FAIL", str(e)[-400:])
+
+# ---------------------------------------------------------------------------------------------- cache
+if wanted("cache"):
+    try:
+        # the automatic cache rule on one machine state (DMENG_TEST_MEMSNAP: total, available, free level, wired, wire
+        # limit) in dmeng, dmserve and the C API under the mac profile: each prints its numbers ("cache_auto"); the start
+        # rule is the one the manifest declares (profiles.mac.cache_start, else the built-in headroom rule), and the
+        # ceiling and start recomputed here from the printed inputs match (the same computation in all three)
+        snap = (17.18, 9.0, 50, 3.0, 13.06)
+        env = {"DMENG_TEST_MEMSNAP": ",".join(map(str, snap))}
+        cs = (man["profiles"].get("mac") or {}).get("cache_start") or {"rule": "headroom", "headroom_gb": 3.0}
+        want_rule = cs["rule"]
+        ip = os.path.join(T, "cids.txt")
+        open(ip, "w").write(",".join(str(LO + i) for i in range(8)))
+        whys, bad = {}, []
+        j = os.path.join(T, "cache.json")
+        r = run([DMENG, "--model", M, "--profile", "mac", "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j], env=env)
+        whys["dmeng"] = (json.load(open(j))["cache_auto"], json.load(open(j))["resolved"]) if r.returncode == 0 else (None, r.stderr[-300:])
+        r = run([DMGATE, "--model", M, "--profile", "mac", "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j], env=env)
+        whys["capi"] = (json.load(open(j))["stats"]["cache_auto"], json.load(open(j))["stats"]["resolved"]) if r.returncode == 0 else (None, r.stderr[-300:])
+        r = run([DMSERVE, "--model", M, "--profile", "mac", "--threads", "2"], env=env, inp="", timeout=120)
+        ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+        whys["dmserve"] = (json.loads(ready[0][6:])["cache_auto"], json.loads(ready[0][6:])["resolved"]) if ready else (None, r.stderr[-300:])
+        rows = []
+        for fe, (w, res) in whys.items():
+            if not isinstance(w, dict):
+                bad.append(f"{fe}: no rule printed ({res})")
+                continue
+            to_come = w["other_gb"] - w["resident_now_gb"]
+            other = w["resident_now_gb"] + w["kv_gb"] + w["ckpt_gb"] + w["scratch_gb"] + w["margin_gb"] + w["later_gb"]
+            start = (snap[2] - w["floor_pct"]) / 100 * snap[0] - to_come if want_rule == "free_level" else snap[1] - to_come - w["headroom_gb"]
+            ceil = snap[0] - w["reserve_gb"] - w["other_gb"]
+            if w.get("start_rule") != want_rule:
+                bad.append(f"{fe}: start rule {w.get('start_rule')} (manifest: {want_rule})")
+            if abs(other - w["other_gb"]) > 0.03 or abs(start - w["start_unclamped_gb"]) > 0.03 or abs(ceil - w["unclamped_gb"]) > 0.03:
+                bad.append(f"{fe}: printed numbers do not follow the rule ({w})")
+            if abs(w["wire_room_gb"] - (snap[4] - snap[3] - 0.5)) > 0.02:
+                bad.append(f"{fe}: wire room {w['wire_room_gb']}")
+            rows.append(f"{fe} {w.get('start_rule')} start {w['start_unclamped_gb']:.2f} ceiling {w['unclamped_gb']:.2f} (plan: kv {w['kv_gb']:.3f}, checkpoints {w['ckpt_gb']:.3f}, later {w['later_gb']:.3f})")
+        starts = {fe: (res or {}).get("cache_start") for fe, (w, res) in whys.items() if isinstance(res, dict)}
+        if len(set(starts.values())) != 1:
+            bad.append(f"resolved cache_start differs: {starts}")
+        verdict("cache", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") + "; ".join(rows))
+    except Exception as e:
+        verdict("cache", "FAIL", str(e)[-400:])
 
 # ---------------------------------------------------------------------------------------------- counters
 STAGES = ["embed", "depth_attn", "message_gates_norms", "attn_proj", "attn_core", "attn_out", "moe_router", "experts", "run_ahead", "wait",

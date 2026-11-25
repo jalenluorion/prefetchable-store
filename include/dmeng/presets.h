@@ -16,6 +16,10 @@ struct Preset {
   std::string resident_id;         // resident_q8 | resident_q4
   std::string resident;            // the file when it is not the resolver's default (resident_q4); "" = default
   std::string cache = "auto";      // auto (from free memory, then memory pressure) | slab (sized at open, iOS)
+  // the automatic cache's start rule (src/serving/memwatch.h MemRule): "headroom:G" leaves G GB of what is free once the
+  // model's memory still to come is in (built-in, G = 3); "free_level:P" keeps the kernel's free level at P% (a
+  // manifest's profile "cache_start": {"rule": "free_level", "floor_pct": P}, measured per model)
+  std::string cache_start = "headroom:3";
   std::string router_id, routers;  // early routers (names); routers = "" when none resolved
   int m = 8;                       // names rule: a fixed top m ...
   double tau = -1;                 // ... or the confidence rule (tau > 0) over `cand` candidates
@@ -68,6 +72,7 @@ struct Resolved {
   int readers = 0;
   int bg_ranks = 0, bg_gate = 0;
   bool cache_auto = false;
+  std::string cache_start;  // the automatic cache's start rule (Preset::cache_start)
   std::string layer_caps;  // "" = the core's rule
   double xtok_tau = 0.5;
   int rd_prio = -1, prefill_chunk = 1;
@@ -129,6 +134,7 @@ struct RunOpts {
   std::string layer_caps;           // "" = the core's rule
   std::string cache = "fixed";      // fixed (cache_gb) | auto (from the machine) | slab (sized at open from what iOS gives)
   double cache_gb = 5.0;
+  std::string cache_start = "headroom:3";  // the automatic cache's start rule (Preset::cache_start)
   double gpu_frac = 0, gpu_experts = 0;
   int run_ahead = 0, run_ahead_depth = 1, ra_max_tok = 0;
   double ra_budget = 0;
