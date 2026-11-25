@@ -287,6 +287,7 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
 bool Flash::bind(Core& cr, std::string& err) {
   core = &cr;
   prec = cr.o.prec;
+  if (const char* e = getenv("DMENG_AB")) ab_on = atoi(e);  // measurement: arm = token parity, per-arm step and mixer ms
   ref = cr.o.ref;
   cr.views.resize(c.NL);
   for (int L = 0; L < c.NL; L++) cr.views[L] = &views[L];
@@ -691,9 +692,81 @@ void Flash::qsa_head(int L, int h, const float* q, const float* gate, const std:
 }
 
 // ------------------------------------------------------------------------------------------------ decode blocks
+namespace {
+struct HcCtx {
+  const FCfg* c;
+  const HCw* w;
+  const float* hyper;
+  float *nrm, *lo, *up, *mixed, *r;
+  XQ *xn, *xl;
+  int nd = 0, nu = 0;
+  bool inj = false;
+  alignas(128) std::atomic<int> next{0};
+  alignas(128) std::atomic<int> streams_left{0};
+  alignas(128) std::atomic<int> down_left{0};
+  alignas(128) std::atomic<int> lo_ready{0};
+};
+void phase_hc(void* p, int, int) {
+  HcCtx& X = *(HcCtx*)p;
+  const FCfg& c = *X.c;
+  const int H = c.H, HC = c.HC, LOW = c.LOW, nb = H / XB;
+  const int a_down = HC, a_inj = a_down + X.nd, a_lo = a_inj + (X.inj ? 1 : 0), a_up = a_lo + 1, total = a_up + X.nu;
+  auto wait = [](const std::atomic<int>& v, int want) {
+    while (v.load(std::memory_order_acquire) != want) __builtin_arm_yield();
+  };
+  for (int job; (job = X.next.fetch_add(1, std::memory_order_relaxed)) < total;) {
+    if (job < a_down) {
+      const int st = job;
+      rmsnorm(X.hyper + (size_t)st * H, X.w->norm + (size_t)st * H, H, c.eps, X.nrm + (size_t)st * H);
+      for (int b = 0; b < nb; b++) xq_block(*X.xn, st * nb + b, X.nrm + (size_t)st * H + XB * b);
+      X.streams_left.fetch_sub(1, std::memory_order_release);
+    } else if (job < a_lo) {
+      wait(X.streams_left, 0);
+      if (job < a_inj) {
+        const int r0 = (job - a_down) * 8, r1 = std::min(LOW, r0 + 8);
+        mv(X.w->down, r0, r1, X.xn, X.nrm, X.lo + r0);
+      } else {
+        mv(X.w->inj, 0, X.w->inj.rows, X.xn, X.nrm, X.r);
+      }
+      X.down_left.fetch_sub(1, std::memory_order_release);
+    } else if (job == a_lo) {
+      wait(X.down_left, 0);
+      for (int i = 0; i < LOW; i++) X.lo[i] = silu(X.lo[i] / (float)HC);
+      for (int b = 0; b < LOW / XB; b++) xq_block(*X.xl, b, X.lo + XB * b);
+      X.lo_ready.store(1, std::memory_order_release);
+    } else {
+      wait(X.lo_ready, 1);
+      const int i0 = (job - a_up) * 64, i1 = std::min(H, i0 + 64);
+      for (int st = 0; st < HC; st++) mv(X.w->up, st * H + i0, st * H + i1, X.xl, X.lo, X.up + (size_t)st * H + i0);
+      for (int i = i0; i < i1; i++) {
+        float acc = 0;
+        for (int st = 0; st < HC; st++) acc = __builtin_fmaf(sigm(X.up[(size_t)st * H + i]), X.nrm[(size_t)st * H + i], acc);
+        X.mixed[i] = acc / (float)HC;
+      }
+    }
+  }
+}
+}  // namespace
+
 void Flash::hc_step(const HCw& w, const float* hyper, float* mixed, float* inj_out) {
   const int N = c.N();
   const auto t0 = clk::now();
+  if (ab_on == 1 && ab_arm && !ref) {  // (measurement: the mixer in one fork-join)
+    float r[64];
+    HcCtx X;
+    X.c = &c, X.w = &w, X.hyper = hyper;
+    X.nrm = nrm.data(), X.lo = lo.data(), X.up = up.data(), X.mixed = mixed, X.r = r;
+    xin.reset(N);
+    xlo.reset(c.LOW);
+    X.xn = &xin.q, X.xl = &xlo.q;
+    X.nd = (c.LOW + 7) / 8, X.nu = (c.H + 63) / 64, X.inj = inj_out != nullptr;
+    X.streams_left.store(c.HC), X.down_left.store(X.nd + (X.inj ? 1 : 0));
+    core->pool->run_any(phase_hc, &X);
+    if (inj_out)
+      for (int st = 0; st < c.HC; st++) inj_out[st] = 2.f * sigm(r[st] / (float)c.HC);
+    T->msg += ms_since(t0);
+    return;
+  }
   // the per-stream norms on the pool, one stream per task (each stream's arithmetic is the serial loop's)
   parallel_for(*core->pool, c.HC, [&](int s) {
     rmsnorm(hyper + (size_t)s * c.H, w.norm + (size_t)s * c.H, c.H, c.eps, nrm.data() + (size_t)s * c.H);
@@ -704,7 +777,7 @@ void Flash::hc_step(const HCw& w, const float* hyper, float* mixed, float* inj_o
     XBuf* qs[1] = {&xin};
     const float* xs[1] = {nrm.data()};
     const int ks[1] = {N};
-    run_rows_q(*core->pool, jb, inj_out ? 2 : 1, 16, ref, &T->bytes_res, qs, xs, ks, 1);
+    run_rows_q(*core->pool, jb, inj_out ? 2 : 1, ab_on == 2 && ab_arm ? 8 : 16, ref, &T->bytes_res, qs, xs, ks, 1);
   }
   hc_lo(lo.data());
   Job ju = {&w.up, &xlo.q, lo.data(), up.data()};
@@ -712,7 +785,7 @@ void Flash::hc_step(const HCw& w, const float* hyper, float* mixed, float* inj_o
     XBuf* qs[1] = {&xlo};
     const float* xs[1] = {lo.data()};
     const int ks[1] = {c.LOW};
-    run_rows_q(*core->pool, &ju, 1, 32, ref, &T->bytes_res, qs, xs, ks, 1);
+    run_rows_q(*core->pool, &ju, 1, ab_on == 2 && ab_arm ? 64 : 32, ref, &T->bytes_res, qs, xs, ks, 1);
   }
   // the mix on the pool in blocks of 256 outputs (every output's arithmetic is hc_mix's: the same bits)
   const int H = c.H, nb = (H + 255) / 256;
@@ -758,7 +831,7 @@ void Flash::gdn_step(int L, const float* xh, float* y) {
   X.S = S->ls[L].S.data();
   X.qkv = qkv, X.z = z, X.bb = bb, X.aa = aa, X.cv = cv, X.o = att.data();
   X.xq = &xatt.q;
-  X.quant_heads = !ref && c.DV % XB == 0;
+  X.quant_heads = !ref && c.DV % XB == 0 && !(ab_on == 3 && ab_arm);  // (DMENG_AB=3: arm 1 the output projection after the heads)
   for (int j = 0; j < c.NKH; j++) X.qk_done[j].store(0, std::memory_order_relaxed);
   xatt.reset(ZD);
   if (X.quant_heads) {  // the output projection in the heads' fork-join
@@ -872,6 +945,17 @@ void Flash::step(State& s0, int32_t tok, Want want) {
   greedy_ = -1;
   const int H = c.H, N = c.N();
   auto t0 = clk::now();
+  const double msg0 = T->msg;
+  struct AbAcc {  // measurement (DMENG_AB): this step's time and mixer time to its arm
+    Flash* f;
+    clk::time_point t0;
+    double msg0;
+    ~AbAcc() {
+      if (!f->ab_on) return;
+      f->ab_ms[f->ab_arm] += ms_since(t0), f->ab_msg[f->ab_arm] += f->T->msg - msg0, f->ab_n[f->ab_arm]++;
+      f->ab_arm ^= 1;
+    }
+  } ab_acc{this, t0, msg0};
   stage_mark(ST_EMBED);
   {  // the n-gram rows first: their reads run while the embedding and layer 0 compute
     int64_t r[64];
@@ -1039,6 +1123,9 @@ std::string Flash::stats_json(int ntok) const {
     o << ",\"fast_head\":{\"candidates_per_token\":" << sh.n_cand / nc << ",\"coarse_ms\":" << sh.ms_coarse / nc << ",\"exact_ms\":" << sh.ms_exact / nc << "}";
   }
   if (V) o << ",\"verify\":" << verify_json();
+  if (ab_on)
+    for (int a = 0; a < 2; a++)
+      o << ",\"ab" << a << "\":{\"steps\":" << ab_n[a] << ",\"ms\":" << ab_ms[a] / std::max(1.0, ab_n[a]) << ",\"msg_ms\":" << ab_msg[a] / std::max(1.0, ab_n[a]) << "}";
   o << "}";
   return o.str();
 }
@@ -1046,6 +1133,7 @@ std::string Flash::stats_json(int ntok) const {
 void Flash::reset_stats() {
   sh.reset_stats();
   ngs.reset_stats();
+  for (int a = 0; a < 2; a++) ab_ms[a] = ab_msg[a] = ab_n[a] = 0;
 }
 
 ModelMem Flash::mem(const State& s0) const {
