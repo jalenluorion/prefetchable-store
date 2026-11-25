@@ -46,7 +46,15 @@ def load(path):
 
 
 class Sim:
-    def __init__(self, ri, rp, ti, slots, policy, names, mode="exact", w=0.13, mass=0.13, first=0, seed=0):
+    def __init__(self, ri, rp, ti, slots, policy, names, mode="exact", w=0.13, mass=0.13, first=0, seed=0, caps=False,
+                 name_touch=False, use_touch=True):
+        # caps: the slots split evenly over the layers (a layer evicts only its own); name_touch: a name counts as a use in
+        # the keep-score's statistics (the near-future evidence a router gives); use_touch = False: picks do not (the old
+        # runner); mode prefetch: picks never read (the released top-k among the held: hits only)
+        self.caps, self.name_touch, self.use_touch = caps, name_touch, use_touch
+        self.lheld = np.zeros(NL, np.int64)
+        self.cur_L = 0
+        self.hits = 0
         self.ri, self.rp, self.ti = ri, rp, ti
         self.npos = ri.shape[0]
         self.C, self.policy, self.names, self.mode, self.W, self.MASS, self.first = slots, policy, names, mode, w, mass, first
@@ -216,12 +224,18 @@ class Sim:
             for p2, s2 in tg:
                 ks = s2 * NE + self.ti[p2, s2, :D]
                 sc[ks] = np.maximum(sc[ks], self.prank[:D] + 1.0 * 0)
-        cand = np.where(self.held & (self.pin < self.ev), sc, np.inf)
+        ok = self.held & (self.pin < self.ev)
+        if self.caps:
+            ok = ok & (np.arange(self.N) // NE == self.cur_L)
+        cand = np.where(ok, sc, np.inf)
         return int(np.argmin(cand))
 
     def insert(self, k, pin_until, counted, L, by_name):
-        if self.nheld >= self.C:
+        self.cur_L = k // NE
+        full = self.lheld[k // NE] >= self.C // NL if self.caps else self.nheld >= self.C
+        if full:
             v = self.victim()
+            self.lheld[v // NE] -= 1
             if self.unused[v] and counted:
                 self.per_layer[v // NE, 2] += 1  # a named read evicted before any use: wasted
             self.held[v] = False
@@ -229,6 +243,7 @@ class Sim:
             self.nheld -= 1
         self.held[k] = True
         self.nheld += 1
+        self.lheld[k // NE] += 1
         self.pin[k] = pin_until
         self.unused[k] = by_name
         if self.policy == "lru":
@@ -277,17 +292,22 @@ class Sim:
                             self.insert(k, p * NL + st, counted, st, True)
                         else:
                             self.pin[k] = max(self.pin[k], p * NL + st)
+                        if self.name_touch:
+                            self.touch(k)
                 picks = self.ri[p, s, :K]
                 wts = self.rp[p, s, :K].astype(np.float64)
                 wts = wts / wts.sum()
                 keys = [s * NE + int(e) for e in picks]
+                if counted:
+                    self.hits += sum(bool(self.held[k]) for k in keys)
                 for k in keys:
-                    self.touch(k)
+                    if self.use_touch:
+                        self.touch(k)
                     self.pin[k] = max(self.pin[k], self.ev)
                 if self.policy == "hazard" and self.nr > 1:
                     self.see_released(p, s)
                 miss = [(wts[j], keys[j]) for j in range(K) if not self.held[keys[j]]]
-                read = miss
+                read = miss if self.mode != "prefetch" else []
                 left = []
                 if self.mode == "fast" and miss:
                     miss.sort(reverse=True)
@@ -327,7 +347,7 @@ class Sim:
         need = pl[:, 0].sum() + pl[:, 1].sum()
         waste = pl[:, 2].sum() + unused_end
         out = {
-            "records_per_token": self.reads_counted / T,
+            "records_per_token": self.reads_counted / T, "top10_held": self.hits / (T * NL * K),
             "mb_per_token": self.reads_counted * REC / 1e6 / T,
             "needed_per_token": need / T,
             "demand_per_token": pl[:, 0].sum() / T,
@@ -339,6 +359,60 @@ class Sim:
             "per_layer_needed_wasted": [[round(float(pl[L, 0] + pl[L, 1]) / T, 2), round(float(pl[L, 2]) / T, 2)] for L in range(NL)],
         }
         return out
+
+
+def old_runner(ri, ti, first, slots=24, keep=3, m=10, lag=LAG):
+    """The old MLX runner's slot rule (reference/flash/mlx_run.py, prefetch mode): per layer `slots` slots; the lag router's
+    top m are named (steps < lag at the token's start, step s + lag at step s); a named expert not held is read into a free
+    slot, else over the least recently NAMED one outside the keep window (named < t - keep), else over the least recently
+    named one not named this token; at each step the layer's experts not named within `keep` tokens are freed. Picks are
+    never read and never refresh an expert (the released top-k runs among the experts held). After the prompt each layer
+    holds the experts its last `keep` prompt positions used, the latest first (the runner's batched prefill).
+    Returns decode MB per token and the share of the released top 10 held when its layer runs."""
+    npos = ri.shape[0]
+    last = [dict() for _ in range(NL)]  # layer -> expert -> token last named
+    for L in range(NL):
+        lat = {}
+        for p in range(max(0, first - keep), first):
+            for e in ri[p, L, :K]:
+                lat[int(e)] = p
+        for e in sorted(lat, key=lambda e: -lat[e])[:slots]:
+            last[L][e] = lat[e]
+    reads = hits = asked = 0
+
+    def name(L, t, pred, counted):
+        nonlocal reads
+        H = last[L]
+        for c in pred:
+            if c in H:
+                H[c] = t
+        for c in pred:
+            if c in H:
+                continue
+            if len(H) >= slots:
+                old = [e for e, l in H.items() if l < t - keep]
+                if not old:
+                    old = [e for e, l in H.items() if l < t]
+                if not old:
+                    raise RuntimeError("all slots named this token")
+                del H[min(old, key=lambda e: H[e])]
+            H[c] = t
+            reads += counted
+
+    for p in range(first, npos):
+        for L in range(min(lag, NL)):
+            name(L, p, [int(e) for e in ti[p, L, :m]], True)
+        for L in range(NL):
+            if L + lag < NL:
+                name(L + lag, p, [int(e) for e in ti[p, L + lag, :m]], True)
+            H = last[L]
+            for e in [e for e, l in H.items() if l < p - keep]:
+                del H[e]
+            hits += sum(int(e) in H for e in ri[p, L, :K])
+            asked += K
+    T = npos - first
+    return {"old_runner": {"slots": slots, "keep": keep, "m": m}, "mb_per_token": reads * REC / 1e6 / T,
+            "records_per_token": reads / T, "top10_held": hits / asked}
 
 
 def reuse(ri, first):
@@ -402,6 +476,10 @@ if __name__ == "__main__":
     ap.add_argument("--first", type=int, default=-1)
     ap.add_argument("--json", default=None)
     ap.add_argument("--reuse", action="store_true")
+    ap.add_argument("--caps", action="store_true")
+    ap.add_argument("--name-touch", action="store_true")
+    ap.add_argument("--no-use-touch", action="store_true")
+    ap.add_argument("--old", default=None, help="the old runner's rule: SLOTS,KEEP,M")
     ap.add_argument("--one", default=None, help="one run: GB,policy,names,mode[,mass]")
     ap.add_argument("--grid", default="names", help="names | policy | fast")
     a = ap.parse_args()
@@ -411,9 +489,15 @@ if __name__ == "__main__":
     if a.reuse:
         res["reuse"] = reuse(ri, first)
         print(json.dumps(res["reuse"]))
+    if a.old:
+        f = [int(x) for x in a.old.split(",")]
+        print(json.dumps(old_runner(ri, ti, first, *f)))
     if a.one:
         f = a.one.split(",")
         gb, pol, nm, mode = float(f[0]), f[1], f[2], f[3]
         mass = float(f[4]) if len(f) > 4 else 0.13
-        r = Sim(ri, rp, ti, int(gb * 1e9 // REC), pol, nm, mode, w=mass, mass=mass, first=first).run()
-        print(json.dumps({"gb": gb, "policy": pol, "names": nm, "mode": mode, "mass": mass, **r}))
+        r = Sim(ri, rp, ti, int(gb * 1e9 // REC), pol, nm, mode, w=mass, mass=mass, first=first, caps=a.caps, name_touch=a.name_touch,
+                use_touch=not a.no_use_touch).run()
+        r.pop("per_layer_needed_wasted")
+        print(json.dumps({"gb": gb, "policy": pol, "names": nm, "mode": mode, "mass": mass, "caps": a.caps, "name_touch": a.name_touch,
+                          "use_touch": not a.no_use_touch, **r}))

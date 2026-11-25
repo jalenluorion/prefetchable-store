@@ -1147,7 +1147,7 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
         if (s < 0 || !cache.ready(L, s) || std::find(pk, pk + K, e) != pk + K) continue;
         n++;
       }
-      if (n < std::min(2 * K, NE - K)) {
+      if (n < std::min(ns.cold_floor >= 0 ? ns.cold_floor : 2 * K, NE - K)) {
         for (int j = 0; j < K; j++)
           if (stt[j]) must[j] = true;
         ns.cold++;

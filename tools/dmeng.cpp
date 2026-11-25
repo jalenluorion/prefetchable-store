@@ -201,6 +201,7 @@ struct Args {
   int n = 120, start_pos = 0, ctx = 16384, threads = 8, readers = 4, split = 1, m = 8, top_k = 0, dump_from = 0, stop_eos = -1, drop = -1;
   int rt_cand = 16, router_ecache = 0, fast_head = -1, run_ahead = 0, run_ahead_depth = 1, ra_max = 0, ra_sat = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1;
   int plan_budget = 1, plan_revoke = 1, plan_maxcand = 32;
+  int cold_floor = -1;  // approximate mode's cold-cache floor (Approx::cold_floor)
   int bg_ranks = 0, bg_gate = 0, bg_split = 2, bg_queue = 2, bg_max = 1;
   double bg_margin = 0;  // background reads (the profile's; --bg-ranks 0 = off)
   int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1;
@@ -421,6 +422,7 @@ int main(int argc, char** argv) {
     else if (k == "--evict-trace") a.evict_trace = v();
     else if (k == "--layer-caps") a.layer_caps = v();
     else if (k == "--drop") a.drop = std::stoi(v());
+    else if (k == "--cold-floor") a.cold_floor = std::stoi(v());
     else if (k == "--router-heavy") a.router_heavy = v();
     else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
     else if (k == "--rd-excl") a.rd_excl = std::stoi(v());
@@ -702,7 +704,8 @@ int main(int argc, char** argv) {
   if (a.read_w >= 0) C.ns.read_w = a.read_w;
   if (a.read_mass >= 0) C.ns.read_mass = a.read_mass;
   if (a.bg >= 0) C.ns.bg = a.bg != 0;
-  if (a.drop >= 0) C.ns.drop = a.drop != 0;  // --drop overrides the preset (approx:drop sets it, the others clear it)
+  if (a.drop >= 0) C.ns.drop = a.drop != 0;
+  C.ns.cold_floor = a.cold_floor;  // --drop overrides the preset (approx:drop sets it, the others clear it)
   C.cache.rd.prio = a.rd_prio < 0 ? (plan || (C.ns.on && C.ns.prio)) : a.rd_prio != 0;
   C.cache.rd.excl = a.rd_excl != 0;
   if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;

@@ -1,0 +1,9 @@
+{"trace":"pitt (the old runner's benchmark prompt, exact decode, 120 tokens)","rule":"old runner: 24 slots/layer, keep 3, names top 10 lag 4","mb_per_token":561.9,"mib_per_token":535.9,"top10_held":0.827,"old_runner_reported":{"mib_per_token":488.4,"top10_held":0.834,"tok_s":5.699,"note":"its own text (approximate decoding) differs from the exact decode after ~10 tokens"}}
+{"trace":"sky (chat, exact decode, 160 tokens)","rule":"old runner","mb_per_token":622.1,"top10_held":0.808}
+{"trace":"sky (chat, approximate decode with the old runner's settings in this engine)","rule":"old runner","mb_per_token":600.0,"top10_held":0.805}
+{"trace":"prose (chat, exact)","rule":"old runner","mb_per_token":622.2,"top10_held":0.845}
+{"trace":"code (chat, exact)","rule":"old runner","mb_per_token":524.3,"top10_held":0.807}
+{"trace":"sky exact","rule":"this engine's hazard keep-score, same names, prefetch (no pick reads), 3.2 GB one pool","mb_per_token":625,"top10_held":0.831}
+{"trace":"sky exact","rule":"hazard, per-layer caps","mb_per_token":617,"top10_held":0.824}
+{"trace":"sky exact","rule":"hazard, names counted as uses","mb_per_token":603,"top10_held":0.830}
+{"trace":"sky exact","rule":"name recency only (LRU over names), per-layer caps","mb_per_token":624,"top10_held":0.814}
