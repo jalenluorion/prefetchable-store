@@ -1127,7 +1127,9 @@ int main(int argc, char** argv) {
          << ",\"nll_delta_se\":" << std::sqrt(std::max(0.0, d2 / nn - (d / nn) * (d / nn)) / nn) << ",\"top1_agree\":" << agree / nn;
     }
     js << std::setprecision(4);
-    emit_stats((int)ids.size(), dt, step_ms);
+    // per stepped position (with --teacher-prefill the first N - 1 ids went through the prompt path, outside the loop's
+    // time and counters; counting them as steps understated every per-token figure by (N - 1) / steps)
+    emit_stats((int)step_ms.size(), dt, step_ms);
     js << ",\"argmax\":[";
     for (size_t i = 0; i < am.size(); i++) js << (i ? "," : "") << am[i];
     js << "]}";
