@@ -245,7 +245,8 @@ namespace {
 // DMENG_AB (weights.h): per arm, decode tokens, their ms and each stage's ms (Times' fields), printed at exit
 constexpr int NT = sizeof(Times) / sizeof(double);
 struct AbAcc {
-  double n[2] = {0, 0}, ms[2] = {0, 0}, st[2][NT] = {};
+  double n[2] = {0, 0}, ms[2] = {0, 0}, st[2][NT] = {}, mb[2] = {0, 0};
+  uint64_t b0 = 0;
   clk::time_point t0;
   double s0[NT];
   bool in = false;
@@ -254,7 +255,7 @@ struct AbAcc {
     static const char* nm[] = {"embed", "attn_proj", "attn_core", "attn_out", "depth", "msg", "router", "experts", "wait", "cache", "pf", "head", "misc", "ra"};
     for (int a = 0; a < 2; a++) {
       const double k = std::max(1.0, n[a]);
-      fprintf(stderr, "DMAB %d arm %d tokens %.0f ms %.3f |", g_ab, a, n[a], ms[a] / k);
+      fprintf(stderr, "DMAB %d arm %d tokens %.0f ms %.3f mb_read %.1f |", g_ab, a, n[a], ms[a] / k, mb[a] / k);
       for (int i = 0; i < 14 && i < NT; i++) fprintf(stderr, " %s %.3f", nm[i], st[a][i] / k);
       fprintf(stderr, "\n");
     }
@@ -267,6 +268,7 @@ void Core::token_start(int position, int tok, const float* router_emb) {
     g_ab_arm = (int)(tok_clock & 1);
     g_abacc.t0 = clk::now();
     std::memcpy(g_abacc.s0, &t, sizeof g_abacc.s0);
+    g_abacc.b0 = cache.st.bytes_urgent + cache.st.bytes_pf;
     g_abacc.in = true;
   }
   pos = position;
@@ -285,6 +287,7 @@ void Core::token_end() {
     const int a = g_ab_arm;
     g_abacc.n[a] += 1;
     g_abacc.ms[a] += ms_since(g_abacc.t0);
+    g_abacc.mb[a] += (cache.st.bytes_urgent + cache.st.bytes_pf - g_abacc.b0) / 1e6;
     const double* now_t = (const double*)&t;
     for (int i = 0; i < NT; i++) g_abacc.st[a][i] += now_t[i] - g_abacc.s0[i];
     g_abacc.in = false;
