@@ -1021,8 +1021,8 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
   if (name == "prefill_gpu_min") return (po.gpu_min = std::max(1, std::stoi(value))), true;
   if (name == "prefill_gpu_kernel") return (po.gpu_kernel = std::stoi(value) != 0), true;
   if (name == "prefill_release") return (po.release = std::stoi(value) != 0), true;
-  err = "unknown option " + name + " for qwen4_exp";
-  return false;
+  if (!core) return (err = "unknown option " + name + " (or bind the model first)"), false;
+  return core->set_option(name, value, err);  // the engine's own options (Core::set_option)
 }
 
 std::string Flash::stats_json(int ntok) const {

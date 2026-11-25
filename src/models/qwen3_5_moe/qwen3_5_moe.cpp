@@ -887,8 +887,10 @@ bool Qwen35::set_option(const std::string& name, const std::string& value, std::
   if (name == "prefill_gpu_min_wave") return (po.gpu_min_wave = std::stoi(value)), true;
   if (name == "prefill_gpu_kernel") return (po.gpu_kernel = std::stoi(value) != 0), true;  // 1 matrix units, 0 integer
   if (name == "prefill_release") return (po.release = std::stoi(value) != 0), true;  // 1: free the scratch after each prefill
-  err = "unknown option " + name + " for qwen3_5_moe";
-  return false;
+  if (name == "prefill_pack_min") return (po.pack_min = std::max(0, std::stoi(value))), true;  // 0: the multi-vector kernels
+  if (name == "prefill_dn_rows") return (po.dn_rows = std::max(4, std::stoi(value) / 4 * 4)), true;
+  if (!core) return (err = "unknown option " + name + " (or bind the model first)"), false;
+  return core->set_option(name, value, err);  // the engine's own options (Core::set_option)
 }
 
 std::string Qwen35::stats_json(int) const {

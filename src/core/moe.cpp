@@ -101,6 +101,21 @@ const char* Approx::presets_help() {
 }
 
 // ------------------------------------------------------------------------------------------------ setup
+// Core::moe_chunk runs a union that does not fit in batches: the pools' floor is then one step's pins (2K + 2), else a
+// prefill layer's union and the next layer's names (2 NE + 2K + 2)
+void Core::set_union_batches(bool on) {
+  mi.union_batches = on;
+  for (int p = 0; p < cache.npools; p++) cache.P[p].min_cap = std::min(cache.P[p].n, on ? 2 * K + 2 : 2 * NE + 2 * K + 2);
+}
+
+// options of the engine itself, the same for every family (a model's set_option passes on the names it does not know)
+bool Core::set_option(const std::string& name, const std::string& value, std::string& err) {
+  if (name == "union_batches") return set_union_batches(std::stoi(value) != 0), true;
+  if (name == "chunk_aff4") return (mi.chunk_aff4 = std::stoi(value) != 0), true;  // moe_chunk's packed affine kernels
+  err = "unknown option " + name + " for " + mi.family;
+  return false;
+}
+
 bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& dir, std::string& err) {
   mi = info;
   o = opts;
@@ -133,8 +148,7 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
   if (!cache.init(mi.layers, NE, K, mi.step_layer, mi.layer_fmt, rec, share, dir, mi.layer_file, o.cache_gb * 1e9, o.readers,
                   o.split, o.mem, o.skip_reads, err))
     return false;
-  if (mi.union_batches)  // Core::moe_chunk runs a union that does not fit in batches: the floor is one step's pins
-    for (int p = 0; p < cache.npools; p++) cache.P[p].min_cap = std::min(cache.P[p].n, 2 * K + 2);
+  if (mi.union_batches) set_union_batches(true);
   if (cache.defer_lock) cache.lock_start((int64_t)(o.cache_start_gb * 1e9));
   cache.half_life = o.half_life;
   if (o.evict == "pred") {

@@ -2,8 +2,10 @@
 // combination exactly as the single step (moe.cpp) computes them; the union of the positions' experts pinned and read
 // once; each expert computed for all positions that picked it in one pass over its record (multi-vector kernels, packed
 // i8mm for NVFP4 from 6 users). Lossless, or fast mode's leave-out rule (approx:drop) for a verify pass.
+#include "dmeng/workcount.h"
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 
 #include "dmeng/core.h"
@@ -34,9 +36,12 @@ struct Core::Chunk {
     int inter;
     std::vector<int> users;  // row index i * (K + 1) + j
     XQB xg, xd;              // packed inputs (NVFP4 with >= PACK_MIN users)
+    std::vector<int> gpos;   // the users' positions (the GPU reads them from the chunk's packed input: Chunk::xall)
     bool packed = false, done = false;
   };
   std::vector<Ent> ent;
+  XQB xall;           // every position's MoE input packed, staged once per GPU set (each entry's rows read through gpos)
+  bool xall_ok = false;
   std::vector<int> ent_of;  // [NE] -> entry, -1
   // fast mode (approx:drop): keep[i * K + j] = position i's pick j is computed (0: left out); wtok[i] = the released weight
   // left out of position i over the pass's steps so far
@@ -49,6 +54,7 @@ struct ChCtx {
   Core::Chunk* C;
   const std::vector<int>* run;  // entries of this pass
   int H, IA, R;                 // R = K + 1 rows per position
+  int dn_rows = 32;             // rows per down-projection job (Core::chunk_dn_rows)
   const float* const* x;        // [n] the fp32 MoE inputs (the reference path reads them)
   bool ref, softcap_act;
   float gcap, ucap;
@@ -76,6 +82,14 @@ static void gu_act(const ChCtx& X, Core::Chunk& C, int row, int j0, const float*
     for (int j = 0; j < XB; j++) a[j0 + j] = silu(gg_[j]) * uu_[j];
   }
   if (!X.ref) xq_block(C.act[row].q, j0 / XB, a + j0);
+}
+
+// the packed batched kernel of an affine record (4-bit routed experts, the 8-bit shared expert): gemm_aff4_i16's /
+// gemm_aff8_i16's bits = the one-vector kernels' for inputs a multiple of 256
+static bool affine(Weight::Kind k) { return k == Weight::AFF4 || k == Weight::AFF8; }
+static void gemm_affine(const Weight& m, int r0, int r1, const XQB& x, int nu, float* y, size_t ldy) {
+  if (m.kind == Weight::AFF8) gemm_aff8_i16(m.c, (const _Float16*)m.s, (const _Float16*)m.b, m.cols, r0, r1, x, 0, nu, y, ldy);
+  else gemm_aff4_i16(m.c, (const _Float16*)m.s, (const _Float16*)m.b, m.cols, r0, r1, x, 0, nu, y, ldy);
 }
 
 static void chunk_gu(void* p, int, int) {
@@ -110,9 +124,9 @@ static void chunk_gu(void* p, int, int) {
       gemm_nvfp4_i16(E.gu.c, (const uint8_t*)E.gu.s, E.gu.gmul, E.gu.cols, fused ? 2 * j0 : j0, fused ? 2 * j0 + 2 * XB : j0 + XB, E.xg, 0, nu,
                      g.data(), gw);
       if (!fused) gemm_nvfp4_i16(E.up.c, (const uint8_t*)E.up.s, E.up.gmul, E.up.cols, j0, j0 + XB, E.xg, 0, nu, u.data(), XB);
-    } else if (E.packed && E.gu.kind == Weight::AFF4 && !fused && E.gu.cols % 256 == 0) {  // ModelInfo::chunk_aff4
-      gemm_aff4_i16(E.gu.c, (const _Float16*)E.gu.s, (const _Float16*)E.gu.b, E.gu.cols, j0, j0 + XB, E.xg, 0, nu, g.data(), gw);
-      gemm_aff4_i16(E.up.c, (const _Float16*)E.up.s, (const _Float16*)E.up.b, E.up.cols, j0, j0 + XB, E.xg, 0, nu, u.data(), XB);
+    } else if (E.packed && affine(E.gu.kind) && !fused && E.gu.cols % 256 == 0) {  // ModelInfo::chunk_aff4
+      gemm_affine(E.gu, j0, j0 + XB, E.xg, nu, g.data(), gw);
+      gemm_affine(E.up, j0, j0 + XB, E.xg, nu, u.data(), XB);
     } else if (fused) {
       mv_multi(E.gu, 2 * j0, 2 * j0 + 2 * XB, xq.data(), xf.data(), nu, ys.data(), X.ref);
     } else {
@@ -126,7 +140,7 @@ static void chunk_gu(void* p, int, int) {
 static void chunk_dn(void* p, int, int) {
   ChCtx& X = *(ChCtx*)p;
   Core::Chunk& C = *X.C;
-  constexpr int CH = 32;
+  const int CH = X.dn_rows;
   const int nch = (X.H + CH - 1) / CH, nr = (int)X.run->size(), total = nch * nr;
   static thread_local std::vector<const XQ*> xq;
   static thread_local std::vector<const float*> xf;
@@ -136,10 +150,10 @@ static void chunk_dn(void* p, int, int) {
     Core::Chunk::Ent& E = C.ent[(*X.run)[ch / nch]];
     const int a = (ch % nch) * CH, b = std::min(X.H, a + CH), nu = (int)E.users.size();
     if (!X.dlo.empty() && (a < X.dlo[ch / nch] || a >= X.dhi[ch / nch])) continue;  // the GPU's rows
-    const bool aff4 = E.packed && E.dn.kind == Weight::AFF4;  // ModelInfo::chunk_aff4
-    if (E.packed && !(a & 3) && !(b & 3) && (!aff4 || E.dn.cols % 256 == 0)) {
+    const bool aff = E.packed && affine(E.dn.kind);  // ModelInfo::chunk_aff4
+    if (E.packed && !(a & 3) && !(b & 3) && (!aff || E.dn.cols % 256 == 0)) {
       tmp.resize((size_t)nu * CH);
-      if (aff4) gemm_aff4_i16(E.dn.c, (const _Float16*)E.dn.s, (const _Float16*)E.dn.b, E.dn.cols, a, b, E.xd, 0, nu, tmp.data(), CH);
+      if (aff) gemm_affine(E.dn, a, b, E.xd, nu, tmp.data(), CH);
       else gemm_nvfp4_i16(E.dn.c, (const uint8_t*)E.dn.s, E.dn.gmul, E.dn.cols, a, b, E.xd, 0, nu, tmp.data(), CH);
       for (int k = 0; k < nu; k++)
         std::memcpy(C.eout.data() + (size_t)E.users[k] * X.H + a, tmp.data() + (size_t)k * CH, sizeof(float) * (b - a));
@@ -270,6 +284,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   // ---- the union: slots (hits pinned, misses read now)
   C.ent.clear();
   C.ent_of.assign(NE, -1);
+  C.xall_ok = false;
   auto& S = cache.st;
   const int reg = looped(step) ? 0 : 1;
   auto& ut = used_tok[L];
@@ -423,13 +438,20 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   auto t2a = clk::now();
   t.cache += ms_between(t1, t2a);
   if (nh) nh->chunk_after_router(*this, step, n);  // names for later steps: queued behind this step's own misses
+  if (span_next >= 0 && off == 0) {  // a span's next step named while this one runs (its first sub-chunk)
+    stage_mark(ST_PREFETCH);
+    if (span_next_router) span_name_router(span_next, n, x);
+    else span_name(span_next);
+  }
+  span_next = -1;
   auto t2 = clk::now();
   t.pf += ms_between(t2a, t2);
   stage_mark(ST_MOE_EXPERTS);
   // ---- experts: the shared expert and every routed one in memory, then the rest as they land
   const double wait0 = S.wait_ms;
   const bool packable = !o.ref && o.prec == Prec::I16;
-  auto compute = [&](std::vector<int>& run) {  // gate/up then down of the entries in run, into their C.eout rows
+  auto compute = [&](std::vector<int>& run, bool gpu_ok) {  // gate/up then down of the entries in run, into their C.eout rows
+    DM_WC("moe.waves", 1);
     parallel_for(*pool, (int)run.size(), [&](int k) {  // the packed inputs of each entry
       Chunk::Ent& E = C.ent[run[k]];
       if (!E.packed) return;
@@ -444,6 +466,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
     X.H = H;
     X.IA = IA;
     X.R = R;
+    X.dn_rows = chunk_dn_rows;
     X.x = x;
     X.ref = o.ref;
     X.softcap_act = v.act == MoeView::SOFTCAP_SWIGLU;
@@ -452,7 +475,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
     // the GPU's share (moe_gpu): the first gate-up chunks and down rows of each packed NVFP4 entry, the CPU the rest at
     // the same time; every row computed once, by one side, with the same bits; a set the GPU does not complete is
     // computed on the CPU
-    GpuGemm* const G = moe_gpu && moe_gpu_frac > 0 && !o.ref ? moe_gpu : nullptr;
+    GpuGemm* const G = gpu_ok && moe_gpu && moe_gpu_frac > 0 && !o.ref ? moe_gpu : nullptr;
     struct GT { int k, cg, tg, tu, rd, td; };  // entry index in run; gate-up chunks and tickets; down rows and ticket
     std::vector<GT> gt;
     X.start.assign(run.size() + 1, 0);
@@ -463,21 +486,31 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (size_t k = 0; k < run.size(); k++) {
         Chunk::Ent& E = C.ent[run[k]];
         const bool nv = E.gu.kind == Weight::NVFP4 && E.dn.kind == Weight::NVFP4;
-        // ModelInfo::chunk_aff4: the GPU's 4-bit bits are gemm_aff4_i16's, the one-vector kernel's only for inputs a multiple
-        // of 256 (gate / up here; the down rows below likewise)
-        const bool af = E.gu.kind == Weight::AFF4 && E.dn.kind == Weight::AFF4 && E.up.kind == Weight::AFF4 && E.gu.cols % 256 == 0;
+        // ModelInfo::chunk_aff4: the GPU's affine bits are gemm_aff4_i16's / gemm_aff8_i16's, the one-vector kernel's only for
+        // inputs a multiple of 256 (gate / up here; the down rows below likewise)
+        const bool af = affine(E.gu.kind) && E.dn.kind == E.gu.kind && E.up.kind == E.gu.kind && E.gu.cols % 256 == 0;
         if (!E.packed || !(nv || af)) continue;
         const int nch = E.inter / XB, cg = (int)(nch * moe_gpu_frac), nu = (int)E.users.size();
         if (cg <= 0) continue;
         const bool fused = E.up.kind == Weight::NONE;
-        const int s = G->stage(E.xg);
+        if (!C.xall_ok) {  // the chunk's inputs once (not one gathered copy per expert): the GPU gathers through gpos
+          C.xall.reserve(H, n);
+          parallel_for(*pool, n, [&](int i) { xqb_set_from(C.xall, i, C.xin[i].q); });
+          xqb_pad(C.xall);
+          C.xall_ok = true;
+        }
+        E.gpos.resize(nu);
+        for (int u = 0; u < nu; u++) E.gpos[u] = E.users[u] / R;
+        const int s = G->stage(C.xall);
+        const int* gm = E.gpos.data();
         GT r{(int)k, cg, -1, -1, 0, -1};
         if (af) {
-          r.tg = G->add(4, E.gu.c, (const _Float16*)E.gu.s, (const _Float16*)E.gu.b, E.gu.cols, cg * XB, nu, s);
-          if (r.tg >= 0) r.tu = G->add(4, E.up.c, (const _Float16*)E.up.s, (const _Float16*)E.up.b, E.up.cols, cg * XB, nu, s);
+          const int bits = E.gu.kind == Weight::AFF8 ? 8 : 4;
+          r.tg = G->add(bits, E.gu.c, (const _Float16*)E.gu.s, (const _Float16*)E.gu.b, E.gu.cols, cg * XB, nu, s, gm);
+          if (r.tg >= 0) r.tu = G->add(bits, E.up.c, (const _Float16*)E.up.s, (const _Float16*)E.up.b, E.up.cols, cg * XB, nu, s, gm);
         } else {
-          r.tg = G->add_nvfp4(E.gu.c, (const uint8_t*)E.gu.s, E.gu.gmul, E.gu.cols, fused ? 2 * cg * XB : cg * XB, nu, s);
-          if (r.tg >= 0 && !fused) r.tu = G->add_nvfp4(E.up.c, (const uint8_t*)E.up.s, E.up.gmul, E.up.cols, cg * XB, nu, s);
+          r.tg = G->add_nvfp4(E.gu.c, (const uint8_t*)E.gu.s, E.gu.gmul, E.gu.cols, fused ? 2 * cg * XB : cg * XB, nu, s, gm);
+          if (r.tg >= 0 && !fused) r.tu = G->add_nvfp4(E.up.c, (const uint8_t*)E.up.s, E.up.gmul, E.up.cols, cg * XB, nu, s, gm);
         }
         if (r.tg < 0 || (!fused && r.tu < 0)) continue;  // not wrapped: the CPU computes the whole entry
         X.c0[k] = cg;
@@ -524,6 +557,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
         Y.H = H;
         Y.IA = IA;
         Y.R = R;
+        Y.dn_rows = chunk_dn_rows;
         Y.x = x;
         Y.ref = o.ref;
         Y.softcap_act = X.softcap_act;
@@ -558,9 +592,9 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (GT r : gt) {
         Chunk::Ent& E = C.ent[run[r.k]];
         r.rd = ((int)(H * moe_gpu_frac) / 64) * 64;
-        if (r.rd <= 0 || (E.dn.kind == Weight::AFF4 && E.dn.cols % 256 != 0)) continue;
-        r.td = E.dn.kind == Weight::AFF4
-                   ? G->add(4, E.dn.c, (const _Float16*)E.dn.s, (const _Float16*)E.dn.b, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd))
+        if (r.rd <= 0 || (affine(E.dn.kind) && E.dn.cols % 256 != 0)) continue;
+        r.td = affine(E.dn.kind)
+                   ? G->add(E.dn.kind == Weight::AFF8 ? 8 : 4, E.dn.c, (const _Float16*)E.dn.s, (const _Float16*)E.dn.b, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd))
                    : G->add_nvfp4(E.dn.c, (const uint8_t*)E.dn.s, E.dn.gmul, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd));
         if (r.td < 0) continue;
         X.dlo[r.k] = r.rd;
@@ -601,18 +635,34 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (const GT& r : gt) moe_gpu_macs += (double)r.rd * C.ent[run[r.k]].dn.cols * C.ent[run[r.k]].users.size();
     }
   };
-  auto prepare = [&](Chunk::Ent& E) {  // the record's matrices (landed) and its kernel choice
-    F.mats(cache.rec(L, E.slot), E.gu, E.up, E.dn);
-    E.inter = F.I;
-    E.packed = packable && (E.gu.kind == Weight::NVFP4 || (mi.chunk_aff4 && E.gu.kind == Weight::AFF4)) && (int)E.users.size() >= PACK_MIN;
+  // the kernel choice (one rule for every record): the packed batched kernels from a number of users where the format has
+  // one, else the multi-vector kernels; the same bits either way. NVFP4 from PACK_MIN; the affine routed records from
+  // chunk_pack_affine (-1: PACK_MIN with ModelInfo::chunk_aff4, else never); the shared expert from chunk_pack_shared
+  // (0: never); a pass sets the two for its kind (the 35B's prefill: every expert and the shared one packed, as it was)
+  const int pmin_aff = chunk_pack_affine >= 0 ? chunk_pack_affine : mi.chunk_aff4 ? PACK_MIN : 0;
+  auto pack = [&](Chunk::Ent& E) {
+    const int pm = E.gu.kind == Weight::NVFP4 ? PACK_MIN : !affine(E.gu.kind) ? 0 : E.e < 0 ? chunk_pack_shared : pmin_aff;
+    E.packed = packable && pm > 0 && (int)E.users.size() >= pm;
     if (E.packed) E.xg.reserve(H, (int)E.users.size());
     E.done = true;
   };
-  for (int ps = 0; ps < 2; ps++) {
+  auto prepare = [&](Chunk::Ent& E) {  // the record's matrices (landed) and its kernel choice
+    F.mats(cache.rec(L, E.slot), E.gu, E.up, E.dn);
+    E.inter = F.I;
+    pack(E);
+  };
+  auto users_of = [&](const std::vector<int>& run) {
+    size_t u = 0;
+    for (int q : run) u += C.ent[q].users.size();
+    return u;
+  };
+  // the experts in memory first (with the shared expert); then the rest: all at once once they have landed, or with
+  // chunk_waves in waves as they land (wait for one, compute it with whatever else has landed), a wave using the GPU's
+  // share only from chunk_wave_gpu_min (position, expert) rows. The order of computation never changes a bit: every row of
+  // C.eout is computed once from its record, and the combination below reads them in pick order.
+  for (int ps = 0;; ps++) {
     std::vector<int> run;
-    int shared_q = -1;
     if (ps == 0 && v.shared) {  // the shared expert as one more entry: every position, row K
-      shared_q = (int)C.ent.size();
       C.ent.emplace_back();
       Chunk::Ent& E = C.ent.back();
       E.e = -1;
@@ -622,19 +672,28 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       E.dn = *v.sh_down;
       E.inter = sh_inter_;
       for (int i = 0; i < n; i++) E.users.push_back(i * R + K);
-      E.done = true;
-      run.push_back(shared_q);
+      pack(E);
+      run.push_back((int)C.ent.size() - 1);
     }
+    bool waited = false;
     for (int q = 0; q < (int)C.ent.size(); q++) {
       Chunk::Ent& E = C.ent[q];
       if (E.done || E.slot == -2) continue;  // done, or deferred to a later batch
-      if (ps == 0 && !cache.ready(L, E.slot)) continue;
-      if (ps == 1) cache.wait(L, E.slot);
+      if (ps > 0 && (!chunk_waves || !waited)) {  // all at once: wait for each; waves: for the first only
+        cache.wait(L, E.slot);
+        waited = true;
+      } else if (!cache.ready(L, E.slot)) {
+        continue;
+      }
       prepare(E);
       run.push_back(q);
     }
-    if (run.empty()) continue;
-    compute(run);
+    if (run.empty()) {
+      if (ps > 0) break;
+      continue;
+    }
+    compute(run, !chunk_waves || users_of(run) >= (size_t)chunk_wave_gpu_min);
+    if (ps > 0 && !chunk_waves) break;
   }
   // ---- batches (phone sizes only: some misses were deferred). The entries computed so far are counted as used, as
   // the bookkeeping below would, and unpinned (no loop hold or span pin for them); then each later batch takes as many
@@ -681,7 +740,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
         cache.wait(L, C.ent[q].slot);
         prepare(C.ent[q]);
       }
-      compute(run);
+      compute(run, true);
       for (int q : run) use_unpin(C.ent[q]);
     }
   }
@@ -762,6 +821,42 @@ void Core::span_name(int step) {
     const int sl = cache.name(L, e, now(step));
     if (sl >= 0) nm.push_back({sl, e});
   }
+}
+
+// The next step's released router on this step's MoE inputs (C.xin, quantised), its top K per position named (names only:
+// the outputs cannot change; the 35B's early names for spans shorter than whole_from)
+void Core::span_name_router(int step, int n, const float* const* x) {
+  if ((int)span_names.size() < steps) span_names.resize(steps);
+  const MoeView* v = step < (int)views.size() ? views[step] : nullptr;
+  if (!v || !v->router) return;
+  Chunk& C = *ch_;
+  const int L = mi.step_layer[step];
+  std::vector<float> lg((size_t)n * NE);
+  std::vector<const XQ*> xq(n);
+  std::vector<float*> out(n);
+  for (int i = 0; i < n; i++) xq[i] = &C.xin[i].q, out[i] = lg.data() + (size_t)i * NE;
+  JobN jr = {v->router, n, xq.data(), x, out.data()};
+  run_rows_n(*pool, &jr, 1, 16, false, nullptr);
+  std::vector<uint8_t> want(NE, 0);
+  parallel_for(*pool, n, [&](int i) {
+    const float* l = lg.data() + (size_t)i * NE;
+    static thread_local std::vector<float> key;
+    static thread_local std::vector<int> idx;
+    key.resize(NE);
+    idx.resize(NE);
+    for (int e = 0; e < NE; e++) {
+      key[e] = v->rule == MoeView::SOFTMAX_TOPK_RENORM ? l[e] : 1.f / (1.f + std::exp(-l[e])) + v->router_bias[e];
+      idx[e] = e;
+    }
+    std::partial_sort(idx.begin(), idx.begin() + K, idx.end(), [&](int a, int b) { return key[a] > key[b] || (key[a] == key[b] && a < b); });
+    for (int j = 0; j < K; j++) __atomic_store_n(&want[idx[j]], 1, __ATOMIC_RELAXED);
+  });
+  auto& nm = span_names[step];
+  for (int e = 0; e < NE; e++)
+    if (want[e]) {
+      const int sl = cache.name(L, e, now(step));
+      if (sl >= 0) nm.push_back({sl, e});
+    }
 }
 
 void Core::span_unname(int step) {

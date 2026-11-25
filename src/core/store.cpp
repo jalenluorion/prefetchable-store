@@ -1,4 +1,5 @@
 // Record formats, the reader threads and the expert slots.
+#include "dmeng/workcount.h"
 #include "dmeng/store.h"
 
 #include "../format/json.h"
@@ -672,6 +673,7 @@ int Cache::steal(int L) {
 }
 
 void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
+  DM_WC("cache.issue", 1);
   SlotPool& S = pool(L);
   Slot& x = S.s[slot];
   x.layer = L;
@@ -775,6 +777,7 @@ void Cache::use(int L, int slot, long t_use, long step) {
 }
 
 int Cache::name(int L, int e, long step, int reserve, int fit_names) {
+  DM_WC("cache.name_calls", 1);
   SlotPool& S = pool(L);
   int sl = tab[(size_t)L * NE + e];
   if (sl >= 0) {

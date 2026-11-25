@@ -5,6 +5,7 @@
 //   dmeng --model DIR --mode fast --prompt "text"                    (text through python/run.py)
 //   dmeng --model DIR --teacher ids.txt --dump-logits out.f32        (teacher-forced logits at every position)
 //   dmeng --help | --help-advanced
+#include "dmeng/workcount.h"
 #include <limits.h>
 #include <sys/stat.h>
 #include <mach-o/dyld.h>
@@ -65,6 +66,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          the profile's (off)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
   --print-defaults       print the resolved profile defaults as JSON and exit
+  --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: union_batches, chunk_aff4, prefill_*)
   --chat --reasoning-effort E   with --prompt: the chat template (python/run.py)
 
 model and memory
@@ -243,6 +245,7 @@ struct Args {
   int drafts = -1;
   bool cache_auto = false, print_defaults = false, chat = false;
   MemRule mr;
+  std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
   std::set<std::string> given;  // the flags on the command line (a profile default fills only the others)
 };
 
@@ -408,6 +411,11 @@ int main(int argc, char** argv) {
       if (!a.cache_auto) a.cache_gb = std::stod(x);
     } else if (k == "--cache-start-gb") a.cache_start_gb = std::stod(v());
     else if (k == "--profile") a.profile = v();
+    else if (k == "--model-opt") {
+      const std::string kv = v();
+      const size_t e = kv.find('=');
+      a.model_opts.push_back({kv.substr(0, e), e == std::string::npos ? "1" : kv.substr(e + 1)});
+    }
     else if (k == "--drafts") a.drafts = std::stoi(v());
     else if (k == "--prompt") a.prompt_text = v();
     else if (k == "--chat") a.chat = true;
@@ -646,6 +654,8 @@ int main(int argc, char** argv) {
   if (!C.cache.core_init((int64_t)(a.file_core_gb * 1e9), err)) return die("core", err);
   const double file_res0_gb = C.cache.mem == Mem::FILE ? C.cache.file_resident_bytes() / 1e9 : 0;
   if (!M->bind(C, err)) return die("model", err);
+  for (auto& kv : a.model_opts)
+    if (!M->set_option(kv.first, kv.second, err)) return die("--model-opt " + kv.first, err);
   std::unique_ptr<State> S = M->new_state(a.ctx, err);
   if (!S) return die("state", err);
   const ModelInfo& mi = M->info();
@@ -1229,7 +1239,9 @@ int main(int argc, char** argv) {
       if (a.prefill_gpu_frac > 0 && !M->set_option("prefill_gpu_frac", std::to_string(a.prefill_gpu_frac), e2)) return die("prefill", e2);
       if (a.prefill_gpu_experts > 0 && !M->set_option("prefill_gpu_experts", std::to_string(a.prefill_gpu_experts), e2)) return die("prefill", e2);
       std::vector<int32_t> pid(prompt.begin(), prompt.end());
+      wc::reset();
       M->prefill(*S, pid.data(), (int)pid.size(), true, {}, nullptr, nullptr, nullptr);
+      if (wc::on()) fprintf(stderr, "WORK %s\n", wc::json().c_str());
     } else {
       for (size_t i = 0; i < prompt.size(); i++) {
         M->step(*S, prompt[i], i + 1 == prompt.size() ? want : Want::NONE);

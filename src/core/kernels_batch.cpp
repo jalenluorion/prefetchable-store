@@ -1,5 +1,6 @@
 // Batched I16 kernels for prefill (see include/dmeng/kernels_batch.h): i8mm integer group dots + the batch-1 kernels'
 // own float epilogue per (row, position), so the outputs are bit-identical to mv_aff8 / mv_aff4.
+#include "dmeng/workcount.h"
 #include "dmeng/kernels_batch.h"
 
 #include <arm_neon.h>
@@ -46,6 +47,7 @@ static inline int perm_pos(int i) {
 static inline size_t pk_off(int K, int i, int k) { return ((size_t)(i >> 1) * (K / 8) + (k >> 3)) * 16 + (i & 1) * 8 + (k & 7); }
 
 void xqb_set(XQB& q, int i, const float* x) {
+  DM_WC("xqb.quantise_pos", 1);
   const int NG = q.K / XB;
   for (int b = 0; b < NG; b++) {
     const float* xb = x + XB * b;
@@ -197,15 +199,22 @@ static void gemm_tile_loop(const uint8_t* codes, const _Float16* scales, const _
 
 void gemm_aff8_i16(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQB& x,
                    int p0, int p1, float* Y, size_t ldy) {
+  DM_WC("gemm_aff8.calls", 1);
+  DM_WC("gemm_aff8.row_pos", (uint64_t)(r1 - r0) * (p1 - p0));
+  DM_WC("gemm_aff8.weight_bytes", (uint64_t)(r1 - r0) * K);
   gemm_tile_loop<8>(codes, scales, biases, K, r0, r1, x, p0, p1, Y, ldy);
 }
 void gemm_aff4_i16(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQB& x,
                    int p0, int p1, float* Y, size_t ldy) {
+  DM_WC("gemm_aff4.calls", 1);
+  DM_WC("gemm_aff4.row_pos", (uint64_t)(r1 - r0) * (p1 - p0));
+  DM_WC("gemm_aff4.weight_bytes", (uint64_t)(r1 - r0) * K / 2);
   gemm_tile_loop<4>(codes, scales, biases, K, r0, r1, x, p0, p1, Y, ldy);
 }
 
 // ------------------------------------------------------------------------------------------------ NVFP4 (Inkling experts)
 void xqb_set_from(XQB& q, int i, const XQ& x) {
+  DM_WC("xqb.copy_pos", 1);
   const int NG = q.K / XB;
   std::memcpy(q.d + (size_t)i * NG, x.d, sizeof(float) * NG);
   std::memcpy(q.gsum + (size_t)i * NG, x.gsum, sizeof(float) * NG);
@@ -242,6 +251,8 @@ static inline void nv_e4m3x16(const uint8_t* p, float32x4_t out[4]) {  // = kern
 
 void gemm_nvfp4_i16(const uint8_t* codes, const uint8_t* sc, float gmul, int K, int r0, int r1, const XQB& x, int p0, int p1,
                     float* Y, size_t ldy) {
+  DM_WC("gemm_nvfp4.calls", 1);
+  DM_WC("gemm_nvfp4.row_pos", (uint64_t)(r1 - r0) * (p1 - p0));
   const float post = gmul * 128.f;  // as mv_nvfp4
   const int NB = K / XB, rb = K / 2, rs = K / 16, KB = K / 8, NG = K / XB;
   const int8x16_t lut = vld1q_s8(NV_E2M1X2);

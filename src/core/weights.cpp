@@ -1,5 +1,6 @@
 // Memory regions, weight views and their matvec dispatch, the DMENGRES1 reader, embedding rows, row phases, and the
 // exact reference kernels.
+#include "dmeng/workcount.h"
 #include "dmeng/weights.h"
 #include <vector>
 
@@ -166,6 +167,7 @@ void XBuf::init(int K, Prec p) {
   cap = K;
 }
 void XBuf::prep(const float* x, int K) {
+  DM_WC("xbuf.prep", 1);
   q.K = K;
   xq_prep(q, x);
 }
@@ -557,6 +559,16 @@ void run_rows_post(Pool& pool, const Job& job, int chunk, bool ref, double* byte
 }
 
 void mv_multi(const Weight& w, int r0, int r1, const XQ* const* xq, const float* const* xf, int n, float* const* y, bool ref) {
+  if (w.kind == Weight::AFF4) {
+    DM_WC("mv_multi.aff4.row_pos", (uint64_t)(r1 - r0) * n);
+    DM_WC("mv_multi.aff4.calls", 1);
+  } else if (w.kind == Weight::AFF8) {
+    DM_WC("mv_multi.aff8.row_pos", (uint64_t)(r1 - r0) * n);
+    DM_WC("mv_multi.aff8.calls", 1);
+  } else {
+    DM_WC("mv_multi.other.row_pos", (uint64_t)(r1 - r0) * n);
+    DM_WC("mv_multi.other.calls", 1);
+  }
   const bool i16 = !ref && n > 1 && xq && xq[0]->prec == Prec::I16;
   for (int k0 = 0; k0 < n; k0 += 8) {
     const int k = std::min(8, n - k0);
@@ -599,12 +611,15 @@ void phase_rows_n(void* p, int, int) {
     const JobN& J = C.j[i];
     const Weight& w = *J.w;
     const int r0 = J.r0 + (ch - C.start[i]) * C.chunk, r1 = std::min(J.r1 < 0 ? w.rows : J.r1, r0 + C.chunk);
-    if (!C.ref && J.xb && (w.kind == Weight::AFF8 || w.kind == Weight::AFF8S) && !(r0 & 3) && !(r1 & 3) && w.cols % 256 == 0) {
+    if (!C.ref && J.xb && (w.kind == Weight::AFF8 || w.kind == Weight::AFF8S || w.kind == Weight::AFF4) && !(r0 & 3) && !(r1 & 3) &&
+        w.cols % 256 == 0) {
       tmp.resize((size_t)J.n * C.chunk);
       if (w.kind == Weight::AFF8S) {  // the rows' AFF8 bytes rebuilt, then the same gemm
         static thread_local std::vector<uint8_t> buf;
         const Weight v = aff8s_view(w, r0, r1, buf);
         gemm_aff8_i16(v.c, (const _Float16*)v.s, (const _Float16*)v.b, v.cols, 0, r1 - r0, *J.xb, 0, J.n, tmp.data(), C.chunk);
+      } else if (w.kind == Weight::AFF4) {  // a 4-bit resident (phone-small): gemm_aff4_i16, the one-vector kernel's bits
+        gemm_aff4_i16(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *J.xb, 0, J.n, tmp.data(), C.chunk);
       } else {
         gemm_aff8_i16(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *J.xb, 0, J.n, tmp.data(), C.chunk);
       }

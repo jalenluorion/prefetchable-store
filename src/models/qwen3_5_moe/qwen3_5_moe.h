@@ -37,6 +37,10 @@ struct PrefillOpts {
   // experts arrive in waves (whatever has landed): a wave uses the GPU only with at least this many (position, expert)
   // assignments (the shared expert's positions counted), so a trickle of reads does not pay a GPU round trip per expert
   int gpu_min_wave = 128;
+  // the experts' packed kernels (gemm_aff4_i16, the shared expert's gemm_aff8_i16) from this many users of an expert in a
+  // sub-chunk (Core::chunk_pack_affine / chunk_pack_shared): 1 = every expert, as this prefill always ran
+  int pack_min = 1;
+  int dn_rows = 64;  // rows per down-projection job (Core::chunk_dn_rows), as this prefill always ran
   // free the prefill's scratch (activations, expert inputs, packed activations: ~0.5 GB at 512-position sub-chunks) at
   // the end of every prefill; the next one allocates it again. Placement of memory only: no computed bit changes
   bool release = false;

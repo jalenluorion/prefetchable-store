@@ -45,13 +45,12 @@ struct ModelInfo {
   std::string caps_json() const {
     return std::string("{\"verify\":") + (has_verify ? "true" : "false") + ",\"ref_path\":" + (has_ref_path ? "true" : "false") + "}";
   }
-  // every multi-position MoE of this model goes through Core::moe_chunk, which runs a union larger than the cache in
-  // batches (phone sizes): the pools' run-time floor (min_cap) is then one step's pins (2K + 2), not a prefill layer's
-  // union (Inkling; the 35B's batched prefill has its own MoE with no batches yet)
+  // Core::moe_chunk runs a union larger than the cache in batches (phone sizes): the pools' run-time floor (min_cap) is
+  // then one step's pins (2K + 2), not a prefill layer's union (Inkling, Flash-Next; the 35B: an option, union_batches)
   bool union_batches = false;
-  // Core::moe_chunk computes this model's 4-bit affine experts with the packed batched kernels (gemm_aff4_i16, inputs a
-  // multiple of 256) from PACK_MIN users and gives the GPU its share of them (moe_gpu): the same bits as the multi-vector
-  // path. Off: the multi-vector path, as before (the 35B's verify)
+  // Core::moe_chunk computes this model's affine records (4-bit experts, the 8-bit shared expert) with the packed batched
+  // kernels (gemm_aff4_i16 / gemm_aff8_i16, inputs a multiple of 256) from PACK_MIN users and gives the GPU its share of
+  // them (moe_gpu): the same bits as the multi-vector path. Off: the multi-vector path
   bool chunk_aff4 = false;
 };
 
@@ -245,6 +244,10 @@ class Core {
   }
 
   bool init(const ModelInfo& info, const CoreOpts& opts, const std::string& dir, std::string& err);
+  // the engine's own options for every family: union_batches 0|1 (the pools' floor, ModelInfo::union_batches),
+  // chunk_aff4 0|1 (moe_chunk's packed affine kernels, ModelInfo::chunk_aff4); a model passes on the names it does not know
+  bool set_option(const std::string& name, const std::string& value, std::string& err);
+  void set_union_batches(bool on);
   // per token: the model calls token_start before its first MoE step and token_end after its last
   void token_start(int position, int tok, const float* router_emb);
   void moe_step(int step, const float* x, float* y, const MoeView& v);
@@ -268,6 +271,22 @@ class Core {
   // pinned until span_unname(step). Names only: the outputs cannot change.
   void span_name(int step);
   void span_unname(int step);
+  // ... or the step's own released router run on the running step's MoE inputs names its top K per position
+  void span_name_router(int step, int n, const float* const* x);
+  // the next step a span names, set by the model before a moe_chunk call: moe_chunk issues the names behind the running
+  // step's own reads (first sub-chunk only, off = 0), every expert of its layer or (span_next_router) the router's picks;
+  // released by span_unname(step) after that step's last sub-chunk. -1: none
+  int span_next = -1;
+  bool span_next_router = false;
+  // the experts of a chunk that are not in memory: all at once once landed (false), or in waves as they land (true), a
+  // wave given the GPU's share only from chunk_wave_gpu_min (position, expert) rows (no GPU round trip per trickle)
+  bool chunk_waves = false;
+  int chunk_wave_gpu_min = 0;
+  // moe_chunk's packed kernels for affine records: routed experts from chunk_pack_affine users (-1: PACK_MIN when
+  // ModelInfo::chunk_aff4, else never), the shared expert from chunk_pack_shared positions (0: never); a model's pass sets
+  // them for its own kind of pass and puts them back
+  int chunk_pack_affine = -1, chunk_pack_shared = 0;
+  int chunk_dn_rows = 32;  // rows per down-projection job (a multiple of 4; the 35B's prefill: 64, as it ran)
   std::vector<std::vector<std::pair<int, int>>> span_names;  // [steps] (slot, expert) named
   std::vector<std::vector<int>> span_hold;                   // [steps] the step's union pins kept across its sub-chunks
   void chunk_end(int n) {

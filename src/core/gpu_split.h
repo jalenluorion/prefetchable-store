@@ -1,10 +1,9 @@
-// run_rows_n with the GPU's share (gpu_gemm.h): for every job with a packed input (JobN::xb) and an 8-bit affine matrix, the GPU
+// run_rows_n with the GPU's share (gpu_gemm.h): for every job with a packed input (JobN::xb) and an 8- or 4-bit affine matrix, the GPU
 // computes the first frac of the matrix's rows (whole 64-row blocks) while the CPU computes the rest through run_rows_n,
-// at the same time. The GPU kernel computes gemm_aff8_i16's bits, which are mv's bits (weights.h
+// at the same time. The GPU kernel computes gemm_aff8_i16's / gemm_aff4_i16's bits, which are mv's bits (weights.h
 // mv_multi), so the outputs do not depend on the split. Jobs without a packed input, other formats, matrices outside
 // the wrapped regions and the reference path stay on the CPU; if the GPU does not complete the set, the CPU computes
-// its rows too. The per-position-output form of the 35B prefill's run_split (qwen3_5_moe/prefill.cpp), for Inkling's
-// batched projections.
+// its rows too. Every family's batched projections go through it.
 #pragma once
 #include <cstdint>
 

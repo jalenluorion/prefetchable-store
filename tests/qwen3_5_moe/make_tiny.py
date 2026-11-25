@@ -25,7 +25,7 @@ REL, MODEL = os.path.join(OUT, "release"), os.path.join(OUT, "model")
 os.makedirs(REL, exist_ok=True)
 g = torch.Generator().manual_seed(int(os.environ.get("SEED", 0)))
 
-H, NL, E, K, I, SI, V = 256, 8, 64, 8, 128, 128, 1024
+H, NL, E, K, I, SI, V = 256, 8, 64, 8, 256, 256, 1024  # every width a multiple of 256: the batched prefill runs (its kernels need it)
 NQ, NKV, HD = 16, 2, 256
 NKH, NVH, DK, DV, CK = 16, 32, 128, 128, 4
 types = ["linear_attention", "linear_attention", "linear_attention", "full_attention"] * (NL // 4)

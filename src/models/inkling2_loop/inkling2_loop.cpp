@@ -2669,8 +2669,8 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
     else taps_.clear();
     return true;
   }
-  err = "unknown option " + name + " for inkling2_loop";
-  return false;
+  if (!core) return (err = "unknown option " + name + " (or bind the model first)"), false;
+  return core->set_option(name, value, err);  // the engine's own options (Core::set_option)
 }
 
 bool Inkling::set_gpu_frac(double f, std::string& err, bool experts) {

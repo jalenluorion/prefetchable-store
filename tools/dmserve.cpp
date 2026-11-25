@@ -132,6 +132,7 @@ struct Args {
   int drafts = -1;
   int fast_head = 1;  // the screened head (exact) for greedy and top-k <= 64 requests; 0 = the full head always
   bool print_defaults = false;
+  std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
   std::set<std::string> given;  // flags on the command line (a profile default fills only the others)
 };
 
@@ -157,6 +158,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
   --mode exact|fast|lossless|approx[:PRESET]   default: the profile's
   --drafts 0|1           1 = --draft lookup --early 4 (as in dmeng); default: the profile's (off)
   --print-defaults       print the resolved profile defaults as JSON and exit
+  --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: union_batches, chunk_aff4, prefill_*)
 model and memory
   --resident F --family F --ctx N (33792) --threads N (8) --readers N (4) --mem plain|mlock --res-mem plain|mlock
   --kv-plan N            positions of per-position state the automatic cache plans for at start (4096); past them the
@@ -358,6 +360,11 @@ int main(int argc, char** argv) {
       printf("%s", HELP);
       return 0;
     } else if (k == "--profile") a.profile = v();
+    else if (k == "--model-opt") {
+      const std::string kv = v();
+      const size_t e = kv.find('=');
+      a.model_opts.push_back({kv.substr(0, e), e == std::string::npos ? "1" : kv.substr(e + 1)});
+    }
     else if (k == "--mode") a.mode = v();
     else if (k == "--drafts") a.drafts = std::stoi(v());
     else if (k == "--fast-head") a.fast_head = std::stoi(v());
@@ -582,6 +589,11 @@ int main(int argc, char** argv) {
     fprintf(stderr, "load: %s\n", err.c_str());
     return 1;
   }
+  for (auto& kv : a.model_opts)
+    if (!M->set_option(kv.first, kv.second, err)) {
+      fprintf(stderr, "--model-opt %s: %s\n", kv.first.c_str(), err.c_str());
+      return 1;
+    }
   Routers rts;  // decode: trained lag-k routers naming m experts early (lossless); none = cache only
   if (!a.routers.empty()) {
     if (!rts.load(a.routers, C, err)) {

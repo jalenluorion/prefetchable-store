@@ -1,5 +1,6 @@
 #include "dmeng/pool.h"
 
+#include "dmeng/workcount.h"
 #include <pthread.h>
 #include <pthread/qos.h>
 
@@ -185,8 +186,14 @@ Pool::~Pool() {
   for (auto& t : th_) t.join();
 }
 
-void Pool::run(TaskFn fn, void* ctx) { dispatch(fn, ctx, false); }
-void Pool::run_any(TaskFn fn, void* ctx) { dispatch(fn, ctx, true); }
+void Pool::run(TaskFn fn, void* ctx) {
+  DM_WC("pool.forkjoins", 1);
+  dispatch(fn, ctx, false);
+}
+void Pool::run_any(TaskFn fn, void* ctx) {
+  DM_WC("pool.forkjoins", 1);
+  dispatch(fn, ctx, true);
+}
 
 // A run's state word: the low 32 bits of its generation (tag), the kind (ALL: every thread runs fn; else claimed work),
 // CLOSED (an any-run whose caller has returned from fn: late workers skip it) and the count of workers inside fn.

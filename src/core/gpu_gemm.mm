@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
+#include "dmeng/workcount.h"
 #include "gpu_gemm.h"
 
 #include <unistd.h>
@@ -485,12 +486,20 @@ int GpuGemm::stage(const XQB& x) {
   GImpl& g = *(GImpl*)impl;
   for (size_t i = 0; i < g.stages.size(); i++)
     if (g.stages[i].x == &x) return (int)i;
+  DM_WC("gpu.stage_pos", x.N);
   g.stages.push_back({&x, 0, 0, 0, 0});
   return (int)g.stages.size() - 1;
 }
 
 int GpuGemm::add(int fmt, const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int R, int n, int s,
                  const int* map) {
+  if (fmt == 8) {
+    DM_WC("gpu.aff8.row_pos", (uint64_t)R * n);
+    DM_WC("gpu.aff8.adds", 1);
+  } else {
+    DM_WC("gpu.aff4.row_pos", (uint64_t)R * n);
+    DM_WC("gpu.aff4.adds", 1);
+  }
   GImpl& g = *(GImpl*)impl;
   if (R <= 0 || n <= 0 || K % 64 || (fmt != 8 && fmt != 4) || s < 0) return -1;
   const size_t NG = K / 64, cb = (size_t)R * (fmt == 8 ? K : K / 2), sb = (size_t)R * NG * 2;
@@ -649,6 +658,7 @@ void GpuGemm::copy(int i) {
 }
 
 void GpuGemm::submit() {
+  DM_WC("gpu.sets", 1);
   @autoreleasepool {
     GImpl& g = *(GImpl*)impl;
     if (g.jobs.empty()) return;
