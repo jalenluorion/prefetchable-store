@@ -68,6 +68,7 @@ bool Qwen35::load(const LoadOpts& op, std::string& err) {
   if (!rows.open(c.emb_file[0] == '/' ? c.emb_file : op.dir + "/" + c.emb_file, c.emb_off, c.H, err)) return false;
   // what the core needs
   mi.family = "qwen3_5_moe";
+  mi.has_verify = true;
   mi.hidden = c.H;
   mi.vocab = mi.vocab_out = c.V;
   mi.layers = mi.steps = c.NL;

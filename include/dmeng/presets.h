@@ -3,6 +3,7 @@
 // with built-in fallbacks. dmeng, dmserve and the C API all resolve them here, so they cannot disagree.
 #pragma once
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,9 @@ struct Resolved {
   int readers = 0;
   int bg_ranks = 0, bg_gate = 0;
   bool cache_auto = false;
+  std::string layer_caps;  // "" = the core's rule
+  double xtok_tau = 0.5;
+  int rd_prio = -1, prefill_chunk = 1;
   std::string json() const;
 };
 
@@ -83,5 +87,61 @@ std::string device_profile(int64_t avail_bytes, double min_gb, std::string& why)
 // ("" = DIR/.dmeng). Router files are found (or derived) as docs/MANIFEST-PRESETS.md says.
 bool resolve_preset(const std::string& dir, const std::string& profile_req, const std::string& mode_req, const std::string& derived_dir,
                     int64_t avail_bytes, Preset& p, std::string& err);
+
+// ---------------------------------------------------------------- one resolver for the three front ends
+// What a front end was given explicitly: each fills it from its own spelling (dmeng's and dmserve's flags, the C API's
+// dm_open_opts); an unset member is left to the profile, then the manifest's defaults, then the built-in values. The
+// front ends differ only in that spelling, never in the precedence, so a setting resolves the same way in all three.
+struct Given {
+  std::optional<std::string> mode;      // exact | fast | lossless | approx[:PRESET]
+  std::optional<std::string> resident;  // an explicit resident file
+  std::optional<std::string> routers;   // an engine router file, or "none"
+  std::optional<std::string> xtok;      // a cross-token router file, or "none"
+  bool other_address = false;           // another early address (oracle, planner, transplant, a router id): no profile routers
+  std::optional<int> m, cand;
+  std::optional<double> tau, xtok_tau;
+  std::optional<bool> rd_prio;
+  std::optional<std::string> evict, layer_caps;
+  std::optional<double> cache_gb;       // an explicit size
+  bool cache_auto = false;              // the automatic rule asked for explicitly
+  std::optional<double> gpu_frac, gpu_experts;
+  bool gpu_off = false;
+  std::optional<int> run_ahead, run_ahead_depth, ra_max_tok;
+  std::optional<double> ra_budget;
+  std::optional<bool> ra_sat_skip;
+  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts;
+  bool recording = false;  // a routing record is written (dmeng --record): single steps unless a chunk is given
+};
+
+// The run options after the precedence. Before resolve_run, a front end puts its own built-in values here (what applies
+// when neither the command line, the profile nor the manifest sets a value); resolve_run fills in the rest.
+struct RunOpts {
+  Preset preset;
+  bool profiled = false;
+  std::string mode = "lossless";  // the engine's mode string
+  std::string resident;           // "" = the model resolver's default (resident_q8)
+  std::string routers, xtok;      // engine files; "" = none
+  bool routers_from_profile = false;
+  int m = 8, cand = 16;
+  double tau = -1, xtok_tau = 0.5;  // tau as the routers use it (>= 0: the confidence rule)
+  int rd_prio = -1;                 // -1: the front end's rule (on with planner / fast mode), 0 / 1 explicit or the profile's
+  std::string evict = "auto";
+  std::string layer_caps;           // "" = the core's rule
+  std::string cache = "fixed";      // fixed (cache_gb) | auto (from the machine) | slab (sized at open from what iOS gives)
+  double cache_gb = 5.0;
+  double gpu_frac = 0, gpu_experts = 0;
+  int run_ahead = 0, run_ahead_depth = 1, ra_max_tok = 0;
+  double ra_budget = 0;
+  bool ra_sat_skip = false;
+  int readers = 4, bg_ranks = 0, bg_gate = 0, prefill_chunk = 1, drafts = 0;
+  std::vector<std::string> notes;
+  // the "resolved" block of every run's JSON (the cache's size once a front end has computed it)
+  Resolved resolved(double cache_gb_in_force) const;
+};
+
+// Resolve model folder `dir` for profile `profile_req` ("none": no profile; "" / "auto": the device's) with the explicit
+// options `g`; `r` comes in holding the front end's built-in values. derived_dir, avail_bytes: as resolve_preset.
+bool resolve_run(const std::string& dir, const std::string& profile_req, const Given& g, const std::string& derived_dir, int64_t avail_bytes,
+                 RunOpts& r, std::string& err);
 
 }  // namespace dm

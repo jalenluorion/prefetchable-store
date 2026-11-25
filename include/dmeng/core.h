@@ -40,6 +40,11 @@ struct ModelInfo {
   std::vector<std::string> layer_paths;      // per layer, relative to the folder (a profile's own files); empty = layer_file
   int eos = -1;
   bool has_ref_path = false;                 // supports the exact fp32-activation reference path
+  bool has_verify = false;                   // a multi-position verify pass (Model::verify): drafting; without one every front end refuses it
+  // what this family's code supports, in every front end's JSON (dmeng's line, dmserve's READY, dm_stats_json)
+  std::string caps_json() const {
+    return std::string("{\"verify\":") + (has_verify ? "true" : "false") + ",\"ref_path\":" + (has_ref_path ? "true" : "false") + "}";
+  }
   // every multi-position MoE of this model goes through Core::moe_chunk, which runs a union larger than the cache in
   // batches (phone sizes): the pools' run-time floor (min_cap) is then one step's pins (2K + 2), not a prefill layer's
   // union (Inkling; the 35B's batched prefill has its own MoE with no batches yet)

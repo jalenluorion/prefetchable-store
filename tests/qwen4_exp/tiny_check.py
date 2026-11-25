@@ -5,7 +5,7 @@ fp16 scale), and every in-memory matrix the engine holds at 8 bits as its codes 
 derived resident file); every other weight as released (bf16 widened). Teacher-forced over random tokens with the n-gram
 EOS inside (the hash's EOS rule), 40 tokens (the QSA budget of 16 crossed: the indexer's selection runs) and 300.
 
-  FLASH_TINY=<OUT of make_tiny.py> python tests/qwen4_exp/tiny_check.py      (python: numpy, torch, transformers)
+  TINY=<OUT of make_tiny.py> python tests/qwen4_exp/tiny_check.py      (python: numpy, torch, transformers)
   (DMENG_BIN, DMSERVE_BIN override the binaries, TINY_OUT the output folder)
 
   A. the exact reference path, dmeng --prec f32 (fp32 activations, fp32 K / V / indexer keys, scalar kernels) vs the
@@ -30,7 +30,7 @@ import torch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-TINY = os.environ["FLASH_TINY"]
+TINY = os.environ.get("TINY") or os.environ["FLASH_TINY"]
 REL, MOD = os.path.join(TINY, "release"), os.path.join(TINY, "model")
 BIN = os.environ.get("DMENG_BIN", os.path.join(REPO, "build", "dmeng"))
 SRV = os.environ.get("DMSERVE_BIN", os.path.join(REPO, "build", "dmserve"))

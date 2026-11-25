@@ -181,18 +181,63 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   std::string err, family;
   LoadOpts lo;
   const std::string derived = o.derived_dir ? o.derived_dir : "";
-  // the profile's defaults (include/dmeng/presets.h): each fills only an option left at zero / NULL
-  Preset P;
+  // the settings: explicit options > the profile > the manifest's defaults > the C API's own values (resolve_run, the
+  // resolver dmeng and dmserve use too); an option left at zero / NULL is not given, a negative one is "off"
   const std::string prof = o.profile && *o.profile ? o.profile : "auto";
-  if (prof != "none" && !resolve_preset(model_dir, prof, o.mode && *o.mode ? o.mode : "", derived, e->avail_open > 0 ? e->avail_open : -1, P, err)) {
+  Given g;
+  if (o.mode && *o.mode) g.mode = o.mode;
+  if (o.resident) g.resident = o.resident;
+  if (o.routers && *o.routers) g.routers = o.routers;  // a file or "none"
+  else if (o.routers_id && std::strcmp(o.routers_id, "none") == 0) g.routers = "none";
+  else if (o.routers_id && *o.routers_id) {
+    std::string rp;
+    if (!router_path(model_dir, derived, o.routers_id, rp, err)) {
+      g_err = "routers: " + err;
+      return nullptr;
+    }
+    g.routers = rp;
+  }
+  if (o.xtok) g.xtok = std::strcmp(o.xtok, "none") == 0 || !*o.xtok ? "none" : o.xtok;
+  if (o.router_m > 0) g.m = o.router_m;
+  if (o.router_tau != 0) g.tau = o.router_tau;
+  if (o.router_cand > 0) g.cand = o.router_cand;
+  if (o.evict && *o.evict) g.evict = o.evict;
+  if (o.layer_caps == 1) g.layer_caps = "uniform";
+  else if (o.layer_caps == 2) g.layer_caps = "none";
+  if (o.cache_bytes > 0) g.cache_gb = (double)o.cache_bytes / 1e9;
+  if (o.prefill_gpu_frac != 0) g.gpu_frac = std::max(0.0, o.prefill_gpu_frac);
+  if (o.prefill_gpu_experts != 0) g.gpu_experts = std::max(0.0, o.prefill_gpu_experts);
+  if (o.run_ahead != 0) g.run_ahead = std::max(0, o.run_ahead);
+  if (o.run_ahead_depth > 0) g.run_ahead_depth = o.run_ahead_depth;
+  if (o.run_ahead_budget != 0) g.ra_budget = std::max(0.0, o.run_ahead_budget);
+  if (o.run_ahead_max != 0) g.ra_max_tok = std::max(0, o.run_ahead_max);
+  if (o.run_ahead_sat_skip != 0) g.ra_sat_skip = o.run_ahead_sat_skip > 0;
+  if (o.readers > 0) g.readers = o.readers;
+  RunOpts ro;  // the C API's own values where nothing else sets one
+  ro.cache_gb = 3.3;
+  ro.readers = CoreOpts().readers;
+  ro.evict = CoreOpts().evict;
+  if (!resolve_run(model_dir, prof, g, derived, e->avail_open > 0 ? e->avail_open : -1, ro, err)) {
     g_err = "profile: " + err;
     return nullptr;
   }
-  const bool profiled = prof != "none" && P.profile != "none";
+  const Preset& P = ro.preset;
+  const bool profiled = ro.profiled;
   if (profiled) e->preset_json = P.json();
-  const std::string mode = profiled ? P.engine_mode : engine_mode_of(o.mode && *o.mode ? o.mode : "lossless");
+  if (ro.drafts > 0) {  // (no drafting in the C API: a manifest default cannot turn on what this front end does not do)
+    ro.notes.push_back("drafts: the C API has no drafting, off");
+    ro.drafts = 0;
+  }
+  if (ro.bg_ranks > 0) {
+    ro.notes.push_back("background reads: not in the C API, off");
+    ro.bg_ranks = 0;
+  }
+  // the prompt's sub-chunk is the model's own here (the C API does not set it; dmeng and dmserve use 512): printed as 0
+  ro.prefill_chunk = 0;
+  for (auto& n : ro.notes) fprintf(stderr, "dmeng: %s\n", n.c_str());
+  const std::string mode = ro.mode;
   std::string res_file = o.resident ? o.resident : "";
-  if (res_file.empty() && o.resident_bits == 0 && profiled && !P.resident.empty()) res_file = P.resident;
+  if (res_file.empty() && o.resident_bits == 0) res_file = ro.resident;
   if (res_file.empty() && o.resident_bits == 4) {  // the 4-bit derived variant (P2), by the engine's derived naming
     ms::Manifest mf;
     if (!mf.load(model_dir, err)) {
@@ -221,15 +266,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     g_err = "load: " + err;
     return nullptr;
   }
-  const bool addr_given = (o.routers && *o.routers) || (o.routers_id && *o.routers_id) || o.xtok;
-  if (o.routers && *o.routers && std::strcmp(o.routers, "none") != 0) e->routers_path = o.routers;
-  else if (o.routers && std::strcmp(o.routers, "none") == 0) e->routers_path.clear();
-  else if (o.routers_id && std::strcmp(o.routers_id, "none") == 0) e->routers_path.clear();
-  else if (profiled && !addr_given) e->routers_path = P.routers;
-  else if (o.routers_id && *o.routers_id && !router_path(model_dir, derived, o.routers_id, e->routers_path, err)) {
-    g_err = "routers: " + err;
-    return nullptr;
-  }
+  e->routers_path = ro.routers;
   CoreOpts co;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
   co.threads = 4;  // P0: 4 threads for the 8-bit resident on 2 P + 4 E cores (6 for a 4-bit resident)
@@ -241,11 +278,12 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     const int p = sysctl_int("hw.perflevel0.physicalcpu");
     if (p > 0) co.threads = std::min(co.threads, p);
   }
-  if (o.readers > 0) co.readers = o.readers;
-  else if (profiled && P.readers > 0) co.readers = P.readers;
-  co.cache_gb = (o.cache_bytes > 0 ? (double)o.cache_bytes : 3.3e9) / 1e9;
+  co.readers = ro.readers;
+  co.cache_gb = ro.cache_gb;
   co.mem = mem_c(o.memory_mode);
-  if (o.cache_bytes <= 0 && e->avail_open <= 0 && profiled && P.cache == "auto" && co.mem == Mem::MLOCK) {  // the Mac rule
+  if (ro.cache != "fixed" && e->avail_open <= 0 && ro.cache != "auto") ro.cache = "fixed";  // (slab is the iPhone's rule)
+  if (ro.cache == "auto" && (e->avail_open > 0 || co.mem != Mem::MLOCK)) ro.cache = "fixed";
+  if (ro.cache == "auto") {  // the Mac rule
     const ModelInfo& mi0 = e->M->info();
     double start = 0;
     std::string why;
@@ -259,6 +297,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     co.cache_gb = std::min(ceil, start);
   }
   if (o.cache_bytes <= 0 && e->avail_open > 0 && co.mem != Mem::FILE) {  // iOS: the slab from the memory the app has
+    ro.cache = "slab";
     struct stat st;
     const int64_t res = stat(lo.resident.c_str(), &st) == 0 ? (int64_t)st.st_size : (int64_t)2.1e9;
     const int64_t rt = !e->routers_path.empty() && stat(e->routers_path.c_str(), &st) == 0 ? (int64_t)st.st_size : 0;
@@ -271,11 +310,8 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.split > 0) co.split = o.split;
   // the eviction policy: the core's own default (auto: hazard, uniform per-layer caps below 4 x K x layers slots)
   // unless the caller names one
-  if (o.evict && *o.evict) co.evict = o.evict;
-  else if (profiled) co.evict = P.evict;
-  if (o.layer_caps == 1) co.layer_caps = "uniform";
-  else if (o.layer_caps == 2) co.layer_caps = "none";
-  else if (profiled && !P.layer_caps.empty()) co.layer_caps = P.layer_caps;
+  co.evict = ro.evict;
+  if (!ro.layer_caps.empty()) co.layer_caps = ro.layer_caps;
   co.qos = (int)e->qos;
   if (o.reader_qos > 0) co.reader_qos = (int)qos_of(o.reader_qos - 1);
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
@@ -311,28 +347,23 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       g_err = "routers: " + err;
       return nullptr;
     }
-    // the names rule (precedence: presets.h): an explicit router_m without router_tau is a plain top m; router_tau > 0
-    // the confidence rule, < 0 a plain top m; else the profile's rule when the routers are the profile's
-    int rm, rc;
-    double rt;
-    names_rule(P, profiled && !addr_given, o.router_m > 0, o.router_m > 0 ? o.router_m : 8, o.router_tau != 0, o.router_tau, o.router_cand > 0,
-               o.router_cand > 0 ? o.router_cand : 16, rm, rt, rc);
-    e->R->m = rm;
-    if (rt > 0) e->R->tau = rt;
-    e->R->cand = rc;
+    // the names rule as resolved (precedence: presets.h)
+    e->R->m = ro.m;
+    if (ro.tau > 0) e->R->tau = ro.tau;
+    e->R->cand = ro.cand;
     e->C->hook = e->R.get();
   }
-  const std::string xtok = o.xtok ? (std::strcmp(o.xtok, "none") == 0 ? "" : o.xtok) : profiled && !addr_given ? P.xtok : "";
+  const std::string xtok = ro.xtok;
   if (!xtok.empty()) {  // cross-token routers: the next token's first steps, from a late step of this one
     e->X = std::make_unique<Xtok>();
     if (!e->X->load(xtok, *e->C, err)) {
       g_err = "xtok: " + err;
       return nullptr;
     }
-    e->X->tau = profiled ? P.xtok_tau : 0.5;
+    e->X->tau = ro.xtok_tau;
     e->X->inner = e->C->hook;
     e->C->hook = e->X.get();
-    if (!o.xtok && profiled && P.rd_prio) e->C->cache.rd.prio = true;
+    if (ro.rd_prio > 0) e->C->cache.rd.prio = true;
   }
   if (mode != "lossless") {  // fast or an advanced approximate preset (dmeng --mode)
     const std::string md = mode;
@@ -345,8 +376,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     if (e->C->ns.cancel) e->C->cancel_stale = true;
   }
   // the prefill's GPU split (exact): 0 = the profile's shares (mac: 0.4 / 0.4), < 0 = off
-  const double gpu_frac = o.prefill_gpu_frac < 0 ? 0 : o.prefill_gpu_frac > 0 ? o.prefill_gpu_frac : profiled ? P.gpu_frac : 0;
-  const double gpu_experts = o.prefill_gpu_experts < 0 ? 0 : o.prefill_gpu_experts > 0 ? o.prefill_gpu_experts : profiled ? P.gpu_experts : 0;
+  const double gpu_frac = ro.gpu_frac, gpu_experts = ro.gpu_experts;
   if (gpu_frac > 0 || gpu_experts > 0 || o.prefill_gpu_min > 0 || o.prefill_gpu_min_wave > 0) {
     std::string ge;
     char v[32];
@@ -361,22 +391,16 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     }
   }
   {  // run-ahead (exact: names only): 0 = the profile's, < 0 = off
-    const int ra = o.run_ahead < 0 ? 0 : o.run_ahead > 0 ? o.run_ahead : profiled ? P.run_ahead : 0;
-    const int rd = o.run_ahead_depth > 0 ? o.run_ahead_depth : profiled ? P.run_ahead_depth : 1;
+    const int ra = ro.run_ahead, rd = ro.run_ahead_depth;
     std::string re;
     if (ra > 0 && (!e->M->set_option("run_ahead", std::to_string(ra), re) || (rd > 1 && !e->M->set_option("run_ahead_depth", std::to_string(rd), re)))) {
       g_err = "run_ahead: " + re;
       return nullptr;
     }
-    e->res.run_ahead = ra;
-    e->res.run_ahead_depth = rd;
-    e->C->ra_budget = o.run_ahead_budget < 0 ? 0 : o.run_ahead_budget > 0 ? o.run_ahead_budget : profiled ? P.ra_budget : 0;
-    e->C->ra_max_tok = o.run_ahead_max < 0 ? 0 : o.run_ahead_max > 0 ? o.run_ahead_max : profiled ? P.ra_max_tok : 0;
-    e->C->ra_sat_skip = o.run_ahead_sat_skip < 0 ? false : o.run_ahead_sat_skip > 0 ? true : profiled && P.ra_sat_skip;
+    e->C->ra_budget = ro.ra_budget;
+    e->C->ra_max_tok = ro.ra_max_tok;
+    e->C->ra_sat_skip = ro.ra_sat_skip;
     e->C->cache.rd.depth_times(e->rs_dt);
-    e->res.ra_budget = e->C->ra_budget;
-    e->res.ra_max_tok = e->C->ra_max_tok;
-    e->res.ra_sat_skip = e->C->ra_sat_skip;
   }
   int pt = o.prefill_threads;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
@@ -427,20 +451,8 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.ckpt_gb > 0) so.ckpt_gb = o.ckpt_gb;
   if (o.park_gb > 0) so.park_gb = o.park_gb;
   e->pc = std::make_unique<PrefixCache>(*e->lm, so);
-  e->res.profile = profiled ? P.profile : "none";
-  e->res.mode = mode;
-  e->res.routers = e->routers_path;
-  e->res.m = e->R ? e->R->m : 0;
-  e->res.tau = e->R ? e->R->tau : -1;
-  e->res.cand = e->R ? e->R->cand : 0;
-  e->res.xtok = xtok;
-  e->res.cache_gb = co.cache_gb;
-  e->res.cache_auto = o.cache_bytes <= 0;
-  e->res.evict = co.evict;
-  e->res.readers = co.readers;
-  e->res.drafts = 0;  // the C API has no drafting
-  e->res.gpu_frac = gpu_frac;
-  e->res.gpu_experts = gpu_experts;
+  ro.routers = e->R || e->PL ? e->routers_path : "";
+  e->res = ro.resolved(co.cache_gb);
   return e.release();
 }
 
@@ -767,7 +779,7 @@ const char* dm_stats_json(dm_engine* e) {
     s << "}";
   }
   if (e->C->hook) s << ",\"hook\":" << e->C->hook->stats_json(*e->C, (int)std::max<int64_t>(1, e->steps));
-  s << ",\"resolved\":" << e->res.json() << "}";
+  s << ",\"resolved\":" << e->res.json() << ",\"capabilities\":" << e->M->info().caps_json() << "}";
   e->stats = s.str();
   e->lm->reset_stats();
   return e->stats.c_str();

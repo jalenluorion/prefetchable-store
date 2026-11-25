@@ -1,13 +1,14 @@
-"""A tiny random Qwen3.6-35B-A3B (qwen3_5_moe) for the engine's checks, built with the repo's own converter and derive.
+"""A tiny random Qwen3.6-35B-A3B (qwen3_5_moe) for the engine's checks, built with the repo's own converter.
 
-  python tests/qwen3_5_moe/make_tiny.py OUT      (torch, safetensors, numpy and mlx in one Python)
+  python tests/qwen3_5_moe/make_tiny.py OUT      (python: torch, safetensors, numpy)
 
 Writes OUT/release (a Hugging Face-style release: config.json, generation_config.json, model.safetensors.index.json,
 two shards, bf16, the release's tensor names and layouts: fused experts gate_up_proj [E, 2I, H] / down_proj [E, H, I],
-conv1d [C, 1, K], zero-centred norms, dummy mtp.* tensors the converter skips), then
-  OUT/model                       python/convert/qwen3_5_moe/convert.py of it (store/layer_XX.bin int4, resident.safetensors)
-                                  + python/derive/qwen3_5_moe.py resident (dmeng_resident.bin)
-  OUT/routers_full_k4_h512.dmr    a random lag-4 router set (linear + MLP of 512), python/derive/qwen3_5_moe.py router
+conv1d [C, 1, K], zero-centred norms, dummy mtp.* tensors the converter skips), then OUT/model: the store
+(python/convert/qwen3_5_moe/convert.py of it: store/layer_XX.bin int4, resident.safetensors), a random lag-2 linear
+router set as the weight repo publishes it (routers/linear_k2.safetensors: f16 matrices, f32 vectors, the entry's facts as
+metadata) and the manifest (tests/tiny_manifest.py). The engine derives its 8-bit in-memory file and router file on
+first use (or ms_derive), as for the weight repo.
 Geometry: the release's attention (16 query heads x 256, 2 KV heads, partial RoPE 64; Gated DeltaNet 16 key heads x 128,
 32 value heads x 128, conv 4) at hidden 256 (a multiple of 256, so the packed i8mm path runs), 8 layers (LLLF twice),
 64 experts top 8 (intermediate 128, shared 128), vocabulary 1024. SEED (env, default 0) fixes the weights.
@@ -16,6 +17,7 @@ import json, os, subprocess, sys
 
 import numpy as np
 import torch
+from safetensors.numpy import save_file as save_np
 from safetensors.torch import save_file
 
 OUT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "q36_tiny")
@@ -95,22 +97,23 @@ json.dump({"metadata": {}, "weight_map": wmap}, open(os.path.join(REL, "model.sa
 
 env = dict(os.environ, REPO=REL, OUT=MODEL, STATE_DIR=os.path.join(OUT, "_state"), THREADS="4")
 env.pop("FINAL_DIR", None)
-subprocess.run([sys.executable, os.path.join(REPO, "python/convert/qwen3_5_moe/convert.py")], env=env, check=True)
-subprocess.run([sys.executable, os.path.join(REPO, "python/derive/qwen3_5_moe.py"), "resident", MODEL], check=True)
+r = subprocess.run([sys.executable, os.path.join(REPO, "python/convert/qwen3_5_moe/convert.py")], env=env, capture_output=True, text=True)
+if r.returncode:
+    sys.exit(f"convert.py failed:\n{r.stdout[-3000:]}\n{r.stderr[-3000:]}")
 
-# a lag-4 router set (mlx_run.py's npz format: per layer emb_norm, lin, mlp.0, mlp.2), random
+# a random lag-2 linear router set (the published container: per target L, x = [rmsnorm(emb) * emb_norm, h_prev(, h_lag)])
 rng = np.random.default_rng(int(os.environ.get("SEED", 0)) + 1)
-blob = {"__lag__": np.array(4), "__feats__": np.array("full")}
+LAG = 2
+blob = {}
 for L in range(NL):
-    W = 3 * H if L >= 4 else 2 * H  # inputs [emb, prev] and, from the lag on, the lagged layer's
+    W = 3 * H if L >= LAG else 2 * H
     blob[f"{L}.emb_norm.weight"] = (1 + 0.1 * rng.standard_normal(H)).astype(np.float32)
-    blob[f"{L}.lin.weight"] = (0.05 * rng.standard_normal((E, W))).astype(np.float32)
+    blob[f"{L}.lin.weight"] = (0.05 * rng.standard_normal((E, W))).astype(np.float16)
     blob[f"{L}.lin.bias"] = (0.05 * rng.standard_normal(E)).astype(np.float32)
-    blob[f"{L}.mlp.0.weight"] = (0.05 * rng.standard_normal((512, W))).astype(np.float32)
-    blob[f"{L}.mlp.0.bias"] = np.zeros(512, np.float32)
-    blob[f"{L}.mlp.2.weight"] = (0.05 * rng.standard_normal((E, 512))).astype(np.float32)
-    blob[f"{L}.mlp.2.bias"] = np.zeros(E, np.float32)
-npz = os.path.join(OUT, "routers_full_k4_h512.npz")
-np.savez(npz, **blob)
-subprocess.run([sys.executable, os.path.join(REPO, "python/derive/qwen3_5_moe.py"), "router", MODEL, npz], check=True)
-print("tiny model:", MODEL, "| router:", npz[:-4] + ".dmr")
+os.makedirs(os.path.join(MODEL, "routers"), exist_ok=True)
+save_np(blob, os.path.join(MODEL, "routers", "linear_k2.safetensors"),
+        metadata={"family": "qwen3_5_moe", "lag": str(LAG), "targets": str(NL), "hidden": "0", "run": "tiny", "variant": "linear_k2", "source": "synthetic"})
+r = subprocess.run([sys.executable, os.path.join(REPO, "tests/tiny_manifest.py"), MODEL], capture_output=True, text=True)
+if r.returncode:
+    sys.exit(f"tiny_manifest.py failed:\n{r.stdout}\n{r.stderr}")
+print("tiny model:", MODEL)

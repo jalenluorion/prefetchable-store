@@ -1,0 +1,1877 @@
+{
+ "format": "moved-store",
+ "format_version": "1.0",
+ "family": "qwen3_5_moe",
+ "name": "Qwen3.6-35B-A3B-moved-store",
+ "source": {
+  "repo": "Qwen/Qwen3.6-35B-A3B",
+  "revision": "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
+  "license": "apache-2.0",
+  "license_file": "LICENSE"
+ },
+ "converter": {
+  "code": "github.com/jalenluorion/moved-store python/convert/qwen3_5_moe/convert.py (the sha256 below is of the file as run; the published file differs only in its docstring)",
+  "commit": null,
+  "sha256": "bd3102cd23b561048bf7fcc20477bcdcbf49dce5bfe8d75753b9290a3fb638e8",
+  "date": "2026-11-20"
+ },
+ "complete": true,
+ "parts": [
+  {
+   "path": "LICENSE",
+   "bytes": 11343,
+   "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+   "role": "license",
+   "precision": "text"
+  },
+  {
+   "path": "README.md",
+   "bytes": 12303,
+   "sha256": "6129e3932c6700bbd48f66833e22be2fa516c2a54905d79acb31cef141a79614",
+   "role": "card",
+   "precision": "text"
+  },
+  {
+   "path": "chat_template.jinja",
+   "bytes": 7816,
+   "sha256": "1b8361565cc35d47551d342214cff341c0f1a9685ce529c7ce31de0ed3616248",
+   "role": "chat_template",
+   "precision": "text"
+  },
+  {
+   "path": "check_output.txt",
+   "bytes": 1551,
+   "sha256": "4ef6d6744b48584935e67db7bd54fc67a92bf4ea91d82344144354a10d535b06",
+   "role": "results",
+   "precision": "text",
+   "optional": true
+  },
+  {
+   "path": "config.json",
+   "bytes": 3686,
+   "sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99",
+   "role": "config",
+   "precision": "text"
+  },
+  {
+   "path": "derived/resident_q4.dmres1.a603e898ddee.bin",
+   "bytes": 1135001600,
+   "sha256": "9bcb7685b1913e0beb251016abd6ee04c688323cce4c0f25c9a6182d992b06b9",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmres1",
+   "derived_id": "resident_q4",
+   "local": ".dmeng/resident_q4.dmres1.a603e898ddee.bin",
+   "check": "sha256 equal to derived[resident_q4].sha256 (shipped: made from a calibrated export that is not in the repo)"
+  },
+  {
+   "path": "derived/resident_q8.dmres1.a603e898ddee.bin",
+   "bytes": 2091827200,
+   "sha256": "38911cd1999715bd09e3af4ca19ee6bc8187b9237bb653620f37a28d8bf0921b",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmres1",
+   "derived_id": "resident_q8",
+   "local": ".dmeng/resident_q8.dmres1.a603e898ddee.bin",
+   "check": "sha256 equal to derived[resident_q8].sha256: the file the engine makes from its source part"
+  },
+  {
+   "path": "derived/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+   "bytes": 68091904,
+   "sha256": "97f4e33a03c9d5bb910961cfab6b889b779843554553e5a6f73e5f974a9089d0",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmr1",
+   "derived_id": "router.linear_k2.q8",
+   "local": ".dmeng/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+   "check": "sha256 equal to derived[router.linear_k2.q8].sha256: the file the engine makes from its source part"
+  },
+  {
+   "path": "embeddings.safetensors",
+   "bytes": 1017119224,
+   "sha256": "c920fdc76c37b4a77d24e7cfe0d010e9be17f3ab55ce2f9397e3ead4addfbd53",
+   "role": "embedding",
+   "optional": true,
+   "precision": "bf16",
+   "tensor": "model.language_model.embed_tokens.weight",
+   "check": "its data region equals the bytes of model.language_model.embed_tokens.weight in resident.safetensors (same dtype and shape)"
+  },
+  {
+   "path": "generation_config.json",
+   "bytes": 202,
+   "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e",
+   "role": "config",
+   "precision": "text"
+  },
+  {
+   "path": "merges.txt",
+   "bytes": 3353259,
+   "sha256": "a9d356d7bdf1ef4949e3e748e95b8e10ad9d4e2e838eddc38a0a7b6b94d1db8d",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "resident.safetensors",
+   "bytes": 4896793680,
+   "sha256": "a603e898ddee80bb6a7207743595cf28a339020f7575e424acebd30413627302",
+   "role": "resident",
+   "precision": "bf16"
+  },
+  {
+   "path": "results/router_training.json",
+   "bytes": 1267850,
+   "sha256": "4b78e79068ec2f9232bc113e2e100f3ee37ace3b1f7e1ec3dbfa46f0d638ac0d",
+   "role": "results",
+   "precision": "text",
+   "optional": true
+  },
+  {
+   "path": "routers/linear_k1.safetensors",
+   "bytes": 125160280,
+   "sha256": "023f05eda908f578d938d2a24543a31eb7d60c350c0dc57ce7e75b87590ec714",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "routers/linear_k2.safetensors",
+   "bytes": 124111704,
+   "sha256": "efd45c78a56b6a2c08505aafad219d2e4bfb89aa0c0e501ed396e58ca9ef86a7",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "routers/linear_k3.safetensors",
+   "bytes": 123063120,
+   "sha256": "8832136f37ce02cbf20dc1eb3e1d4b7b351282581f44e80aff8eb5850407d7f8",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "routers/linear_k4.safetensors",
+   "bytes": 122014536,
+   "sha256": "bcddc9633c96d55884d64a4c8f51fe4aec063e014aae38f7624d38da63b2fcb8",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "routers/mlp_k1_h512.safetensors",
+   "bytes": 385343832,
+   "sha256": "75ed4a3171545f9ac409062ffa0f416fd4572b17c62ee02202a0a1a270645444",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "routers/mlp_k2_h512.safetensors",
+   "bytes": 382198104,
+   "sha256": "6881073b383ca0e51e6cf66314084451bdb0b668aadafa70c0f23d043a78f8ad",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "routers/mlp_k3_h512.safetensors",
+   "bytes": 379052368,
+   "sha256": "af6968bc6a7768f203ed2f25f360475bbcc49da4a2c0c89868e34621b329dd49",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true,
+   "local": false,
+   "size_from": "converted on babel from routers/q36_router_full_k3_h512.npz"
+  },
+  {
+   "path": "routers/mlp_k4_h512.safetensors",
+   "bytes": 375906632,
+   "sha256": "582864741576fa0e686499387a4e7dea12db2f93790b5d971dcd7a9d10b3c301",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "routers/q36_router_full_k1_h512.npz",
+   "bytes": 770219506,
+   "sha256": "63bf8a258a90fc459d3c4d1c8f3819e5460c2a947963cccb1819936440ec24e1",
+   "role": "legacy",
+   "precision": "f32",
+   "optional": true,
+   "local": false,
+   "size_from": "the Hub's LFS metadata",
+   "note": "not present locally (deleted from the Mac after conversion; on the Hub)"
+  },
+  {
+   "path": "routers/q36_router_full_k2_h512.npz",
+   "bytes": 763928050,
+   "sha256": "c151e5821991455a62d2b5d7dbe87eeb238330ab7ae0f72bec56223128c816c7",
+   "role": "legacy",
+   "precision": "f32",
+   "optional": true,
+   "local": false,
+   "size_from": "the Hub's LFS metadata",
+   "note": "not present locally (deleted from the Mac after conversion; on the Hub)"
+  },
+  {
+   "path": "routers/q36_router_full_k3_h512.npz",
+   "bytes": 757636594,
+   "sha256": "8cac54f194d81eff6626a4e8fec2a63d79cdf70b2a6a8b260e6f50dc7e107323",
+   "role": "legacy",
+   "precision": "f32",
+   "optional": true,
+   "local": false,
+   "size_from": "the Hub's LFS metadata",
+   "note": "not present locally (deleted from the Mac after conversion; on the Hub)"
+  },
+  {
+   "path": "routers/q36_router_full_k4_h512.npz",
+   "bytes": 751345138,
+   "sha256": "a1e1dfffd8f1b7ee45f9c6c155c51ebe6cdd4229e502ad6d31ab981d8d012d46",
+   "role": "legacy",
+   "precision": "f32",
+   "optional": true,
+   "local": false,
+   "size_from": "the Hub's LFS metadata",
+   "note": "not present locally (deleted from the Mac after conversion; on the Hub)"
+  },
+  {
+   "path": "store/layer_00.bin",
+   "bytes": 452984832,
+   "sha256": "f54b63a17b8a8fe2c2c9ce1af5b2b9069f2022f00be404da36c82ff49810ac76",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_01.bin",
+   "bytes": 452984832,
+   "sha256": "7f7dc3a1945c0239c5ec4b9142b67b7892c9ac3c39333ff76704e55f716492be",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_02.bin",
+   "bytes": 452984832,
+   "sha256": "5d191f9490a6b57902a70eb9acde2bec5d91615bc6b905a2f93e1dde0e94ad0b",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_03.bin",
+   "bytes": 452984832,
+   "sha256": "ebfaa43630086845ae9d253cc8bac0bb4e97d930e8359bf5790c54f6c9c26ed4",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_04.bin",
+   "bytes": 452984832,
+   "sha256": "96b5900c1f405581031b837acfa6c4ae142fc035cbc06984e856118efdffead3",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_05.bin",
+   "bytes": 452984832,
+   "sha256": "f1145b9ef596aa057c16c3302984c92b127a72a39a970f13fec3a75c5e0649fb",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_06.bin",
+   "bytes": 452984832,
+   "sha256": "659d8e5cfe338a604641bed211b9b313347d031ea251d1ff4f69005e6d0ec6dc",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_07.bin",
+   "bytes": 452984832,
+   "sha256": "4f40f04aed09c072e46cc3ea692deef9a7cf9825b0cf1884f873b91b67cc6dac",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_08.bin",
+   "bytes": 452984832,
+   "sha256": "8415bfef62bed668987fdafc9c180470dea96c14442f3f61293d8e7c7fa09e25",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_09.bin",
+   "bytes": 452984832,
+   "sha256": "9148ec15ff67e80ab1ad41ded9589965650c5681f8bc689db586feceefe15ae5",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_10.bin",
+   "bytes": 452984832,
+   "sha256": "27ff3a6aa1a10baf02254b55a1cf116dfbeada17b808269acd7b4fef2f1cade3",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_11.bin",
+   "bytes": 452984832,
+   "sha256": "a49468bcd0f95284c223c3ff6eed3cc9d91ad20de0cc9bd7aee1fe3ca4c3ad0e",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_12.bin",
+   "bytes": 452984832,
+   "sha256": "3b277edeb268640305169b53ff39cf01873b8ff0c37887dfa3ff7beabf9a9a9f",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_13.bin",
+   "bytes": 452984832,
+   "sha256": "64804df79fa9bd64c00f75d443ec4735cbd4bc81fe089ada715f726ba0dea17c",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_14.bin",
+   "bytes": 452984832,
+   "sha256": "5a21dffe6c164e65d920daff7673c1b2b0bb47b3ea31189bd7036db585ab6bce",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_15.bin",
+   "bytes": 452984832,
+   "sha256": "8a86d9b3921bedec433e96754a36459c9b8fda119070eccc0d445bbeba3f1e4f",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_16.bin",
+   "bytes": 452984832,
+   "sha256": "7adbe321dc01354aec2161a44d3f91aeaf45a5c151f1d6eb026a20c0356870bf",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_17.bin",
+   "bytes": 452984832,
+   "sha256": "a1a31c6d4f88ccf7a4af376280276269ddfb9fb8f56eba805bc0ed41347b503b",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_18.bin",
+   "bytes": 452984832,
+   "sha256": "1b8f61596e9a85bc14ddce9f163308cb2dc1bb41804cdd00d82950fae1c571f8",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_19.bin",
+   "bytes": 452984832,
+   "sha256": "0399696d09238745019a5a35b321e05d0ab3f7caf52ca91ec16e398f12234248",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_20.bin",
+   "bytes": 452984832,
+   "sha256": "e69ab8f2448f7ca11440ffa8d0ff8e05efe2ea89357325ede2ef38d20092136a",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_21.bin",
+   "bytes": 452984832,
+   "sha256": "3b6eb44bb54e8b5c8008f969b46b20ac2fd1ea2f179443376218742b5a409ff1",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_22.bin",
+   "bytes": 452984832,
+   "sha256": "026276d97a9550aa14a9a3dd2de3249020b475939fde73ba36de48c20901c7ac",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_23.bin",
+   "bytes": 452984832,
+   "sha256": "a3820a788421d431ab7c82a151309e725ce46e1f79b93619f20e75c96ef69f02",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_24.bin",
+   "bytes": 452984832,
+   "sha256": "252c297b7a9176841f5d97dbf6bd295cccb8c750ad088fbe3b9c91c20dcce9e7",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_25.bin",
+   "bytes": 452984832,
+   "sha256": "550366c3704da07f28a62bac8175fff969c32ddb1eee69b2ea8bf151977d8d3c",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_26.bin",
+   "bytes": 452984832,
+   "sha256": "175ad4de34219912fc2ee9016fb831d204bdf969074d37bc86d0e969ce8e123d",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_27.bin",
+   "bytes": 452984832,
+   "sha256": "7fbb326122da01262935896f76c0967319896e2347ee15bccdd9e5e453b4b5a4",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_28.bin",
+   "bytes": 452984832,
+   "sha256": "7d78a41ea6c273f7957b8ab4a7ae1e7f279310be821bab66917d8854d58b6fa3",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_29.bin",
+   "bytes": 452984832,
+   "sha256": "fe14bcd5c35d44b9023447fd06c5c9f800f89d34428874ccf341df918d0dc3c9",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_30.bin",
+   "bytes": 452984832,
+   "sha256": "6a339896e2a9f0c9a1997e6bfe7752a90f2b999f71a49af590613a081005e66b",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_31.bin",
+   "bytes": 452984832,
+   "sha256": "c427025d3752ef3ec9c1eca79416691b5310af68dbf3eaf67f8d53e974f5f3a1",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_32.bin",
+   "bytes": 452984832,
+   "sha256": "a413f150351574bdc18885e800a6d6ec27a3e8a12be5528e2637dfdf543a39f8",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_33.bin",
+   "bytes": 452984832,
+   "sha256": "0a08599e3c79d8a4306ccce3ee34a2005ff86a4e3f38563ab920b9282ffa1533",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_34.bin",
+   "bytes": 452984832,
+   "sha256": "863001972428b628dfb2428e89f4c8ab84c48a0956f5fe5e9e36d94b958d7cdb",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_35.bin",
+   "bytes": 452984832,
+   "sha256": "cbdeefc310da8b1fd68b92bded27fc860d7422450a047b8a533089be53a95e42",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_36.bin",
+   "bytes": 452984832,
+   "sha256": "3b87132f908f1fc0d1f3e971b36a0bedb3c8448a7db5cd22c158bbccaed11b94",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_37.bin",
+   "bytes": 452984832,
+   "sha256": "44dcc1c5056030270aa78f669c1e7806b6b18c091ae819174d00aacfbd67d8fa",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_38.bin",
+   "bytes": 452984832,
+   "sha256": "53695a15f90842520205d059cccd6812572b4187559fcdef0986d52f89090c12",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/layer_39.bin",
+   "bytes": 452984832,
+   "sha256": "09e2a245604fa328eb0b2252b9c894545908e26017436bdf51a93a388fb1f461",
+   "role": "experts",
+   "precision": "aff4_g64"
+  },
+  {
+   "path": "store/meta.json",
+   "bytes": 2203,
+   "sha256": "3261c0ce90303d2d89369573d011cc3ebcdcf45538fc9bdf2c5aff8c42cee873",
+   "role": "meta",
+   "precision": "text"
+  },
+  {
+   "path": "tokenizer.json",
+   "bytes": 12807982,
+   "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "tokenizer_config.json",
+   "bytes": 9983,
+   "sha256": "a39230de929388c748904265340616449f3bdeeb324d99385c6243d0577f98ed",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "vocab.json",
+   "bytes": 6722759,
+   "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "draft/heads_lr_h2048.safetensors",
+   "bytes": 203736848,
+   "sha256": "9d1abec837a60be249c56e76773204053ea1a30a5291b0d9e37f5d3e549f7e5d",
+   "role": "draft_head",
+   "optional": true,
+   "precision": "bf16",
+   "experimental": true,
+   "note": "a trained draft head (low rank, hidden 2048) for dmeng --draft-light FILE; in no profile. Measured on a 16 GB Mac: output identical, draft 1 kept on 0.53-0.54 of steps, 1.00-1.08 tokens per step: no speed gain"
+  }
+ ],
+ "model": {
+  "hidden": 2048,
+  "vocab": 248320,
+  "physical_layers": 40,
+  "steps": 40,
+  "step_layer": null,
+  "step_pass": null,
+  "layer_types": "LLLFLLLFLLLFLLLFLLLFLLLFLLLFLLLFLLLFLLLF",
+  "layer_type_letters": {
+   "L": "Gated DeltaNet (linear attention)",
+   "F": "gated full attention"
+  },
+  "embedding": {
+   "file": "resident.safetensors",
+   "tensor": "model.language_model.embed_tokens.weight",
+   "dtype": "bf16"
+  }
+ },
+ "experts": {
+  "layer_file": "store/layer_{L:02d}.bin",
+  "experts_per_layer": 256,
+  "top_k": 8,
+  "router": "softmax_topk_renorm",
+  "route_scale": 1.0,
+  "shared_expert": true,
+  "activation": "swiglu",
+  "page": 16384,
+  "layer_format": "aff4_g64",
+  "formats": {
+   "aff4_g64": {
+    "kind": "affine",
+    "bits": 4,
+    "group": 64,
+    "record_bytes": 1769472,
+    "record_bytes_used": 1769472,
+    "matrices": [
+     {
+      "name": "gate",
+      "shape": [
+       512,
+       2048
+      ],
+      "codes": 0,
+      "scales": 524288,
+      "biases": 557056
+     },
+     {
+      "name": "up",
+      "shape": [
+       512,
+       2048
+      ],
+      "codes": 589824,
+      "scales": 1114112,
+      "biases": 1146880
+     },
+     {
+      "name": "down",
+      "shape": [
+       2048,
+       512
+      ],
+      "codes": 1179648,
+      "scales": 1703936,
+      "biases": 1736704
+     }
+    ],
+    "code_packing": "two per byte, element 2j in the low nibble of byte j",
+    "scale_dtype": "f16",
+    "bias_dtype": "f16",
+    "dequant": "w = code * scale + bias per group of 64 along the input"
+   }
+  }
+ },
+ "resident": {
+  "file": "resident.safetensors",
+  "precision": "bf16",
+  "q8_rule": {
+   "matrices": "every 2-D linear with >= 64 outputs and inputs % 64 == 0, except the released router",
+   "quantiser": "mlx_affine",
+   "bits": 8,
+   "group": 64,
+   "input_cast": "f16",
+   "scale_dtype": "f16",
+   "keep_exact": [
+    "mlp.gate",
+    "mlp.shared_expert_gate",
+    "linear_attn.in_proj_a",
+    "linear_attn.in_proj_b"
+   ],
+   "embedding": "not copied: one bf16 row per token is read from resident.safetensors"
+  }
+ },
+ "routers": [
+  {
+   "id": "mlp_k1_h512",
+   "path": "routers/mlp_k1_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 1,
+   "hidden": 512,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "q36_r_main",
+    "variant": "full_k1_h512",
+    "tokens": 120000000,
+    "data": "wikitext-103, FineWeb-Edu, UltraChat, code, agent transcripts (hermes, openhands, swesmith); see results/router_training.json data_cfg",
+    "objective": "KL(released softmax || router softmax) per layer",
+    "report": "results/router_training.json",
+    "exported_as": {
+     "file": "q36_router_full_k1_h512.npz",
+     "sha256": "63bf8a258a90fc459d3c4d1c8f3819e5460c2a947963cccb1819936440ec24e1"
+    }
+   }
+  },
+  {
+   "id": "mlp_k2_h512",
+   "path": "routers/mlp_k2_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 2,
+   "hidden": 512,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "q36_r_main",
+    "variant": "full_k2_h512",
+    "tokens": 120000000,
+    "data": "wikitext-103, FineWeb-Edu, UltraChat, code, agent transcripts (hermes, openhands, swesmith); see results/router_training.json data_cfg",
+    "objective": "KL(released softmax || router softmax) per layer",
+    "report": "results/router_training.json",
+    "exported_as": {
+     "file": "q36_router_full_k2_h512.npz",
+     "sha256": "c151e5821991455a62d2b5d7dbe87eeb238330ab7ae0f72bec56223128c816c7"
+    }
+   }
+  },
+  {
+   "id": "mlp_k3_h512",
+   "path": "routers/mlp_k3_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 3,
+   "hidden": 512,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "q36_r_main",
+    "variant": "full_k3_h512",
+    "tokens": 120000000,
+    "data": "wikitext-103, FineWeb-Edu, UltraChat, code, agent transcripts (hermes, openhands, swesmith); see results/router_training.json data_cfg",
+    "objective": "KL(released softmax || router softmax) per layer",
+    "report": "results/router_training.json",
+    "exported_as": {
+     "file": "q36_router_full_k3_h512.npz",
+     "sha256": "8cac54f194d81eff6626a4e8fec2a63d79cdf70b2a6a8b260e6f50dc7e107323"
+    }
+   }
+  },
+  {
+   "id": "mlp_k4_h512",
+   "path": "routers/mlp_k4_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 4,
+   "hidden": 512,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "q36_r_main",
+    "variant": "full_k4_h512",
+    "tokens": 120000000,
+    "data": "wikitext-103, FineWeb-Edu, UltraChat, code, agent transcripts (hermes, openhands, swesmith); see results/router_training.json data_cfg",
+    "objective": "KL(released softmax || router softmax) per layer",
+    "report": "results/router_training.json",
+    "exported_as": {
+     "file": "q36_router_full_k4_h512.npz",
+     "sha256": "a1e1dfffd8f1b7ee45f9c6c155c51ebe6cdd4229e502ad6d31ab981d8d012d46"
+    }
+   }
+  },
+  {
+   "id": "linear_k1",
+   "path": "routers/linear_k1.safetensors",
+   "default": false,
+   "form": "linear",
+   "lag": 1,
+   "hidden": 0,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": null,
+    "note": "linear routers from the Qwen3.6 draft-and-verify work; run and data not recorded in the npz",
+    "exported_as": {
+     "file": "q36_router_lin_k1_fp16.npz",
+     "sha256": "38ddb53e9340515198b58ed9264542b8948849793e4ca18e4d37a0b99d6c99ba"
+    }
+   }
+  },
+  {
+   "id": "linear_k2",
+   "path": "routers/linear_k2.safetensors",
+   "default": true,
+   "form": "linear",
+   "lag": 2,
+   "hidden": 0,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": null,
+    "note": "linear routers from the Qwen3.6 draft-and-verify work; run and data not recorded in the npz",
+    "exported_as": {
+     "file": "q36_router_lin_k2_fp16.npz",
+     "sha256": "4e656f2e21741b4952463d8f6ad7e5a3b77f34ce0d8eceb38060678d5e1effc2"
+    }
+   }
+  },
+  {
+   "id": "linear_k3",
+   "path": "routers/linear_k3.safetensors",
+   "default": false,
+   "form": "linear",
+   "lag": 3,
+   "hidden": 0,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": null,
+    "note": "linear routers from the Qwen3.6 draft-and-verify work; run and data not recorded in the npz",
+    "exported_as": {
+     "file": "q36_router_lin_k3_fp16.npz",
+     "sha256": "2c47b1e3b0a9e05c02865c6c56ba12616d55eecee59ba313d5874513fa434fc0"
+    }
+   }
+  },
+  {
+   "id": "linear_k4",
+   "path": "routers/linear_k4.safetensors",
+   "default": false,
+   "form": "linear",
+   "lag": 4,
+   "hidden": 0,
+   "index": "layer",
+   "targets": 40,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for targets t < lag",
+    "emb": "the embed_tokens row of the token (bf16 widened to f32)",
+    "h": "the MoE block input (post_attention_layernorm output); h_prev at target t for the previous token (zero at position 0), h_lag at target t - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias [+ mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias]; the top m of z name the experts of target t"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": null,
+    "note": "linear routers from the Qwen3.6 draft-and-verify work; run and data not recorded in the npz",
+    "exported_as": {
+     "file": "q36_router_lin_k4_fp16.npz",
+     "sha256": "dcacd94a0dfb2365ec9fa7d9edfec6acc1d37341d06fd8105ed8fa79bb94c7b1"
+    }
+   }
+  }
+ ],
+ "extras": {
+  "ngram": null,
+  "draft_head": null,
+  "vision": null
+ },
+ "derived": [
+  {
+   "id": "resident_q4",
+   "from": [
+    "resident.safetensors"
+   ],
+   "engine_format": "dmres1",
+   "bits": 4,
+   "sha256": "9bcb7685b1913e0beb251016abd6ee04c688323cce4c0f25c9a6182d992b06b9",
+   "variant_of": "resident_q8",
+   "optional": true,
+   "for": "memory-limited iPhones (the phone-small profile) only; tokens differ from the 8-bit set",
+   "made_by": "ms_derive resident DIR --bits 4 --from-calibrated FILE (calibrated 4-bit export, same tensors, size and layout as the plain set)",
+   "quality": "on the iPhone 15 Plus, top choice equal to the exact 8-bit engine on 0.913 / 0.884 of prose / agent-text positions in exact mode and 0.891 / 0.881 in fast (threshold 0.08), measured on the device; the plain set it replaces: 0.88 / 0.85 (Mac)",
+   "path": "derived/resident_q4.dmres1.a603e898ddee.bin",
+   "bytes": 1135001600
+  },
+  {
+   "id": "resident_q8",
+   "from": [
+    "resident.safetensors"
+   ],
+   "engine_format": "dmres1",
+   "sha256": "38911cd1999715bd09e3af4ca19ee6bc8187b9237bb653620f37a28d8bf0921b",
+   "reference": "local/q36/model/dmeng_resident.bin (engine/python/convert.py resident)",
+   "path": "derived/resident_q8.dmres1.a603e898ddee.bin",
+   "bytes": 2091827200
+  },
+  {
+   "id": "router.linear_k1.q8",
+   "from": [
+    "routers/linear_k1.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "2f68c7ad9e1ebb4f4a69399235e8e0ca6473f4a3a2787dee21f95cee5f7f9c7f",
+   "reference": "local/q36/model/routers/lin/q36_router_lin_k1.dmr (today's Python converter)"
+  },
+  {
+   "id": "router.linear_k2.q8",
+   "from": [
+    "routers/linear_k2.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "97f4e33a03c9d5bb910961cfab6b889b779843554553e5a6f73e5f974a9089d0",
+   "reference": "local/q36/model/routers/lin/q36_router_lin_k2.dmr (today's Python converter)",
+   "path": "derived/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+   "bytes": 68091904
+  },
+  {
+   "id": "router.linear_k3.q8",
+   "from": [
+    "routers/linear_k3.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "acf8bdbd4834c6baa9842866d244b146ee16f7fd392eb8d5cb538cf905612ea5",
+   "reference": "local/q36/model/routers/lin/q36_router_lin_k3.dmr (today's Python converter)"
+  },
+  {
+   "id": "router.linear_k4.q8",
+   "from": [
+    "routers/linear_k4.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "2fd00c2778b44cd8b24a929900ed5540c7be5d50457e6842ef57634b477af2d0",
+   "reference": "local/q36/model/routers/lin/q36_router_lin_k4.dmr (today's Python converter)"
+  },
+  {
+   "id": "router.mlp_k1_h512.q8",
+   "from": [
+    "routers/mlp_k1_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "46414b4f268a7a47ddbcde11806e0739342400eb2c566b5dc033b9639f547aa3",
+   "reference": "local/q36/model/routers/q36_router_full_k1_h512.dmr (today's Python converter)"
+  },
+  {
+   "id": "router.mlp_k2_h512.q8",
+   "from": [
+    "routers/mlp_k2_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "73c0e98d8f0e112d907ffd4227e0d5e8ce8098feff985a9b9374dbf5b97f22ee",
+   "reference": "local/q36/model/routers/q36_router_full_k2_h512.dmr (today's Python converter)"
+  },
+  {
+   "id": "router.mlp_k3_h512.q8",
+   "from": [
+    "routers/mlp_k3_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": null
+  },
+  {
+   "id": "router.mlp_k4_h512.q8",
+   "from": [
+    "routers/mlp_k4_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "ec34a89993500d69fb37739559bb8c2191a0fcf78fc5f8776d83ee4f36bbbe73",
+   "reference": "local/q36/model/routers/q36_router_full_k4_h512.dmr (today's Python converter)"
+  }
+ ],
+ "legacy": [
+  "routers/q36_router_full_k1_h512.npz",
+  "routers/q36_router_full_k2_h512.npz",
+  "routers/q36_router_full_k3_h512.npz",
+  "routers/q36_router_full_k4_h512.npz"
+ ],
+ "pending": [],
+ "unknown": [],
+ "generated": {
+  "by": "moved-store release tools, from the manifest of 2026-11-21 plus the new parts",
+  "date": "2026-11-22"
+ },
+ "modes": {
+  "exact": {
+   "definition": "Generated tokens never depend on the cache, the routers or timing: the model's own router picks 8 experts per layer and the engine waits for every one.",
+   "engine": "lossless"
+  },
+  "fast": {
+   "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
+   "engine": "approx:drop",
+   "wait_if": {
+    "routing_weight_over": 0.1,
+    "read_in_flight": true
+   },
+   "otherwise": "left out",
+   "substitute": false,
+   "renormalise": false
+  }
+ },
+ "profiles": {
+  "mac": {
+   "when": "macOS",
+   "mode": "exact",
+   "resident": "resident_q8",
+   "precision": "8-bit",
+   "precision_detail": "8-bit affine, groups of 64",
+   "names": {
+    "rule": "top",
+    "m": 8
+   },
+   "cache": "auto",
+   "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
+   "parts": [
+    {
+     "path": "config.json",
+     "bytes": 3686,
+     "sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99"
+    },
+    {
+     "path": "generation_config.json",
+     "bytes": 202,
+     "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"
+    },
+    {
+     "path": "tokenizer.json",
+     "bytes": 12807982,
+     "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+    },
+    {
+     "path": "tokenizer_config.json",
+     "bytes": 9983,
+     "sha256": "a39230de929388c748904265340616449f3bdeeb324d99385c6243d0577f98ed"
+    },
+    {
+     "path": "chat_template.jinja",
+     "bytes": 7816,
+     "sha256": "1b8361565cc35d47551d342214cff341c0f1a9685ce529c7ce31de0ed3616248"
+    },
+    {
+     "path": "LICENSE",
+     "bytes": 11343,
+     "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32"
+    },
+    {
+     "path": "embeddings.safetensors",
+     "bytes": 1017119224,
+     "sha256": "c920fdc76c37b4a77d24e7cfe0d010e9be17f3ab55ce2f9397e3ead4addfbd53"
+    },
+    {
+     "path": "derived/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+     "bytes": 68091904,
+     "sha256": "97f4e33a03c9d5bb910961cfab6b889b779843554553e5a6f73e5f974a9089d0"
+    },
+    {
+     "path": "store/layer_00.bin",
+     "bytes": 452984832,
+     "sha256": "f54b63a17b8a8fe2c2c9ce1af5b2b9069f2022f00be404da36c82ff49810ac76"
+    },
+    {
+     "path": "store/layer_01.bin",
+     "bytes": 452984832,
+     "sha256": "7f7dc3a1945c0239c5ec4b9142b67b7892c9ac3c39333ff76704e55f716492be"
+    },
+    {
+     "path": "store/layer_02.bin",
+     "bytes": 452984832,
+     "sha256": "5d191f9490a6b57902a70eb9acde2bec5d91615bc6b905a2f93e1dde0e94ad0b"
+    },
+    {
+     "path": "store/layer_03.bin",
+     "bytes": 452984832,
+     "sha256": "ebfaa43630086845ae9d253cc8bac0bb4e97d930e8359bf5790c54f6c9c26ed4"
+    },
+    {
+     "path": "store/layer_04.bin",
+     "bytes": 452984832,
+     "sha256": "96b5900c1f405581031b837acfa6c4ae142fc035cbc06984e856118efdffead3"
+    },
+    {
+     "path": "store/layer_05.bin",
+     "bytes": 452984832,
+     "sha256": "f1145b9ef596aa057c16c3302984c92b127a72a39a970f13fec3a75c5e0649fb"
+    },
+    {
+     "path": "store/layer_06.bin",
+     "bytes": 452984832,
+     "sha256": "659d8e5cfe338a604641bed211b9b313347d031ea251d1ff4f69005e6d0ec6dc"
+    },
+    {
+     "path": "store/layer_07.bin",
+     "bytes": 452984832,
+     "sha256": "4f40f04aed09c072e46cc3ea692deef9a7cf9825b0cf1884f873b91b67cc6dac"
+    },
+    {
+     "path": "store/layer_08.bin",
+     "bytes": 452984832,
+     "sha256": "8415bfef62bed668987fdafc9c180470dea96c14442f3f61293d8e7c7fa09e25"
+    },
+    {
+     "path": "store/layer_09.bin",
+     "bytes": 452984832,
+     "sha256": "9148ec15ff67e80ab1ad41ded9589965650c5681f8bc689db586feceefe15ae5"
+    },
+    {
+     "path": "store/layer_10.bin",
+     "bytes": 452984832,
+     "sha256": "27ff3a6aa1a10baf02254b55a1cf116dfbeada17b808269acd7b4fef2f1cade3"
+    },
+    {
+     "path": "store/layer_11.bin",
+     "bytes": 452984832,
+     "sha256": "a49468bcd0f95284c223c3ff6eed3cc9d91ad20de0cc9bd7aee1fe3ca4c3ad0e"
+    },
+    {
+     "path": "store/layer_12.bin",
+     "bytes": 452984832,
+     "sha256": "3b277edeb268640305169b53ff39cf01873b8ff0c37887dfa3ff7beabf9a9a9f"
+    },
+    {
+     "path": "store/layer_13.bin",
+     "bytes": 452984832,
+     "sha256": "64804df79fa9bd64c00f75d443ec4735cbd4bc81fe089ada715f726ba0dea17c"
+    },
+    {
+     "path": "store/layer_14.bin",
+     "bytes": 452984832,
+     "sha256": "5a21dffe6c164e65d920daff7673c1b2b0bb47b3ea31189bd7036db585ab6bce"
+    },
+    {
+     "path": "store/layer_15.bin",
+     "bytes": 452984832,
+     "sha256": "8a86d9b3921bedec433e96754a36459c9b8fda119070eccc0d445bbeba3f1e4f"
+    },
+    {
+     "path": "store/layer_16.bin",
+     "bytes": 452984832,
+     "sha256": "7adbe321dc01354aec2161a44d3f91aeaf45a5c151f1d6eb026a20c0356870bf"
+    },
+    {
+     "path": "store/layer_17.bin",
+     "bytes": 452984832,
+     "sha256": "a1a31c6d4f88ccf7a4af376280276269ddfb9fb8f56eba805bc0ed41347b503b"
+    },
+    {
+     "path": "store/layer_18.bin",
+     "bytes": 452984832,
+     "sha256": "1b8f61596e9a85bc14ddce9f163308cb2dc1bb41804cdd00d82950fae1c571f8"
+    },
+    {
+     "path": "store/layer_19.bin",
+     "bytes": 452984832,
+     "sha256": "0399696d09238745019a5a35b321e05d0ab3f7caf52ca91ec16e398f12234248"
+    },
+    {
+     "path": "store/layer_20.bin",
+     "bytes": 452984832,
+     "sha256": "e69ab8f2448f7ca11440ffa8d0ff8e05efe2ea89357325ede2ef38d20092136a"
+    },
+    {
+     "path": "store/layer_21.bin",
+     "bytes": 452984832,
+     "sha256": "3b6eb44bb54e8b5c8008f969b46b20ac2fd1ea2f179443376218742b5a409ff1"
+    },
+    {
+     "path": "store/layer_22.bin",
+     "bytes": 452984832,
+     "sha256": "026276d97a9550aa14a9a3dd2de3249020b475939fde73ba36de48c20901c7ac"
+    },
+    {
+     "path": "store/layer_23.bin",
+     "bytes": 452984832,
+     "sha256": "a3820a788421d431ab7c82a151309e725ce46e1f79b93619f20e75c96ef69f02"
+    },
+    {
+     "path": "store/layer_24.bin",
+     "bytes": 452984832,
+     "sha256": "252c297b7a9176841f5d97dbf6bd295cccb8c750ad088fbe3b9c91c20dcce9e7"
+    },
+    {
+     "path": "store/layer_25.bin",
+     "bytes": 452984832,
+     "sha256": "550366c3704da07f28a62bac8175fff969c32ddb1eee69b2ea8bf151977d8d3c"
+    },
+    {
+     "path": "store/layer_26.bin",
+     "bytes": 452984832,
+     "sha256": "175ad4de34219912fc2ee9016fb831d204bdf969074d37bc86d0e969ce8e123d"
+    },
+    {
+     "path": "store/layer_27.bin",
+     "bytes": 452984832,
+     "sha256": "7fbb326122da01262935896f76c0967319896e2347ee15bccdd9e5e453b4b5a4"
+    },
+    {
+     "path": "store/layer_28.bin",
+     "bytes": 452984832,
+     "sha256": "7d78a41ea6c273f7957b8ab4a7ae1e7f279310be821bab66917d8854d58b6fa3"
+    },
+    {
+     "path": "store/layer_29.bin",
+     "bytes": 452984832,
+     "sha256": "fe14bcd5c35d44b9023447fd06c5c9f800f89d34428874ccf341df918d0dc3c9"
+    },
+    {
+     "path": "store/layer_30.bin",
+     "bytes": 452984832,
+     "sha256": "6a339896e2a9f0c9a1997e6bfe7752a90f2b999f71a49af590613a081005e66b"
+    },
+    {
+     "path": "store/layer_31.bin",
+     "bytes": 452984832,
+     "sha256": "c427025d3752ef3ec9c1eca79416691b5310af68dbf3eaf67f8d53e974f5f3a1"
+    },
+    {
+     "path": "store/layer_32.bin",
+     "bytes": 452984832,
+     "sha256": "a413f150351574bdc18885e800a6d6ec27a3e8a12be5528e2637dfdf543a39f8"
+    },
+    {
+     "path": "store/layer_33.bin",
+     "bytes": 452984832,
+     "sha256": "0a08599e3c79d8a4306ccce3ee34a2005ff86a4e3f38563ab920b9282ffa1533"
+    },
+    {
+     "path": "store/layer_34.bin",
+     "bytes": 452984832,
+     "sha256": "863001972428b628dfb2428e89f4c8ab84c48a0956f5fe5e9e36d94b958d7cdb"
+    },
+    {
+     "path": "store/layer_35.bin",
+     "bytes": 452984832,
+     "sha256": "cbdeefc310da8b1fd68b92bded27fc860d7422450a047b8a533089be53a95e42"
+    },
+    {
+     "path": "store/layer_36.bin",
+     "bytes": 452984832,
+     "sha256": "3b87132f908f1fc0d1f3e971b36a0bedb3c8448a7db5cd22c158bbccaed11b94"
+    },
+    {
+     "path": "store/layer_37.bin",
+     "bytes": 452984832,
+     "sha256": "44dcc1c5056030270aa78f669c1e7806b6b18c091ae819174d00aacfbd67d8fa"
+    },
+    {
+     "path": "store/layer_38.bin",
+     "bytes": 452984832,
+     "sha256": "53695a15f90842520205d059cccd6812572b4187559fcdef0986d52f89090c12"
+    },
+    {
+     "path": "store/layer_39.bin",
+     "bytes": 452984832,
+     "sha256": "09e2a245604fa328eb0b2252b9c894545908e26017436bdf51a93a388fb1f461"
+    },
+    {
+     "path": "derived/resident_q8.dmres1.a603e898ddee.bin",
+     "bytes": 2091827200,
+     "sha256": "38911cd1999715bd09e3af4ca19ee6bc8187b9237bb653620f37a28d8bf0921b"
+    }
+   ],
+   "bytes": 21309272620,
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+  },
+  "phone": {
+   "when": "iOS with at least 5.0 GB available at open",
+   "mode": "exact",
+   "resident": "resident_q8",
+   "precision": "8-bit",
+   "precision_detail": "8-bit affine, groups of 64",
+   "names": {
+    "rule": "top",
+    "m": 8
+   },
+   "cache": "slab",
+   "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
+   "min_available_gb": 5.0,
+   "parts": [
+    {
+     "path": "config.json",
+     "bytes": 3686,
+     "sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99"
+    },
+    {
+     "path": "generation_config.json",
+     "bytes": 202,
+     "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"
+    },
+    {
+     "path": "tokenizer.json",
+     "bytes": 12807982,
+     "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+    },
+    {
+     "path": "tokenizer_config.json",
+     "bytes": 9983,
+     "sha256": "a39230de929388c748904265340616449f3bdeeb324d99385c6243d0577f98ed"
+    },
+    {
+     "path": "chat_template.jinja",
+     "bytes": 7816,
+     "sha256": "1b8361565cc35d47551d342214cff341c0f1a9685ce529c7ce31de0ed3616248"
+    },
+    {
+     "path": "LICENSE",
+     "bytes": 11343,
+     "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32"
+    },
+    {
+     "path": "embeddings.safetensors",
+     "bytes": 1017119224,
+     "sha256": "c920fdc76c37b4a77d24e7cfe0d010e9be17f3ab55ce2f9397e3ead4addfbd53"
+    },
+    {
+     "path": "derived/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+     "bytes": 68091904,
+     "sha256": "97f4e33a03c9d5bb910961cfab6b889b779843554553e5a6f73e5f974a9089d0"
+    },
+    {
+     "path": "store/layer_00.bin",
+     "bytes": 452984832,
+     "sha256": "f54b63a17b8a8fe2c2c9ce1af5b2b9069f2022f00be404da36c82ff49810ac76"
+    },
+    {
+     "path": "store/layer_01.bin",
+     "bytes": 452984832,
+     "sha256": "7f7dc3a1945c0239c5ec4b9142b67b7892c9ac3c39333ff76704e55f716492be"
+    },
+    {
+     "path": "store/layer_02.bin",
+     "bytes": 452984832,
+     "sha256": "5d191f9490a6b57902a70eb9acde2bec5d91615bc6b905a2f93e1dde0e94ad0b"
+    },
+    {
+     "path": "store/layer_03.bin",
+     "bytes": 452984832,
+     "sha256": "ebfaa43630086845ae9d253cc8bac0bb4e97d930e8359bf5790c54f6c9c26ed4"
+    },
+    {
+     "path": "store/layer_04.bin",
+     "bytes": 452984832,
+     "sha256": "96b5900c1f405581031b837acfa6c4ae142fc035cbc06984e856118efdffead3"
+    },
+    {
+     "path": "store/layer_05.bin",
+     "bytes": 452984832,
+     "sha256": "f1145b9ef596aa057c16c3302984c92b127a72a39a970f13fec3a75c5e0649fb"
+    },
+    {
+     "path": "store/layer_06.bin",
+     "bytes": 452984832,
+     "sha256": "659d8e5cfe338a604641bed211b9b313347d031ea251d1ff4f69005e6d0ec6dc"
+    },
+    {
+     "path": "store/layer_07.bin",
+     "bytes": 452984832,
+     "sha256": "4f40f04aed09c072e46cc3ea692deef9a7cf9825b0cf1884f873b91b67cc6dac"
+    },
+    {
+     "path": "store/layer_08.bin",
+     "bytes": 452984832,
+     "sha256": "8415bfef62bed668987fdafc9c180470dea96c14442f3f61293d8e7c7fa09e25"
+    },
+    {
+     "path": "store/layer_09.bin",
+     "bytes": 452984832,
+     "sha256": "9148ec15ff67e80ab1ad41ded9589965650c5681f8bc689db586feceefe15ae5"
+    },
+    {
+     "path": "store/layer_10.bin",
+     "bytes": 452984832,
+     "sha256": "27ff3a6aa1a10baf02254b55a1cf116dfbeada17b808269acd7b4fef2f1cade3"
+    },
+    {
+     "path": "store/layer_11.bin",
+     "bytes": 452984832,
+     "sha256": "a49468bcd0f95284c223c3ff6eed3cc9d91ad20de0cc9bd7aee1fe3ca4c3ad0e"
+    },
+    {
+     "path": "store/layer_12.bin",
+     "bytes": 452984832,
+     "sha256": "3b277edeb268640305169b53ff39cf01873b8ff0c37887dfa3ff7beabf9a9a9f"
+    },
+    {
+     "path": "store/layer_13.bin",
+     "bytes": 452984832,
+     "sha256": "64804df79fa9bd64c00f75d443ec4735cbd4bc81fe089ada715f726ba0dea17c"
+    },
+    {
+     "path": "store/layer_14.bin",
+     "bytes": 452984832,
+     "sha256": "5a21dffe6c164e65d920daff7673c1b2b0bb47b3ea31189bd7036db585ab6bce"
+    },
+    {
+     "path": "store/layer_15.bin",
+     "bytes": 452984832,
+     "sha256": "8a86d9b3921bedec433e96754a36459c9b8fda119070eccc0d445bbeba3f1e4f"
+    },
+    {
+     "path": "store/layer_16.bin",
+     "bytes": 452984832,
+     "sha256": "7adbe321dc01354aec2161a44d3f91aeaf45a5c151f1d6eb026a20c0356870bf"
+    },
+    {
+     "path": "store/layer_17.bin",
+     "bytes": 452984832,
+     "sha256": "a1a31c6d4f88ccf7a4af376280276269ddfb9fb8f56eba805bc0ed41347b503b"
+    },
+    {
+     "path": "store/layer_18.bin",
+     "bytes": 452984832,
+     "sha256": "1b8f61596e9a85bc14ddce9f163308cb2dc1bb41804cdd00d82950fae1c571f8"
+    },
+    {
+     "path": "store/layer_19.bin",
+     "bytes": 452984832,
+     "sha256": "0399696d09238745019a5a35b321e05d0ab3f7caf52ca91ec16e398f12234248"
+    },
+    {
+     "path": "store/layer_20.bin",
+     "bytes": 452984832,
+     "sha256": "e69ab8f2448f7ca11440ffa8d0ff8e05efe2ea89357325ede2ef38d20092136a"
+    },
+    {
+     "path": "store/layer_21.bin",
+     "bytes": 452984832,
+     "sha256": "3b6eb44bb54e8b5c8008f969b46b20ac2fd1ea2f179443376218742b5a409ff1"
+    },
+    {
+     "path": "store/layer_22.bin",
+     "bytes": 452984832,
+     "sha256": "026276d97a9550aa14a9a3dd2de3249020b475939fde73ba36de48c20901c7ac"
+    },
+    {
+     "path": "store/layer_23.bin",
+     "bytes": 452984832,
+     "sha256": "a3820a788421d431ab7c82a151309e725ce46e1f79b93619f20e75c96ef69f02"
+    },
+    {
+     "path": "store/layer_24.bin",
+     "bytes": 452984832,
+     "sha256": "252c297b7a9176841f5d97dbf6bd295cccb8c750ad088fbe3b9c91c20dcce9e7"
+    },
+    {
+     "path": "store/layer_25.bin",
+     "bytes": 452984832,
+     "sha256": "550366c3704da07f28a62bac8175fff969c32ddb1eee69b2ea8bf151977d8d3c"
+    },
+    {
+     "path": "store/layer_26.bin",
+     "bytes": 452984832,
+     "sha256": "175ad4de34219912fc2ee9016fb831d204bdf969074d37bc86d0e969ce8e123d"
+    },
+    {
+     "path": "store/layer_27.bin",
+     "bytes": 452984832,
+     "sha256": "7fbb326122da01262935896f76c0967319896e2347ee15bccdd9e5e453b4b5a4"
+    },
+    {
+     "path": "store/layer_28.bin",
+     "bytes": 452984832,
+     "sha256": "7d78a41ea6c273f7957b8ab4a7ae1e7f279310be821bab66917d8854d58b6fa3"
+    },
+    {
+     "path": "store/layer_29.bin",
+     "bytes": 452984832,
+     "sha256": "fe14bcd5c35d44b9023447fd06c5c9f800f89d34428874ccf341df918d0dc3c9"
+    },
+    {
+     "path": "store/layer_30.bin",
+     "bytes": 452984832,
+     "sha256": "6a339896e2a9f0c9a1997e6bfe7752a90f2b999f71a49af590613a081005e66b"
+    },
+    {
+     "path": "store/layer_31.bin",
+     "bytes": 452984832,
+     "sha256": "c427025d3752ef3ec9c1eca79416691b5310af68dbf3eaf67f8d53e974f5f3a1"
+    },
+    {
+     "path": "store/layer_32.bin",
+     "bytes": 452984832,
+     "sha256": "a413f150351574bdc18885e800a6d6ec27a3e8a12be5528e2637dfdf543a39f8"
+    },
+    {
+     "path": "store/layer_33.bin",
+     "bytes": 452984832,
+     "sha256": "0a08599e3c79d8a4306ccce3ee34a2005ff86a4e3f38563ab920b9282ffa1533"
+    },
+    {
+     "path": "store/layer_34.bin",
+     "bytes": 452984832,
+     "sha256": "863001972428b628dfb2428e89f4c8ab84c48a0956f5fe5e9e36d94b958d7cdb"
+    },
+    {
+     "path": "store/layer_35.bin",
+     "bytes": 452984832,
+     "sha256": "cbdeefc310da8b1fd68b92bded27fc860d7422450a047b8a533089be53a95e42"
+    },
+    {
+     "path": "store/layer_36.bin",
+     "bytes": 452984832,
+     "sha256": "3b87132f908f1fc0d1f3e971b36a0bedb3c8448a7db5cd22c158bbccaed11b94"
+    },
+    {
+     "path": "store/layer_37.bin",
+     "bytes": 452984832,
+     "sha256": "44dcc1c5056030270aa78f669c1e7806b6b18c091ae819174d00aacfbd67d8fa"
+    },
+    {
+     "path": "store/layer_38.bin",
+     "bytes": 452984832,
+     "sha256": "53695a15f90842520205d059cccd6812572b4187559fcdef0986d52f89090c12"
+    },
+    {
+     "path": "store/layer_39.bin",
+     "bytes": 452984832,
+     "sha256": "09e2a245604fa328eb0b2252b9c894545908e26017436bdf51a93a388fb1f461"
+    },
+    {
+     "path": "derived/resident_q8.dmres1.a603e898ddee.bin",
+     "bytes": 2091827200,
+     "sha256": "38911cd1999715bd09e3af4ca19ee6bc8187b9237bb653620f37a28d8bf0921b"
+    }
+   ],
+   "bytes": 21309272620,
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+  },
+  "phone-small": {
+   "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
+   "mode": "fast",
+   "resident": "resident_q4",
+   "precision": "4-bit",
+   "precision_detail": "4-bit affine, groups of 64, calibrated",
+   "names": {
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
+   },
+   "cache": "slab",
+   "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
+   "parts": [
+    {
+     "path": "config.json",
+     "bytes": 3686,
+     "sha256": "93a4693fa9d8392fbfccd4b3c9873f4bfdcb14fdede978b123d07d19675efe99"
+    },
+    {
+     "path": "generation_config.json",
+     "bytes": 202,
+     "sha256": "e70c136c1b78ddc1fb0905bac8e733a4dc448d4f852a5dd75143fffc70be550e"
+    },
+    {
+     "path": "tokenizer.json",
+     "bytes": 12807982,
+     "sha256": "5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42"
+    },
+    {
+     "path": "tokenizer_config.json",
+     "bytes": 9983,
+     "sha256": "a39230de929388c748904265340616449f3bdeeb324d99385c6243d0577f98ed"
+    },
+    {
+     "path": "chat_template.jinja",
+     "bytes": 7816,
+     "sha256": "1b8361565cc35d47551d342214cff341c0f1a9685ce529c7ce31de0ed3616248"
+    },
+    {
+     "path": "LICENSE",
+     "bytes": 11343,
+     "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32"
+    },
+    {
+     "path": "embeddings.safetensors",
+     "bytes": 1017119224,
+     "sha256": "c920fdc76c37b4a77d24e7cfe0d010e9be17f3ab55ce2f9397e3ead4addfbd53"
+    },
+    {
+     "path": "derived/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
+     "bytes": 68091904,
+     "sha256": "97f4e33a03c9d5bb910961cfab6b889b779843554553e5a6f73e5f974a9089d0"
+    },
+    {
+     "path": "store/layer_00.bin",
+     "bytes": 452984832,
+     "sha256": "f54b63a17b8a8fe2c2c9ce1af5b2b9069f2022f00be404da36c82ff49810ac76"
+    },
+    {
+     "path": "store/layer_01.bin",
+     "bytes": 452984832,
+     "sha256": "7f7dc3a1945c0239c5ec4b9142b67b7892c9ac3c39333ff76704e55f716492be"
+    },
+    {
+     "path": "store/layer_02.bin",
+     "bytes": 452984832,
+     "sha256": "5d191f9490a6b57902a70eb9acde2bec5d91615bc6b905a2f93e1dde0e94ad0b"
+    },
+    {
+     "path": "store/layer_03.bin",
+     "bytes": 452984832,
+     "sha256": "ebfaa43630086845ae9d253cc8bac0bb4e97d930e8359bf5790c54f6c9c26ed4"
+    },
+    {
+     "path": "store/layer_04.bin",
+     "bytes": 452984832,
+     "sha256": "96b5900c1f405581031b837acfa6c4ae142fc035cbc06984e856118efdffead3"
+    },
+    {
+     "path": "store/layer_05.bin",
+     "bytes": 452984832,
+     "sha256": "f1145b9ef596aa057c16c3302984c92b127a72a39a970f13fec3a75c5e0649fb"
+    },
+    {
+     "path": "store/layer_06.bin",
+     "bytes": 452984832,
+     "sha256": "659d8e5cfe338a604641bed211b9b313347d031ea251d1ff4f69005e6d0ec6dc"
+    },
+    {
+     "path": "store/layer_07.bin",
+     "bytes": 452984832,
+     "sha256": "4f40f04aed09c072e46cc3ea692deef9a7cf9825b0cf1884f873b91b67cc6dac"
+    },
+    {
+     "path": "store/layer_08.bin",
+     "bytes": 452984832,
+     "sha256": "8415bfef62bed668987fdafc9c180470dea96c14442f3f61293d8e7c7fa09e25"
+    },
+    {
+     "path": "store/layer_09.bin",
+     "bytes": 452984832,
+     "sha256": "9148ec15ff67e80ab1ad41ded9589965650c5681f8bc689db586feceefe15ae5"
+    },
+    {
+     "path": "store/layer_10.bin",
+     "bytes": 452984832,
+     "sha256": "27ff3a6aa1a10baf02254b55a1cf116dfbeada17b808269acd7b4fef2f1cade3"
+    },
+    {
+     "path": "store/layer_11.bin",
+     "bytes": 452984832,
+     "sha256": "a49468bcd0f95284c223c3ff6eed3cc9d91ad20de0cc9bd7aee1fe3ca4c3ad0e"
+    },
+    {
+     "path": "store/layer_12.bin",
+     "bytes": 452984832,
+     "sha256": "3b277edeb268640305169b53ff39cf01873b8ff0c37887dfa3ff7beabf9a9a9f"
+    },
+    {
+     "path": "store/layer_13.bin",
+     "bytes": 452984832,
+     "sha256": "64804df79fa9bd64c00f75d443ec4735cbd4bc81fe089ada715f726ba0dea17c"
+    },
+    {
+     "path": "store/layer_14.bin",
+     "bytes": 452984832,
+     "sha256": "5a21dffe6c164e65d920daff7673c1b2b0bb47b3ea31189bd7036db585ab6bce"
+    },
+    {
+     "path": "store/layer_15.bin",
+     "bytes": 452984832,
+     "sha256": "8a86d9b3921bedec433e96754a36459c9b8fda119070eccc0d445bbeba3f1e4f"
+    },
+    {
+     "path": "store/layer_16.bin",
+     "bytes": 452984832,
+     "sha256": "7adbe321dc01354aec2161a44d3f91aeaf45a5c151f1d6eb026a20c0356870bf"
+    },
+    {
+     "path": "store/layer_17.bin",
+     "bytes": 452984832,
+     "sha256": "a1a31c6d4f88ccf7a4af376280276269ddfb9fb8f56eba805bc0ed41347b503b"
+    },
+    {
+     "path": "store/layer_18.bin",
+     "bytes": 452984832,
+     "sha256": "1b8f61596e9a85bc14ddce9f163308cb2dc1bb41804cdd00d82950fae1c571f8"
+    },
+    {
+     "path": "store/layer_19.bin",
+     "bytes": 452984832,
+     "sha256": "0399696d09238745019a5a35b321e05d0ab3f7caf52ca91ec16e398f12234248"
+    },
+    {
+     "path": "store/layer_20.bin",
+     "bytes": 452984832,
+     "sha256": "e69ab8f2448f7ca11440ffa8d0ff8e05efe2ea89357325ede2ef38d20092136a"
+    },
+    {
+     "path": "store/layer_21.bin",
+     "bytes": 452984832,
+     "sha256": "3b6eb44bb54e8b5c8008f969b46b20ac2fd1ea2f179443376218742b5a409ff1"
+    },
+    {
+     "path": "store/layer_22.bin",
+     "bytes": 452984832,
+     "sha256": "026276d97a9550aa14a9a3dd2de3249020b475939fde73ba36de48c20901c7ac"
+    },
+    {
+     "path": "store/layer_23.bin",
+     "bytes": 452984832,
+     "sha256": "a3820a788421d431ab7c82a151309e725ce46e1f79b93619f20e75c96ef69f02"
+    },
+    {
+     "path": "store/layer_24.bin",
+     "bytes": 452984832,
+     "sha256": "252c297b7a9176841f5d97dbf6bd295cccb8c750ad088fbe3b9c91c20dcce9e7"
+    },
+    {
+     "path": "store/layer_25.bin",
+     "bytes": 452984832,
+     "sha256": "550366c3704da07f28a62bac8175fff969c32ddb1eee69b2ea8bf151977d8d3c"
+    },
+    {
+     "path": "store/layer_26.bin",
+     "bytes": 452984832,
+     "sha256": "175ad4de34219912fc2ee9016fb831d204bdf969074d37bc86d0e969ce8e123d"
+    },
+    {
+     "path": "store/layer_27.bin",
+     "bytes": 452984832,
+     "sha256": "7fbb326122da01262935896f76c0967319896e2347ee15bccdd9e5e453b4b5a4"
+    },
+    {
+     "path": "store/layer_28.bin",
+     "bytes": 452984832,
+     "sha256": "7d78a41ea6c273f7957b8ab4a7ae1e7f279310be821bab66917d8854d58b6fa3"
+    },
+    {
+     "path": "store/layer_29.bin",
+     "bytes": 452984832,
+     "sha256": "fe14bcd5c35d44b9023447fd06c5c9f800f89d34428874ccf341df918d0dc3c9"
+    },
+    {
+     "path": "store/layer_30.bin",
+     "bytes": 452984832,
+     "sha256": "6a339896e2a9f0c9a1997e6bfe7752a90f2b999f71a49af590613a081005e66b"
+    },
+    {
+     "path": "store/layer_31.bin",
+     "bytes": 452984832,
+     "sha256": "c427025d3752ef3ec9c1eca79416691b5310af68dbf3eaf67f8d53e974f5f3a1"
+    },
+    {
+     "path": "store/layer_32.bin",
+     "bytes": 452984832,
+     "sha256": "a413f150351574bdc18885e800a6d6ec27a3e8a12be5528e2637dfdf543a39f8"
+    },
+    {
+     "path": "store/layer_33.bin",
+     "bytes": 452984832,
+     "sha256": "0a08599e3c79d8a4306ccce3ee34a2005ff86a4e3f38563ab920b9282ffa1533"
+    },
+    {
+     "path": "store/layer_34.bin",
+     "bytes": 452984832,
+     "sha256": "863001972428b628dfb2428e89f4c8ab84c48a0956f5fe5e9e36d94b958d7cdb"
+    },
+    {
+     "path": "store/layer_35.bin",
+     "bytes": 452984832,
+     "sha256": "cbdeefc310da8b1fd68b92bded27fc860d7422450a047b8a533089be53a95e42"
+    },
+    {
+     "path": "store/layer_36.bin",
+     "bytes": 452984832,
+     "sha256": "3b87132f908f1fc0d1f3e971b36a0bedb3c8448a7db5cd22c158bbccaed11b94"
+    },
+    {
+     "path": "store/layer_37.bin",
+     "bytes": 452984832,
+     "sha256": "44dcc1c5056030270aa78f669c1e7806b6b18c091ae819174d00aacfbd67d8fa"
+    },
+    {
+     "path": "store/layer_38.bin",
+     "bytes": 452984832,
+     "sha256": "53695a15f90842520205d059cccd6812572b4187559fcdef0986d52f89090c12"
+    },
+    {
+     "path": "store/layer_39.bin",
+     "bytes": 452984832,
+     "sha256": "09e2a245604fa328eb0b2252b9c894545908e26017436bdf51a93a388fb1f461"
+    },
+    {
+     "path": "derived/resident_q4.dmres1.a603e898ddee.bin",
+     "bytes": 1135001600,
+     "sha256": "9bcb7685b1913e0beb251016abd6ee04c688323cce4c0f25c9a6182d992b06b9"
+    }
+   ],
+   "bytes": 20352447020,
+   "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast (threshold 0.08) 0.891 / 0.881",
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+  }
+ },
+ "defaults": {
+  "routers": [
+   "linear_k2"
+  ],
+  "names": {
+   "rule": "top",
+   "m": 8
+  },
+  "cross_token": null,
+  "eviction": "auto",
+  "drafts": false,
+  "experts": "aff4_g64: our 4-bit affine, groups of 64 (store/)",
+  "notes": {
+   "routers": "linear_k2 names experts 2 layers early; its engine file is derived/router.linear_k2.q8...bin",
+   "names": "top 8 on mac and phone; phone-small overrides it with the confidence rule (tau 0.5, 16 candidates)",
+   "cross_token": "none yet",
+   "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
+   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only)"
+  }
+ },
+ "layout": {
+  "derived_dir": "derived/",
+  "engine_cache_dir": ".dmeng/",
+  "rule": "engine-ready files are in derived/ under the engine's own names (<id>.<engine_format>.<first 12 hex of the source part's sha256>.bin); the engine looks for them in DIR/derived/ as well as DIR/.dmeng/ and derives what is missing into DIR/.dmeng/",
+  "profile_rule": "the engine picks the profile from the device; --profile NAME overrides it, --mode exact|fast overrides the profile's mode"
+ }
+}

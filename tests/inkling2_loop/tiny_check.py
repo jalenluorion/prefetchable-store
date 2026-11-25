@@ -1,15 +1,16 @@
-"""Check 1: dmeng on the tiny random Inkling (INK_TINY: 12 layers, loop 4-7 x 3, NVFP4 0-9 / MXFP8 10-11, 16
-experts top-4) against the PR's MLX model (mlx-lm PR 2086, the tiny RELEASE through mlx_lm.utils.load_model), teacher-forced
-over test_run.py's 40 random tokens (and its 300-token long case), token by token.
+"""dmeng on the tiny random Inkling (tests/inkling2_loop/make_tiny.py: 12 layers, loop 4-7 x 3, NVFP4 0-9 / MXFP8 10-11,
+16 experts top-4) against the PR's MLX model (mlx-lm PR 2086, the tiny RELEASE through mlx_lm.utils.load_model),
+teacher-forced over 40 random tokens (and a 300-token long case), token by token.
 
-  INK_TINY=<folder with release/ and model/> INK_RES0=<bf16 resident> INK_RES8=<8-bit resident> \
-      python tests/inkling2_loop/tiny_check.py     (DMENG_BIN, TINY_OUT override the binary and the output folder;
-      DMENG_OLD_FLAGS=1 drives a binary with the research tree's flag names)
+  TINY=<OUT of make_tiny.py> python tests/inkling2_loop/tiny_check.py     (python: mlx, mlx-lm with the PR, numpy)
+  (DMENG_BIN, TINY_OUT override the binary and the output folder; INK_RES0 / INK_RES8 other resident files; by default
+  the bf16 resident is derived here by python/derive/inkling2_loop.py --bits 0 and the 8-bit one is the engine's own,
+  MODEL/.dmeng/resident_q8.*; DMENG_OLD_FLAGS=1 drives a binary with the research tree's flag names)
 
 Tolerances are test_run.py's: on DIFFERENT code paths in float32 the PR's own 1e-4; the same arithmetic must be exact.
   A. dmeng --prec f32 (fp32 activations, scalar reference kernels), resident as released  vs  PR float32         tol 1e-4
-  B. dmeng --prec f32, 8-bit resident (the same codes as mlx_run.py's resident_q8)  vs  PR float32 with those same
-     8-bit codes loaded (nn.quantize structure, scales/biases from the cache, cast to float32)                     tol 1e-4
+  B. dmeng --prec f32, the engine's 8-bit resident  vs  PR float32 with the same rule's 8-bit codes (the manifest's
+     q8_rule: nn.quantize of the bf16 projections and head, group 64, scales and biases cast to float32)          tol 1e-4
   C. the speed path: dmeng --prec i16, 8-bit resident vs B's reference (I16 activations: reported, the q36 analogue)
   D. dmeng logits identical across expert budgets (every expert held / few slots with evictions and re-reads, with and
      without the loop hold) and with the oracle replaying the routing at leads 1, 2, 4 and token                   exact
@@ -22,14 +23,20 @@ import mlx.core as mx
 import mlx.nn as nn
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-INK = os.environ["INK_TINY"]
+INK = os.environ.get("TINY") or os.environ["INK_TINY"]
 REL, MOD = os.path.join(INK, "release"), os.path.join(INK, "model")
 BIN = os.environ.get("DMENG_BIN", os.path.join(REPO, "build", "dmeng"))
-RES0, RES8 = os.environ["INK_RES0"], os.environ["INK_RES8"]
 OUT = os.environ.get("TINY_OUT", os.path.join(REPO, "build", "tests", "inkling2_loop"))
 OLD = os.environ.get("DMENG_OLD_FLAGS") == "1"
 os.makedirs(OUT, exist_ok=True)
 TMP = tempfile.mkdtemp()
+RES8 = os.environ.get("INK_RES8") or os.path.join(MOD, ".dmeng", sorted(f for f in os.listdir(os.path.join(MOD, ".dmeng")) if f.startswith("resident_q8."))[-1])
+RES0 = os.environ.get("INK_RES0")
+if not RES0:  # the release's bf16 matrices in the engine's format (the exact reference path's resident)
+    RES0 = os.path.join(TMP, "resident_b0.bin")
+    r = subprocess.run([sys.executable, os.path.join(REPO, "python", "derive", "inkling2_loop.py"), MOD, "--bits", "0", "--out", RES0], capture_output=True, text=True)
+    if r.returncode:
+        raise SystemExit(f"python/derive/inkling2_loop.py --bits 0 failed:\n{r.stdout}\n{r.stderr}")
 from mlx_lm.utils import load_model  # noqa: E402
 
 cfg = json.load(open(os.path.join(MOD, "config.json")))["text_config"]
@@ -45,12 +52,9 @@ def say(s):
 
 def pr_model(q8=False):
     m, _ = load_model(Path(REL))
-    m.set_dtype(mx.float32)
-    if q8:  # the 8-bit codes of mlx_run.py's cache, computed in float32
+    if q8:  # the manifest's q8_rule on the bf16 weights (what the engine's derived file holds), then computed in float32
         nn.quantize(m, group_size=64, bits=8, class_predicate=lambda p, x: isinstance(x, nn.Linear) and (p == "lm_head" or (p.startswith("model.language_model.") and p.endswith(QPATHS))))
-        w = mx.load(os.path.join(MOD, "resident_q8.safetensors"))
-        w = {k: (v.astype(mx.float32) if k.endswith((".scales", ".biases")) else v) for k, v in w.items() if k.endswith((".scales", ".biases", ".weight")) and (k.startswith("lm_head") or any(k.startswith(f"model.language_model.layers.{L}.{q}.") for L in range(cfg["num_hidden_layers"]) for q in QPATHS))}
-        m.load_weights(list(w.items()), strict=False)
+    m.set_dtype(mx.float32)
     mx.eval(m.parameters())
     return m
 
@@ -124,7 +128,7 @@ got_i, _ = dmeng(ids40, "--resident", RES0, "--prec", "i16", *ALL, name="a40i")
 compare("A' i16 activations, bf16 resident (info)", got_i, ref40, None)
 del m32
 
-say("== B. 8-bit resident (mlx_run.py's codes), fp32 activations, vs the PR in float32 with the same codes")
+say("== B. the engine's 8-bit resident, fp32 activations, vs the PR in float32 with the same rule's codes")
 mq = pr_model(q8=True)
 refq = pr_logits(mq, ids40)
 got_q, _ = dmeng(ids40, "--resident", RES8, "--prec", "f32", *ALL, name="b40")

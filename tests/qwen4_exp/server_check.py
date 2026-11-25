@@ -3,13 +3,13 @@ through python/serve/qwen4_exp/chat_format.py) in front of the engine's worker (
 Checks /v1/models, a chat completion with tools, the same request streamed (the same text), and a follow-up turn whose
 prompt extends the first (its prefix comes from the cache: the log's reused positions).
 
-  FLASH_TINY=<OUT of make_tiny.py> python tests/qwen4_exp/server_check.py     (python: tokenizers, jinja2)
+  TINY=<OUT of make_tiny.py> python tests/qwen4_exp/server_check.py     (python: tokenizers, jinja2)
 """
 import json, os, signal, socket, subprocess, sys, tempfile, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-MOD = os.path.join(os.environ["FLASH_TINY"], "model")
+MOD = os.path.join(os.environ.get("TINY") or os.environ["FLASH_TINY"], "model")
 TMP = tempfile.mkdtemp()
 s = socket.socket()
 s.bind(("127.0.0.1", 0))

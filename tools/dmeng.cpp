@@ -523,54 +523,60 @@ int main(int argc, char** argv) {
   }
   if (!a.prompt_text.empty()) return run_text(a, argc, argv);
   std::string err;
-  // ---- the profile's defaults: each fills only what the command line leaves unset
+  // ---- the settings: explicit options > the profile > the manifest's defaults > dmeng's own values (resolve_run, the
+  // resolver dmserve and the C API use too)
   auto has = [&](const char* f) { return a.given.count(f) > 0; };
-  Preset P;
-  if (a.profile != "none" && !resolve_preset(a.model, a.profile, has("--mode") ? a.mode : "", "", -1, P, err)) return die("profile", err);
-  const bool profiled = a.profile != "none" && P.profile != "none";
-  if (profiled) {
-    for (auto& n : P.notes) fprintf(stderr, "dmeng: %s\n", n.c_str());
-    if (a.print_defaults) {
-      printf("%s\n", P.json().c_str());
-      return 0;
-    }
-    a.mode = P.engine_mode;
-    if (!has("--resident") && !P.resident.empty()) a.resident = P.resident;
-    const bool addr_given = has("--prefetch") || has("--routers") || has("--xtok") || has("--oracle") || has("--plan-routers");
-    if (!addr_given && !P.routers.empty()) {
-      a.prefetch = "router";
-      a.routers = P.routers;
-      names_rule(P, true, has("--m"), a.m, has("--rt-tau"), a.rt_tau, has("--rt-cand"), a.rt_cand, a.m, a.rt_tau, a.rt_cand);
-    }
-    if (!addr_given && !P.xtok.empty()) {
-      a.xtok = P.xtok;
-      if (!has("--xtok-tau")) a.xtok_tau = P.xtok_tau;
-      if (!has("--rd-prio") && P.rd_prio) a.rd_prio = 1;
-    }
-    if (!has("--evict")) a.evict = P.evict;
-    if (!has("--layer-caps") && !P.layer_caps.empty()) a.layer_caps = P.layer_caps;
-    if (!has("--cache-gb")) a.cache_auto = true;
-    if (!has("--prefill-chunk") && a.record.empty()) a.prefill_chunk = 512;
-    if (!has("--prefill-gpu-frac")) a.prefill_gpu_frac = P.gpu_frac;
-    if (!has("--prefill-gpu-experts")) a.prefill_gpu_experts = P.gpu_experts;
-    if (!has("--run-ahead")) a.run_ahead = P.run_ahead;
-    if (!has("--run-ahead-depth")) a.run_ahead_depth = P.run_ahead_depth;
-    if (!has("--run-ahead-budget")) a.ra_budget = P.ra_budget;
-    if (!has("--readers") && P.readers > 0) a.readers = P.readers;
-    if (!has("--bg-ranks")) a.bg_ranks = P.bg_ranks;
-    if (!has("--bg-gate")) a.bg_gate = P.bg_gate;
-    if (!has("--run-ahead-max")) a.ra_max = P.ra_max_tok;
-    if (!has("--run-ahead-sat-skip")) a.ra_sat = P.ra_sat_skip ? 1 : 0;
-    if (a.drafts < 0) a.drafts = P.drafts ? 1 : 0;
-  } else {
-    if (a.print_defaults) {
-      printf("null\n");
-      return 0;
-    }
-    a.mode = engine_mode_of(a.mode);
+  Given g;
+  if (has("--mode")) g.mode = a.mode;
+  if (has("--resident")) g.resident = a.resident;
+  if (has("--routers")) g.routers = a.routers.empty() ? "none" : a.routers;
+  if (has("--xtok")) g.xtok = a.xtok.empty() ? "none" : a.xtok;
+  g.other_address = has("--prefetch") || has("--oracle") || has("--plan-routers");
+  if (has("--m")) g.m = a.m;
+  if (has("--rt-tau")) g.tau = a.rt_tau;
+  if (has("--rt-cand")) g.cand = a.rt_cand;
+  if (has("--xtok-tau")) g.xtok_tau = a.xtok_tau;
+  if (has("--rd-prio")) g.rd_prio = a.rd_prio != 0;
+  if (has("--evict")) g.evict = a.evict;
+  if (has("--layer-caps")) g.layer_caps = a.layer_caps;
+  if (has("--cache-gb") && a.cache_auto) g.cache_auto = true;
+  else if (has("--cache-gb")) g.cache_gb = a.cache_gb;
+  if (has("--prefill-gpu-frac")) g.gpu_frac = a.prefill_gpu_frac;
+  if (has("--prefill-gpu-experts")) g.gpu_experts = a.prefill_gpu_experts;
+  g.gpu_off = a.prefill_gpu_off;
+  if (has("--prefill-chunk")) g.prefill_chunk = a.prefill_chunk;
+  g.recording = !a.record.empty();
+  if (has("--run-ahead")) g.run_ahead = a.run_ahead;
+  if (has("--run-ahead-depth")) g.run_ahead_depth = a.run_ahead_depth;
+  if (has("--run-ahead-budget")) g.ra_budget = a.ra_budget;
+  if (has("--run-ahead-max")) g.ra_max_tok = a.ra_max;
+  if (has("--run-ahead-sat-skip")) g.ra_sat_skip = a.ra_sat != 0;
+  if (has("--readers")) g.readers = a.readers;
+  if (has("--bg-ranks")) g.bg_ranks = a.bg_ranks;
+  if (has("--bg-gate")) g.bg_gate = a.bg_gate;
+  if (a.drafts >= 0) g.drafts = a.drafts;
+  RunOpts ro;  // dmeng's own values where nothing else sets one
+  ro.mode = a.mode, ro.m = a.m, ro.tau = a.rt_tau, ro.cand = a.rt_cand, ro.xtok_tau = a.xtok_tau, ro.rd_prio = a.rd_prio, ro.evict = a.evict;
+  ro.cache = a.cache_auto ? "auto" : "fixed", ro.cache_gb = a.cache_gb, ro.readers = a.readers, ro.prefill_chunk = a.prefill_chunk;
+  if (!resolve_run(a.model, a.profile, g, "", -1, ro, err)) return die("profile", err);
+  const Preset& P = ro.preset;
+  const bool profiled = ro.profiled;
+  for (auto& n : ro.notes) fprintf(stderr, "dmeng: %s\n", n.c_str());
+  if (a.print_defaults) {
+    printf("%s\n", profiled ? P.json().c_str() : "null");
+    return 0;
   }
-  if (a.prefill_gpu_off) a.prefill_gpu_frac = a.prefill_gpu_experts = 0;
-  if (has("--routers") && !has("--prefetch") && a.routers != "none" && !a.routers.empty()) a.prefetch = "router";  // named routers name
+  a.mode = ro.mode;
+  a.resident = ro.resident;
+  a.routers = ro.routers;
+  a.xtok = ro.xtok;
+  if (ro.routers_from_profile || (has("--routers") && !has("--prefetch") && !ro.routers.empty())) a.prefetch = "router";  // named routers name
+  a.m = ro.m, a.rt_tau = ro.tau, a.rt_cand = ro.cand, a.xtok_tau = ro.xtok_tau, a.rd_prio = ro.rd_prio;
+  a.evict = ro.evict, a.layer_caps = ro.layer_caps;
+  a.cache_auto = ro.cache != "fixed", a.cache_gb = ro.cache_gb;  // (dmeng is a macOS tool: slab, the iPhone rule, is the automatic one here)
+  a.prefill_gpu_frac = ro.gpu_frac, a.prefill_gpu_experts = ro.gpu_experts, a.prefill_chunk = ro.prefill_chunk;
+  a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
+  a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts;
   LoadOpts lo;
   std::string family;
   if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings, profiled ? P.profile : ""))
@@ -803,6 +809,8 @@ int main(int argc, char** argv) {
   const bool use_lookup = a.draft == "lookup" || a.draft == "fixed" || a.draft == "both";
   const bool use_head = a.draft == "head" || a.draft == "both" || !a.draft_check.empty();
   if (a.draft != "none" && !use_lookup && !use_head) return die("draft", "--draft lookup|fixed|head|both");
+  if ((a.draft != "none" || a.verify_check > 0) && !mi.has_verify)  // never silently plain decoding
+    return die("draft", "drafting is not supported for this family (" + family + "): the model has no multi-position verify pass");
   double head_load_s = 0;
   if (use_head) {  // before the prompt: the head's features are taken from every committed position
     auto th = clk::now();
@@ -999,31 +1007,13 @@ int main(int argc, char** argv) {
     if (C.run_ahead) js << ",\"run_ahead\":" << C.ra_json();
   };
   auto head = [&](const char* mode) {
-    js << "{\"engine\":\"dmeng\",\"family\":\"" << family << "\",\"mode\":\"" << mode << "\",\"accuracy\":\"" << a.mode
+    js << "{\"engine\":\"dmeng\",\"family\":\"" << family << "\",\"capabilities\":" << mi.caps_json() << ",\"mode\":\"" << mode << "\",\"accuracy\":\"" << a.mode
        << "\",\"preset\":" << (profiled ? P.json() : std::string("null")) << ",\"resolved\":" << [&] {
-            Resolved r;
-            r.profile = profiled ? P.profile : "none";
-            r.mode = a.mode;
-            r.routers = a.prefetch == "router" ? a.routers : "";
-            r.m = a.m;
-            r.tau = a.rt_tau;
-            r.cand = a.rt_cand;
-            r.xtok = a.xtok == "none" ? "" : a.xtok;
-            r.cache_gb = a.cache_gb;
-            r.cache_auto = a.cache_auto;
-            r.evict = a.evict;
-            r.drafts = a.drafts > 0 ? 1 : 0;
-            r.gpu_frac = a.prefill_gpu_frac;
-            r.gpu_experts = a.prefill_gpu_experts;
-            r.run_ahead = a.run_ahead > 0 ? a.run_ahead : 0;
-            r.run_ahead_depth = a.run_ahead_depth;
-            r.ra_budget = a.ra_budget;
-            r.ra_max_tok = a.ra_max;
-            r.ra_sat_skip = a.ra_sat != 0;
-            r.readers = a.readers;
+            RunOpts r = ro;  // as applied: names only with the routers' hook, background reads only with the routers
+            if (a.prefetch != "router") r.routers.clear();
             r.bg_ranks = rts.bg_ranks;
-            r.bg_gate = rts.bg_ranks > 0 ? a.bg_gate : 0;
-            return r.json();
+            r.cache = a.cache_auto ? r.cache : "fixed";
+            return r.resolved(a.cache_gb).json();
           }() << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
        << "\",\"m\":" << (a.prefetch == "router" ? a.m : 0) << ",\"cache_gb\":" << a.cache_gb << ",\"slots\":[";

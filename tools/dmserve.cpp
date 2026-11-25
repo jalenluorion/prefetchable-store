@@ -458,55 +458,71 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::string err;
-  // the profile's defaults: each fills only what the command line leaves unset
+  // the settings: explicit options > the profile > the manifest's defaults > dmserve's own values (resolve_run, the
+  // resolver dmeng and the C API use too)
   auto has = [&](const char* f) { return a.given.count(f) > 0; };
-  Preset P;
-  if (a.profile != "none" && !resolve_preset(a.model, a.profile, a.mode, "", -1, P, err)) {
+  Given g;
+  if (!a.mode.empty()) g.mode = a.mode;
+  if (has("--resident")) g.resident = a.resident;
+  if (has("--routers")) g.routers = a.routers.empty() ? "none" : a.routers;
+  if (has("--xtok")) g.xtok = a.xtok.empty() ? "none" : a.xtok;
+  if (has("--m")) g.m = a.m;
+  if (has("--rt-tau")) g.tau = a.rt_tau;
+  if (has("--rt-cand")) g.cand = a.rt_cand;
+  if (has("--xtok-tau")) g.xtok_tau = a.xtok_tau;
+  if (has("--rd-prio")) g.rd_prio = a.rd_prio != 0;
+  if (has("--evict")) g.evict = a.evict;
+  if (has("--layer-caps")) g.layer_caps = a.layer_caps;
+  if (has("--cache-gb") && a.cache_auto) g.cache_auto = true;
+  else if (has("--cache-gb")) g.cache_gb = a.cache_gb;
+  if (has("--gpu-frac")) g.gpu_frac = a.gpu_frac;
+  if (has("--gpu-experts")) g.gpu_experts = a.gpu_experts;
+  g.gpu_off = a.gpu_off;
+  g.prefill_chunk = a.chunk;  // the server's prompt path is always chunked (--chunk, 512)
+  if (has("--run-ahead")) g.run_ahead = a.run_ahead;
+  if (has("--run-ahead-depth")) g.run_ahead_depth = a.run_ahead_depth;
+  if (has("--run-ahead-budget")) g.ra_budget = a.ra_budget;
+  if (has("--run-ahead-max")) g.ra_max_tok = a.ra_max;
+  if (has("--run-ahead-sat-skip")) g.ra_sat_skip = a.ra_sat != 0;
+  if (has("--readers")) g.readers = a.readers;
+  if (a.drafts >= 0) g.drafts = a.drafts;
+  RunOpts ro;  // dmserve's own values where nothing else sets one
+  ro.mode = "lossless", ro.m = a.m, ro.tau = a.rt_tau, ro.cand = a.rt_cand, ro.xtok_tau = a.xtok_tau, ro.rd_prio = a.rd_prio, ro.evict = a.evict;
+  ro.cache = a.cache_auto ? "auto" : "fixed", ro.cache_gb = a.cache_gb, ro.readers = a.readers;
+  if (!resolve_run(a.model, a.profile, g, "", -1, ro, err)) {
     fprintf(stderr, "profile: %s\n", err.c_str());
     return 1;
   }
-  const bool profiled = a.profile != "none" && P.profile != "none";
+  const Preset& P = ro.preset;
+  const bool profiled = ro.profiled;
   if (a.print_defaults) {
     printf("%s\n", profiled ? P.json().c_str() : "null");
     return 0;
   }
-  if (profiled) {
-    for (auto& n : P.notes) fprintf(stderr, "dmserve: %s\n", n.c_str());
-    a.mode = P.engine_mode;
-    if (!has("--resident") && !P.resident.empty()) a.resident = P.resident;
-    if (!has("--routers") && !has("--xtok")) {
-      a.routers = P.routers;
-      // the profile's names rule; an explicit --m / --rt-tau / --rt-cand wins (precedence: presets.h)
-      names_rule(P, true, has("--m"), a.m, has("--rt-tau"), a.rt_tau, has("--rt-cand"), a.rt_cand, a.m, a.rt_tau, a.rt_cand);
-      a.xtok = P.xtok;
-      if (!has("--xtok-tau")) a.xtok_tau = P.xtok_tau;
-      if (!has("--rd-prio") && P.rd_prio) a.rd_prio = 1;
-    }
-    if (!has("--evict")) a.evict = P.evict;
-    if (!has("--layer-caps") && !P.layer_caps.empty()) a.layer_caps = P.layer_caps;
-    if (!has("--gpu-frac")) a.gpu_frac = P.gpu_frac;
-    if (!has("--run-ahead")) a.run_ahead = P.run_ahead;
-    if (!has("--run-ahead-depth")) a.run_ahead_depth = P.run_ahead_depth;
-    if (!has("--run-ahead-budget")) a.ra_budget = P.ra_budget;
-    if (!has("--readers") && P.readers > 0) a.readers = P.readers;
-    if (!has("--run-ahead-max")) a.ra_max = P.ra_max_tok;
-    if (!has("--run-ahead-sat-skip")) a.ra_sat = P.ra_sat_skip ? 1 : 0;
-    if (!has("--gpu-experts")) a.gpu_experts = P.gpu_experts;
-    if (!has("--cache-gb")) a.cache_auto = true;
+  for (auto& n : ro.notes) fprintf(stderr, "dmserve: %s\n", n.c_str());
+  a.mode = ro.mode;
+  a.resident = ro.resident;
+  a.routers = ro.routers;
+  a.xtok = ro.xtok;
+  a.m = ro.m, a.rt_tau = ro.tau, a.rt_cand = ro.cand, a.xtok_tau = ro.xtok_tau, a.rd_prio = ro.rd_prio;
+  a.evict = ro.evict, a.layer_caps = ro.layer_caps;
+  a.cache_auto = ro.cache != "fixed", a.cache_gb = ro.cache_gb;  // (a macOS tool: slab, the iPhone rule, is the automatic one here)
+  a.gpu_frac = ro.gpu_frac, a.gpu_experts = ro.gpu_experts;
+  a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
+  a.readers = ro.readers, a.drafts = ro.drafts;
+  if (ro.bg_ranks > 0) {  // background reads are a dmeng option only: say so, never resolve to something not done
+    fprintf(stderr, "dmserve: the profile's background reads (ranks %d) are not implemented in the server: off\n", ro.bg_ranks);
+    ro.bg_ranks = 0;
+  }
+  if (profiled) {  // the server's own files, in the engine's cache folder
     if (!has("--disk")) a.s.disk_dir = P.cache_dir + "/prefix";
     if (!has("--disk-every") && (P.family == "inkling2_loop" || P.family == "qwen4_exp")) a.s.disk_every = 1024;  // fixed states of 173 / 118 MB
     if (!has("--hotset")) a.hotset = P.cache_dir + "/hotset.bin";
     if (!has("--draft-cost")) a.draft_cost = P.cache_dir + "/draft_cost.txt";
-    if (a.drafts < 0) a.drafts = P.drafts ? 1 : 0;
-  } else {
-    a.mode = engine_mode_of(a.mode.empty() ? "lossless" : a.mode);
   }
   if (a.draft_cost == "none") a.draft_cost.clear();
   if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
-  if (a.gpu_off) a.gpu_frac = a.gpu_experts = 0;
   if (a.drafts > 0 && !has("--early")) a.early = 4;
-  if (a.routers == "none") a.routers.clear();
-  if (a.xtok == "none") a.xtok.clear();
   if (a.hotset == "none") a.hotset.clear();
   if (a.s.disk_dir == "none") a.s.disk_dir.clear();
   auto tl = sclk::now();
@@ -661,6 +677,10 @@ int main(int argc, char** argv) {
     dr.o.gate = a.draft_gate != 0;
     dr.o.margin = a.draft_margin;
   dr.o.copy_free = a.copy_free != 0;
+  if (a.draft != "none" && !M->info().has_verify) {  // never silently plain decoding
+    fprintf(stderr, "draft: drafting is not supported for this family (%s): the model has no multi-position verify pass\n", M->info().family.c_str());
+    return 1;
+  }
   dr.init(M->info().family, a.early > 0 && a.draft != "none" ? &C : nullptr);
   dr.reads = &C;
   if (dr.on() && !a.draft_cost.empty()) {  // the pass costs an earlier session measured, in place of the family's prior
@@ -690,32 +710,16 @@ int main(int argc, char** argv) {
   const bool hot_loaded = hot && hot->load();
   {
     std::ostringstream s;
-    s << "READY {\"model\":\"" << lm.info().name << "\",\"vocab\":" << lm.info().vocab << ",\"ctx\":" << lm.info().max_ctx << ",\"load_ms\":" << load_ms
+    s << "READY {\"model\":\"" << lm.info().name << "\",\"capabilities\":" << M->info().caps_json() << ",\"vocab\":" << lm.info().vocab << ",\"ctx\":" << lm.info().max_ctx << ",\"load_ms\":" << load_ms
       << ",\"cache_gb\":" << a.cache_gb << ",\"chunk\":" << a.chunk << ",\"stream\":" << a.stream
       << ",\"fixed_mb\":" << lm.info().fixed_bytes / 1e6 << ",\"pos_kb\":" << lm.info().pos_bytes / 1e3 << ",\"hotset\":" << (hot_loaded ? hot->size() : 0)
       << ",\"cache_auto\":" << auto_why << ",\"mode\":\"" << a.mode << "\",\"preset\":" << (profiled ? P.json() : std::string("null"))
       << ",\"resolved\":" << [&] {
-           Resolved r;
-           r.profile = profiled ? P.profile : "none";
-           r.mode = a.mode;
+           RunOpts r = ro;  // as applied
            r.routers = a.routers;
-           r.m = a.m;
-           r.tau = a.rt_tau;
-           r.cand = a.rt_cand;
-           r.xtok = a.xtok;
-           r.cache_gb = a.cache_gb;
-           r.cache_auto = a.cache_auto;
-           r.evict = a.evict;
            r.drafts = a.draft != "none" ? 1 : 0;
-           r.gpu_frac = a.gpu_frac;
-           r.gpu_experts = a.gpu_experts;
-           r.run_ahead = a.run_ahead > 0 ? a.run_ahead : 0;
-           r.run_ahead_depth = a.run_ahead_depth;
-           r.ra_budget = a.ra_budget;
-           r.ra_max_tok = a.ra_max;
-           r.ra_sat_skip = a.ra_sat != 0;
-           r.readers = a.readers;
-           return r.json();
+           r.cache = a.cache_auto ? r.cache : "fixed";
+           return r.resolved(a.cache_gb).json();
          }()
       << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << "}";
     out(s.str());

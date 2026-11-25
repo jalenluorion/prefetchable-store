@@ -1,7 +1,8 @@
 """The tiny random Qwen3.8-Flash-Next of the engine's checks, built the way the real weight repo was: a synthetic release
 (reference/flash/make_tiny.py, the release's tensor names and layouts), the published converter (reference/flash/convert.py:
 4-bit expert records, int8 n-gram rows in part files, resident.safetensors), a random lag-4 router set in the trainer's npz
-layout (routers_k4.npz, flash_router3 keys, float32), and the manifest (python/convert/qwen4_exp/manifest.py).
+layout (routers_k4.npz, flash_router3 keys, float32), and the manifest (tests/tiny_manifest.py, from the weight repo's
+python/convert/qwen4_exp/moved-store.json).
 
   python tests/qwen4_exp/make_tiny.py OUT      (python: torch, safetensors, tokenizers, numpy, huggingface_hub)
 
@@ -67,6 +68,5 @@ for L in range(NL):
     z[f"{L}.mlp.2.weight"] = (rng.standard_normal((NE, RH)) / np.sqrt(RH)).astype(np.float32)
     z[f"{L}.mlp.2.bias"] = (0.1 * rng.standard_normal(NE)).astype(np.float32)
 np.savez(os.path.join(MOD, "routers_k4.npz"), **z)
-# the folder's own checksums, as the real repo ships them
-run([sys.executable, os.path.join(REPO, "python/convert/qwen4_exp/manifest.py"), MOD, "--name", "tiny-qwen4_exp", "--repo", "synthetic"])
+run([sys.executable, os.path.join(REPO, "tests/tiny_manifest.py"), MOD])
 print(f"{MOD}: tiny Qwen3.8-Flash-Next ({H} hidden, {NL} layers, {NE} experts top {cfg['num_experts_per_tok']}, n-gram {ng})")

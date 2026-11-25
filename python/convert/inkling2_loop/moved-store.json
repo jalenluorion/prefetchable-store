@@ -1,0 +1,1857 @@
+{
+ "format": "moved-store",
+ "format_version": "1.0",
+ "family": "inkling2_loop",
+ "name": "Inkling-2-Mini-moved-store",
+ "source": {
+  "repo": "thinkingmachines/Inkling-2-Mini",
+  "revision": "ed40e7da625f594fc9c4990f5f66be24873c22d7",
+  "license": "apache-2.0",
+  "license_file": "LICENSE",
+  "notice_file": "NOTICE.md",
+  "use_policy": "https://thinkingmachines.ai/model-acceptable-use-policy/",
+  "release_file": "model-00001-of-00001.safetensors",
+  "release_bytes": 19526019168
+ },
+ "converter": {
+  "code": "github.com/jalenluorion/moved-store python/convert/inkling2_loop/convert.py + store.py (same bytes as run)",
+  "commit": null,
+  "sha256": "a97f10475fdd8ba07a06e305b2ca702375a1d7484e5f4b2964964b6b8c20147d",
+  "date": "2026-11-20"
+ },
+ "complete": true,
+ "parts": [
+  {
+   "path": "LICENSE",
+   "bytes": 11343,
+   "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
+   "role": "license",
+   "precision": "text"
+  },
+  {
+   "path": "NOTICE.md",
+   "bytes": 2101,
+   "sha256": "d5e3b8cb2fd0ab80b2b028874ad4b388a8ef35a03c52937e4a02583f3592ca03",
+   "role": "license",
+   "precision": "text"
+  },
+  {
+   "path": "README.md",
+   "bytes": 13883,
+   "sha256": "0688de57314dbe2e0f7af79e11d1d93dce0f2b6f7a41849070f9359b5013eb17",
+   "role": "card",
+   "precision": "text"
+  },
+  {
+   "path": "chat_template.jinja",
+   "bytes": 6868,
+   "sha256": "53a9035f3255945704b5857657cfb00c1165090c0641c4f782a0cbf268cc16dc",
+   "role": "chat_template",
+   "precision": "text"
+  },
+  {
+   "path": "config.json",
+   "bytes": 2722,
+   "sha256": "a7a349601f0984c4abf999c480ef775d8567d21f5f84b4e8a3e035b44f288dc2",
+   "role": "config",
+   "precision": "text"
+  },
+  {
+   "path": "derived/resident_q8.dmres1.15a39fa8aa48.bin",
+   "bytes": 1266515968,
+   "sha256": "f87550c84cfcf721d2d643503583aba75a1f30069b24b18e389622c2ff04b4bd",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmres1",
+   "derived_id": "resident_q8",
+   "local": ".dmeng/resident_q8.dmres1.15a39fa8aa48.bin",
+   "check": "sha256 equal to derived[resident_q8].sha256: the file the engine makes from its source part"
+  },
+  {
+   "path": "derived/router.mlp_k2_h512.q8.dmr1.e15ecf260979.bin",
+   "bytes": 231473152,
+   "sha256": "3e28bf7046a2d1ced2d815a5e919176437af129cd50064f0a4fab22b400a32e7",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmr1",
+   "derived_id": "router.mlp_k2_h512.q8",
+   "local": ".dmeng/router.mlp_k2_h512.q8.dmr1.e15ecf260979.bin",
+   "check": "sha256 equal to derived[router.mlp_k2_h512.q8].sha256: the file the engine makes from its source part"
+  },
+  {
+   "path": "derived/router.xtok_s41_h512.q8.dmr1.ba2c977e8db0.bin",
+   "bytes": 20709376,
+   "sha256": "8bebfe9c25d5df48ca892d7fc1d553b01e1fbf2f9fc235111f01a7ec5f9114a0",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmr1",
+   "derived_id": "router.xtok_s41_h512.q8",
+   "local": ".dmeng/router.xtok_s41_h512.q8.dmr1.ba2c977e8db0.bin",
+   "check": "sha256 equal to derived[router.xtok_s41_h512.q8].sha256: the file the engine makes from its source part"
+  },
+  {
+   "path": "derived/router.xtok_s47_h512.q8.dmr1.1e0e7f1cfc2e.bin",
+   "bytes": 20709376,
+   "sha256": "2b394e3f397202183ed75f6cd9c9c1d58205fce896028f759f781cd7848aa97e",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmr1",
+   "derived_id": "router.xtok_s47_h512.q8",
+   "local": ".dmeng/router.xtok_s47_h512.q8.dmr1.1e0e7f1cfc2e.bin",
+   "check": "sha256 equal to derived[router.xtok_s47_h512.q8].sha256: the file the engine makes from its source part"
+  },
+  {
+   "path": "embeddings.safetensors",
+   "bytes": 926319056,
+   "sha256": "93b761e9c2cfe04dcc4ccfb381ac27257fe854026cadda44ffa56344938ae01f",
+   "role": "embedding",
+   "optional": true,
+   "precision": "bf16",
+   "tensor": "model.llm.embed.weight",
+   "check": "its data region equals the bytes of model.llm.embed.weight in resident.safetensors (same dtype and shape)"
+  },
+  {
+   "path": "generation_config.json",
+   "bytes": 98,
+   "sha256": "a08737c07a65a8fdf69f7cf086576210e5aad4b241437090b26d7b0c4f7905f7",
+   "role": "config",
+   "precision": "text"
+  },
+  {
+   "path": "hf_quant_config.json",
+   "bytes": 67924,
+   "sha256": "7c656207d3ce37879c7be209a036b0dde43bf01f78159bff06880b868ed57143",
+   "role": "config",
+   "precision": "text"
+  },
+  {
+   "path": "mtp.safetensors",
+   "bytes": 635801416,
+   "sha256": "7c3b651317f01f73bcf4e1dceba66ef8b7e1a1eac6bc171e882e690a4b10a1d2",
+   "role": "extra",
+   "precision": "bf16",
+   "optional": true
+  },
+  {
+   "path": "processor_config.json",
+   "bytes": 461,
+   "sha256": "d7350adce18c8be4b607f261c8f0f7eabbf720bb7aaf648a43d4f8372bbacc2d",
+   "role": "config",
+   "precision": "text"
+  },
+  {
+   "path": "resident.safetensors",
+   "bytes": 3218998456,
+   "sha256": "15a39fa8aa485786ba4b300a76b6a2053c6388b5f3babb16e7c03558a3eb381e",
+   "role": "resident",
+   "precision": "bf16+f32"
+  },
+  {
+   "path": "routers/mlp_k16_h512.safetensors",
+   "bytes": 384399376,
+   "sha256": "b4dd8980c41d2047d9fa16e6bb99b31b93b495be99ee5a49cf49479df600a1be",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true,
+   "local": false,
+   "size_from": "converted on babel from the ink_r_best export"
+  },
+  {
+   "path": "routers/mlp_k1_h512.safetensors",
+   "bytes": 428636240,
+   "sha256": "c8597e8b67f2c872b7b6a1b2fdec77e90c6f1ccee749341bd1ce7b648c67e508",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true,
+   "local": false,
+   "size_from": "converted on babel from the ink_r_best export"
+  },
+  {
+   "path": "routers/mlp_k2_h512.safetensors",
+   "bytes": 425687120,
+   "sha256": "e15ecf2609791f92e8faff56de1869839076e6d0c2d73c56c3fa9cd407621919",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true,
+   "local": false,
+   "size_from": "converted on babel from the ink_r_best export"
+  },
+  {
+   "path": "routers/mlp_k4_h512.safetensors",
+   "bytes": 419788872,
+   "sha256": "0568fddd51121b78f267820171c59b4fcdbfcd72b0f6c199b34c086b244f1832",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true,
+   "local": false,
+   "size_from": "converted on babel from the ink_r_best export"
+  },
+  {
+   "path": "routers/mlp_k8_h512.safetensors",
+   "bytes": 407992376,
+   "sha256": "b00bad1df3f061f8340b9363c8bab84405fce618a10682efd3c50b050c507aae",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true,
+   "local": false,
+   "size_from": "converted on babel from the ink_r_best export"
+  },
+  {
+   "path": "routers/xtok_s41_h512.safetensors",
+   "bytes": 72396064,
+   "sha256": "ba2c977e8db00831cdd7da341eef9e6f98d9c3bf4035d5f1da208dbb00ab514e",
+   "role": "router",
+   "optional": true,
+   "precision": "f16+f32",
+   "check": "every tensor equals the exported router's values; the engine file made from it equals the matching derived/router.* file"
+  },
+  {
+   "path": "routers/xtok_s47_h512.safetensors",
+   "bytes": 72396064,
+   "sha256": "1e0e7f1cfc2eae93d213f1a260e13698166d9d296b4b038150086b82288f83db",
+   "role": "router",
+   "optional": true,
+   "precision": "f16+f32",
+   "check": "every tensor equals the exported router's values; the engine file made from it equals the matching derived/router.* file"
+  },
+  {
+   "path": "special_tokens_map.json",
+   "bytes": 529,
+   "sha256": "c16f44b3594563d82743ddb0417a2be1bfe3e2000dfad2da4b8f32554593e1a0",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "store/layer_00.bin",
+   "bytes": 574619648,
+   "sha256": "58d8fd082e4b61c10c35e23395eeaf40feb50f34141981de153380e488598b66",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_01.bin",
+   "bytes": 574619648,
+   "sha256": "65bd7575fbec3f3d9b5dba06fba9b7c79322ee5de385f45b290d0b9717e75bc3",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_02.bin",
+   "bytes": 574619648,
+   "sha256": "8655c7ce67e449d90d60d79dbcee357f4cd88f8a7a9ae035bc24cea76a52f135",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_03.bin",
+   "bytes": 574619648,
+   "sha256": "a771081e8d9944e141c0627ad7894bf95bff120deecc24edddb2f52e07e39325",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_04.bin",
+   "bytes": 574619648,
+   "sha256": "b144969275b67f9222a95f52c9086266d9908c5ca5b197c77dabd3792d63e280",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_05.bin",
+   "bytes": 574619648,
+   "sha256": "78c95650229a5a97de4ea8934908933e515f978cc573d962cc105fd82ce395eb",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_06.bin",
+   "bytes": 574619648,
+   "sha256": "4780abacfebc78e1fbab3cc54e00697e241232af05c567e2d61cf7d75b516c93",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_07.bin",
+   "bytes": 574619648,
+   "sha256": "e9d8b6b753fb9cc302dff7d3168db2aca5bff96539a0116c4d871981b88e6654",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_08.bin",
+   "bytes": 574619648,
+   "sha256": "4a1770ddd1aa445fca3e26a7e7fc335ec6afde6cf21081606d14fabdae30fc0b",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_09.bin",
+   "bytes": 574619648,
+   "sha256": "15af8255cb79e193b24344c98bc0a526bb486b19e002526935d3f2dd5e85871f",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_10.bin",
+   "bytes": 574619648,
+   "sha256": "b8bc047e89b848bf05eb2d020518583b6e59c4e75e01a76a34728d8fb9c20b93",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_11.bin",
+   "bytes": 574619648,
+   "sha256": "e9cd833d4d0fc90e44c925bd333d4a03c197d4f301e00e8a2c42e7a3a3de20ed",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_12.bin",
+   "bytes": 574619648,
+   "sha256": "70a185557b2a7c2225213f7dc7cff5bc94e6e67e89f522b19de4695df6e84e09",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_13.bin",
+   "bytes": 574619648,
+   "sha256": "3bafd586b95a06c564af48b520792d17ccae8dd794ef56e4d2b98b21e4dd8263",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_14.bin",
+   "bytes": 574619648,
+   "sha256": "f2108a790b08ef622ff147ec23d25c61d38597be2454e4eaa27ee0568b773054",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_15.bin",
+   "bytes": 574619648,
+   "sha256": "c8158643f244aecf6ea30fe0326a262402bb0e193cd76dbfcbc9ae32795d10a6",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_16.bin",
+   "bytes": 574619648,
+   "sha256": "b783e6178fe8321e02fbb79a5e9bedaeae86e9059c1a1486b28dbc7953615744",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_17.bin",
+   "bytes": 574619648,
+   "sha256": "b4ea395489df8a14bc3622d4733dceb0b302996bdad4a21c8011825b2631ea58",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_18.bin",
+   "bytes": 574619648,
+   "sha256": "8b514f903cd9fd28cb2d4718b7160b26d3d4af9170abbf09b61d147b7fe046bf",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_19.bin",
+   "bytes": 574619648,
+   "sha256": "58c5853777e2d5f404db0b46109b28cc05b77548a0366ba601d6783d1effdfe4",
+   "role": "experts",
+   "precision": "nvfp4_g16"
+  },
+  {
+   "path": "store/layer_20.bin",
+   "bytes": 1052770304,
+   "sha256": "fd279c7374d514253e5e1fc21114ab61db55a6ebc0bbf022ca286c74f7e83eb9",
+   "role": "experts",
+   "precision": "mxfp8_g32"
+  },
+  {
+   "path": "store/layer_21.bin",
+   "bytes": 1052770304,
+   "sha256": "ab7a2f82bc3e1c578cfa343a6ea120d6ee48d357a1d92e295c941c88e54e3e4e",
+   "role": "experts",
+   "precision": "mxfp8_g32"
+  },
+  {
+   "path": "store/layer_22.bin",
+   "bytes": 1052770304,
+   "sha256": "0391908e2eac8e10f557a400dc2dbcac309567ac439de8601a3746ef95161bef",
+   "role": "experts",
+   "precision": "mxfp8_g32"
+  },
+  {
+   "path": "store/layer_23.bin",
+   "bytes": 1052770304,
+   "sha256": "cdfc33f226a360d1ab1797b86e8f6743e06d2f5372da5b9b881ba4aa731a20e9",
+   "role": "experts",
+   "precision": "mxfp8_g32"
+  },
+  {
+   "path": "store/meta.json",
+   "bytes": 5484,
+   "sha256": "61903ca779b49a7380dfdc4e44657f54d0d4350786064901beffb10241aeba7a",
+   "role": "meta",
+   "precision": "text"
+  },
+  {
+   "path": "tiktoken/tokenizer.model",
+   "bytes": 3386494,
+   "sha256": "f170372dd655728909228220d77cf6b8104a59f38a91262a7d2c4027906ec0d8",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "tokenizer.json",
+   "bytes": 26178678,
+   "sha256": "7f332727f9a3f093dd452a39cc978e6757627e5dad1b0673aa4e75174f236dd6",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "tokenizer_config.json",
+   "bytes": 13235,
+   "sha256": "bf09342d285139fd37ce10c70878af1d52cb390e9901e10248654293a80ee636",
+   "role": "tokenizer",
+   "precision": "text"
+  },
+  {
+   "path": "derived/router.linear_k2.q8.dmr1.1e7849984cbb.bin",
+   "bytes": 49152000,
+   "sha256": "cccfc6bd313a2058045b96a94c8d804ec87e3b18abcaa4c0b5cb7a21701975a3",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmr1",
+   "derived_id": "router.linear_k2.q8",
+   "local": ".dmeng/router.linear_k2.q8.dmr1.1e7849984cbb.bin",
+   "check": "sha256 equal to derived[router.linear_k2.q8].sha256: the file the engine makes from its source part"
+  },
+  {
+   "path": "routers/linear_k2.safetensors",
+   "bytes": 84236072,
+   "sha256": "1e7849984cbb7d314b47bc9bba3a70abe794b6eaf05aac6e72ecba83bb65a136",
+   "role": "router",
+   "precision": "f16+f32",
+   "optional": true
+  },
+  {
+   "path": "derived/resident_q4.dmres1.15a39fa8aa48.bin",
+   "bytes": 712900608,
+   "sha256": "42c130377dedada5d51c5dfc76a4c8bff9d17864dc713e1b7b92d2eb8e1c85ef",
+   "role": "derived",
+   "optional": true,
+   "precision": "dmres1",
+   "derived_id": "resident_q4",
+   "local": ".dmeng/resident_q4.dmres1.15a39fa8aa48.bin",
+   "check": "sha256 equal to derived[resident_q4].sha256 (shipped: made from a calibrated export that is not in the repo)"
+  },
+  {
+   "path": "store_nv4/layer_20.bin",
+   "bytes": 574619648,
+   "sha256": "6e7921496cd70e3c15523ec68539e5bf32ab2799dce35de19f5967d4c43ab48c",
+   "role": "experts",
+   "optional": true,
+   "precision": "nvfp4_g16",
+   "note": "the release's MXFP8 layer re-quantised to NVFP4 (least-squares block scales), for phone-small only"
+  },
+  {
+   "path": "store_nv4/layer_21.bin",
+   "bytes": 574619648,
+   "sha256": "0b8a7cfd4c24cf7b347748ce97d377cfae6609a7abb69c7fd695b552d87ea317",
+   "role": "experts",
+   "optional": true,
+   "precision": "nvfp4_g16",
+   "note": "the release's MXFP8 layer re-quantised to NVFP4 (least-squares block scales), for phone-small only"
+  },
+  {
+   "path": "store_nv4/layer_22.bin",
+   "bytes": 574619648,
+   "sha256": "21a84a7ce1f46d653ad4ff3f8327c45d989202e0de19b77cd765964430d88471",
+   "role": "experts",
+   "optional": true,
+   "precision": "nvfp4_g16",
+   "note": "the release's MXFP8 layer re-quantised to NVFP4 (least-squares block scales), for phone-small only"
+  },
+  {
+   "path": "store_nv4/layer_23.bin",
+   "bytes": 574619648,
+   "sha256": "c294d7bf3b621e17d645cb3d0f3136eca708aae36085fe5fbb6693cb07669460",
+   "role": "experts",
+   "optional": true,
+   "precision": "nvfp4_g16",
+   "note": "the release's MXFP8 layer re-quantised to NVFP4 (least-squares block scales), for phone-small only"
+  }
+ ],
+ "model": {
+  "hidden": 2304,
+  "vocab": 201024,
+  "vocab_unpadded": 200058,
+  "physical_layers": 24,
+  "steps": 48,
+  "step_layer": [
+   0,
+   1,
+   2,
+   3,
+   4,
+   5,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   6,
+   7,
+   8,
+   9,
+   10,
+   11,
+   12,
+   13,
+   14,
+   15,
+   16,
+   17,
+   18,
+   19,
+   20,
+   21,
+   22,
+   23
+  ],
+  "step_pass": [
+   -1,
+   -1,
+   -1,
+   -1,
+   -1,
+   -1,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   1,
+   2,
+   2,
+   2,
+   2,
+   2,
+   2,
+   2,
+   2,
+   2,
+   2,
+   2,
+   2,
+   -1,
+   -1,
+   -1,
+   -1,
+   -1,
+   -1
+  ],
+  "layer_types": "SSSSSGSSSSSGSSSSSGSSSSSG",
+  "layer_type_letters": {
+   "S": "sliding-window attention",
+   "G": "global attention"
+  },
+  "embedding": {
+   "file": "resident.safetensors",
+   "tensor": "model.llm.embed.weight",
+   "dtype": "bf16"
+  }
+ },
+ "experts": {
+  "layer_file": "store/layer_{L:02d}.bin",
+  "experts_per_layer": 128,
+  "top_k": 8,
+  "router": "sigmoid_bias_topk_scaled",
+  "route_scale": 8.0,
+  "shared_expert": false,
+  "activation": "softcap_swiglu",
+  "activation_caps": {
+   "gate": 4.0,
+   "up": 25.0
+  },
+  "activation_rule": "softcap(gate, g) * sigmoid(gate) * softcap(up, u), softcap(x, c) = c * tanh(x / c), in float32",
+  "router_rule": {
+   "logits": "x.float32 @ mlp.gate.weight.float32.T",
+   "scores": "sigmoid(logits)",
+   "select": "top_k of scores + mlp.gate.bias (e_score_correction_bias)",
+   "weights": "unbiased scores of the selected / (sum + 1e-20) * route_scale",
+   "route_scale": 8.0
+  },
+  "page": 16384,
+  "layer_format": [
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "nvfp4_g16",
+   "mxfp8_g32",
+   "mxfp8_g32",
+   "mxfp8_g32",
+   "mxfp8_g32"
+  ],
+  "formats": {
+   "mxfp8_g32": {
+    "kind": "mxfp8",
+    "bits": 8,
+    "group": 32,
+    "record_bytes": 8224768,
+    "record_bytes_used": 8211456,
+    "align": 64,
+    "matrices": [
+     {
+      "name": "gate_up",
+      "shape": [
+       2304,
+       2304
+      ],
+      "interleave": "gate_up_rows",
+      "codes": 0,
+      "scales": 5308416
+     },
+     {
+      "name": "down",
+      "shape": [
+       2304,
+       1152
+      ],
+      "codes": 5474304,
+      "scales": 8128512
+     }
+    ],
+    "code_dtype": "fp8_e4m3fn",
+    "scale_dtype": "fp8_e8m0"
+   },
+   "nvfp4_g16": {
+    "kind": "nvfp4",
+    "bits": 4,
+    "group": 16,
+    "record_bytes": 4489216,
+    "record_bytes_used": 4478992,
+    "align": 64,
+    "matrices": [
+     {
+      "name": "gate_up",
+      "shape": [
+       2304,
+       2304
+      ],
+      "interleave": "gate_up_rows",
+      "codes": 0,
+      "scales": 2654208
+     },
+     {
+      "name": "down",
+      "shape": [
+       2304,
+       1152
+      ],
+      "codes": 2985984,
+      "scales": 4313088
+     }
+    ],
+    "trailer": {
+     "offset": 4478976,
+     "dtype": "f32",
+     "order": [
+      "gate_up.amax",
+      "down.amax",
+      "gate_up.denominator",
+      "down.denominator"
+     ]
+    },
+    "global_scale": "amax * 6 * 448 / denominator; w = e2m1 * e4m3 * global / (6 * 448)",
+    "code_dtype": "fp4_e2m1, two per byte, low nibble = even element",
+    "scale_dtype": "fp8_e4m3fn"
+   }
+  }
+ },
+ "resident": {
+  "file": "resident.safetensors",
+  "precision": "bf16+f32",
+  "q8_rule": {
+   "matrices": "the six attention projections (q, k, v, r, o, gate) of every layer and the output head",
+   "quantiser": "mlx_affine",
+   "bits": 8,
+   "group": 64,
+   "input_cast": "bf16",
+   "scale_dtype": "bf16",
+   "engine_scale_dtype": "f16 (widened from bf16, exact)",
+   "embedding": "not copied: one bf16 row per token is read from resident.safetensors"
+  }
+ },
+ "routers": [
+  {
+   "id": "mlp_k1_h512",
+   "path": "routers/mlp_k1_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 1,
+   "hidden": 512,
+   "index": "application",
+   "targets": 48,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for applications a < lag",
+    "emb": "embed_norm(embedding row) (the embed_tokens output of transformers PR 51050); the router normalises it again with its own weight",
+    "h": "the MoE block input of the application; h_prev at application a for the previous token (zero at position 0), h_lag at application a - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias + mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias; the top m of z name the experts of application a"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "ink_r_best",
+    "variant": "full_k1_h512",
+    "tokens": 120000000,
+    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
+    "report": null,
+    "exported_as": {
+     "file": "ink_router_full_k1_h512_fp16.npz",
+     "sha256": "fd6a30e81d81a8f0ec799c4cd5ac527a8715ee02f986ad01eca9f012d3d7036c"
+    }
+   }
+  },
+  {
+   "id": "mlp_k2_h512",
+   "path": "routers/mlp_k2_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 2,
+   "hidden": 512,
+   "index": "application",
+   "targets": 48,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for applications a < lag",
+    "emb": "embed_norm(embedding row) (the embed_tokens output of transformers PR 51050); the router normalises it again with its own weight",
+    "h": "the MoE block input of the application; h_prev at application a for the previous token (zero at position 0), h_lag at application a - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias + mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias; the top m of z name the experts of application a"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "ink_r_best",
+    "variant": "full_k2_h512",
+    "tokens": 120000000,
+    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
+    "report": null,
+    "exported_as": {
+     "file": "ink_router_full_k2_h512_fp16.npz",
+     "sha256": "636d5916526a4cec68f7a86e8271bc1cb3ab90647190b3f0a1fd3bfe4dc0d8b3"
+    }
+   }
+  },
+  {
+   "id": "mlp_k4_h512",
+   "path": "routers/mlp_k4_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 4,
+   "hidden": 512,
+   "index": "application",
+   "targets": 48,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for applications a < lag",
+    "emb": "embed_norm(embedding row) (the embed_tokens output of transformers PR 51050); the router normalises it again with its own weight",
+    "h": "the MoE block input of the application; h_prev at application a for the previous token (zero at position 0), h_lag at application a - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias + mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias; the top m of z name the experts of application a"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "ink_r_best",
+    "variant": "full_k4_h512",
+    "tokens": 120000000,
+    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
+    "report": null,
+    "exported_as": {
+     "file": "ink_router_full_k4_h512_fp16.npz",
+     "sha256": "c1e2f6a4882ac7967f2fb638be27f14ba6f269cba3bc5d4bae62086f4f954011"
+    }
+   }
+  },
+  {
+   "id": "mlp_k8_h512",
+   "path": "routers/mlp_k8_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 8,
+   "hidden": 512,
+   "index": "application",
+   "targets": 48,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for applications a < lag",
+    "emb": "embed_norm(embedding row) (the embed_tokens output of transformers PR 51050); the router normalises it again with its own weight",
+    "h": "the MoE block input of the application; h_prev at application a for the previous token (zero at position 0), h_lag at application a - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias + mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias; the top m of z name the experts of application a"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "ink_r_best",
+    "variant": "full_k8_h512",
+    "tokens": 120000000,
+    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
+    "report": null,
+    "exported_as": {
+     "file": "ink_router_full_k8_h512_fp16.npz",
+     "sha256": "ccf34c146e1be660d1346268358b44059da7ec5f8524004b25ae579a0d2712f9"
+    }
+   }
+  },
+  {
+   "id": "mlp_k16_h512",
+   "path": "routers/mlp_k16_h512.safetensors",
+   "default": false,
+   "form": "mlp",
+   "lag": 16,
+   "hidden": 512,
+   "index": "application",
+   "targets": 48,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for applications a < lag",
+    "emb": "embed_norm(embedding row) (the embed_tokens output of transformers PR 51050); the router normalises it again with its own weight",
+    "h": "the MoE block input of the application; h_prev at application a for the previous token (zero at position 0), h_lag at application a - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias + mlp.2.weight @ gelu(mlp.0.weight @ x + mlp.0.bias) + mlp.2.bias; the top m of z name the experts of application a"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "ink_r_best",
+    "variant": "full_k16_h512",
+    "tokens": 120000000,
+    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
+    "report": null,
+    "exported_as": {
+     "file": "ink_router_full_k16_h512_fp16.npz",
+     "sha256": "c46441a75526d3bcd70aa2acaed31977f6cb214b1856fa946a07cd720b97ab01"
+    }
+   }
+  },
+  {
+   "id": "linear_k2",
+   "path": "routers/linear_k2.safetensors",
+   "default": true,
+   "form": "linear",
+   "lag": 2,
+   "hidden": 0,
+   "index": "application",
+   "targets": 48,
+   "features": {
+    "inputs": [
+     "emb",
+     "h_prev",
+     "h_lag"
+    ],
+    "layout": "x = [rmsnorm(emb) * emb_norm.weight, h_prev, h_lag]; h_lag absent for applications a < lag",
+    "emb": "embed_norm(embedding row) (the embed_tokens output of transformers PR 51050); the router normalises it again with its own weight",
+    "h": "the MoE block input of the application; h_prev at application a for the previous token (zero at position 0), h_lag at application a - lag for this token",
+    "rms_eps": 1.1920929e-07,
+    "activation": "gelu_erf",
+    "output": "z = lin.weight @ x + lin.bias; the top m of z name the experts of application a"
+   },
+   "dtypes": "matrices f16, vectors (emb_norm, biases) f32",
+   "training": {
+    "run": "ink_r_main",
+    "variant": "lin_k2",
+    "code": "jobs/babel/ink_router.py (linear form, no hidden layer)",
+    "exported_as": {
+     "file": "ink_router_lin_k2_fp16.npz",
+     "sha256": "341be9e8d3bd6a5d56f39d5881018af7aa40d7ee5fdfb5de0ebdbfbe54af9d02"
+    }
+   }
+  }
+ ],
+ "extras": {
+  "ngram": null,
+  "draft_head": {
+   "file": "mtp.safetensors",
+   "precision": "bf16",
+   "as_released": true,
+   "kind": "inkling_dspark",
+   "taps": [
+    5,
+    23,
+    41,
+    "final_norm"
+   ],
+   "taps_meaning": "the input hidden state of these steps and the state after the final norm"
+  },
+  "vision": null
+ },
+ "derived": [
+  {
+   "id": "resident_q8",
+   "from": [
+    "resident.safetensors"
+   ],
+   "engine_format": "dmres1",
+   "sha256": "f87550c84cfcf721d2d643503583aba75a1f30069b24b18e389622c2ff04b4bd",
+   "reference": "engine/build_ink/resident_real_b8.bin (engine/ink/convert_ink.py --bits 8)",
+   "path": "derived/resident_q8.dmres1.15a39fa8aa48.bin",
+   "bytes": 1266515968
+  },
+  {
+   "id": "router.mlp_k16_h512.q8",
+   "from": [
+    "routers/mlp_k16_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": null
+  },
+  {
+   "id": "router.mlp_k1_h512.q8",
+   "from": [
+    "routers/mlp_k1_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": null
+  },
+  {
+   "id": "router.mlp_k2_h512.q8",
+   "from": [
+    "routers/mlp_k2_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "3e28bf7046a2d1ced2d815a5e919176437af129cd50064f0a4fab22b400a32e7",
+   "path": "derived/router.mlp_k2_h512.q8.dmr1.e15ecf260979.bin",
+   "bytes": 231473152
+  },
+  {
+   "id": "router.mlp_k4_h512.q8",
+   "from": [
+    "routers/mlp_k4_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": null
+  },
+  {
+   "id": "router.mlp_k8_h512.q8",
+   "from": [
+    "routers/mlp_k8_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": null
+  },
+  {
+   "id": "router.xtok_s41_h512.q8",
+   "from": [
+    "routers/xtok_s41_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "8bebfe9c25d5df48ca892d7fc1d553b01e1fbf2f9fc235111f01a7ec5f9114a0",
+   "made_by": "moved-store python/derive/inkling2_loop_xtok.py --from routers/xtok_s41_h512.safetensors --targets 0-5 --bits 8 (8-bit, the first six target applications; the engine itself does not derive this kind)",
+   "path": "derived/router.xtok_s41_h512.q8.dmr1.ba2c977e8db0.bin",
+   "bytes": 20709376
+  },
+  {
+   "id": "router.xtok_s47_h512.q8",
+   "from": [
+    "routers/xtok_s47_h512.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "2b394e3f397202183ed75f6cd9c9c1d58205fce896028f759f781cd7848aa97e",
+   "made_by": "moved-store python/derive/inkling2_loop_xtok.py --from routers/xtok_s47_h512.safetensors --targets 0-5 --bits 8 (8-bit, the first six target applications; the engine itself does not derive this kind)",
+   "path": "derived/router.xtok_s47_h512.q8.dmr1.1e0e7f1cfc2e.bin",
+   "bytes": 20709376
+  },
+  {
+   "id": "router.linear_k2.q8",
+   "from": [
+    "routers/linear_k2.safetensors"
+   ],
+   "engine_format": "dmr1",
+   "sha256": "cccfc6bd313a2058045b96a94c8d804ec87e3b18abcaa4c0b5cb7a21701975a3",
+   "reference": "local/inkling/model/routers/ink_r_main/ink_router_lin_k2_b8.dmr (whole-file identical)",
+   "path": "derived/router.linear_k2.q8.dmr1.1e7849984cbb.bin",
+   "bytes": 49152000
+  },
+  {
+   "id": "resident_q4",
+   "from": [
+    "resident.safetensors"
+   ],
+   "engine_format": "dmres1",
+   "bits": 4,
+   "sha256": "42c130377dedada5d51c5dfc76a4c8bff9d17864dc713e1b7b92d2eb8e1c85ef",
+   "variant_of": "resident_q8",
+   "optional": true,
+   "for": "memory-limited iPhones (the phone-small profile) only; tokens differ from the 8-bit set",
+   "made_by": "ms_derive resident DIR --bits 4 --from-calibrated FILE (the head and the six attention projections of each layer from a calibrated 4-bit export, every other tensor as the plain 4-bit set)",
+   "quality": "with the NVFP4 late layers, top choice equal to the exact 8-bit engine on 0.934 / 0.961 of prose / agent-text positions in exact mode (plain 4-bit: 0.923 / 0.940); fast at a 1.7 GB cache 0.911 / 0.943 (measured on the Mac)",
+   "path": "derived/resident_q4.dmres1.15a39fa8aa48.bin",
+   "bytes": 712900608
+  }
+ ],
+ "legacy": [],
+ "pending": [
+  "vision.safetensors (636,563,560 B) left out (recommendation: not uploaded); --with-vision lists it as an optional extra"
+ ],
+ "unknown": [
+  "vision.safetensors: listed in sha256.txt but not on the Mac"
+ ],
+ "generated": {
+  "by": "moved-store release tools, from the manifest of 2026-11-21 plus the new parts",
+  "date": "2026-11-22"
+ },
+ "modes": {
+  "exact": {
+   "definition": "Generated tokens never depend on the cache, the routers or timing: the model's own router picks 8 experts per layer and the engine waits for every one.",
+   "engine": "lossless"
+  },
+  "fast": {
+   "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
+   "engine": "approx:drop",
+   "wait_if": {
+    "routing_weight_over": 0.1,
+    "read_in_flight": true
+   },
+   "otherwise": "left out",
+   "substitute": false,
+   "renormalise": false
+  }
+ },
+ "profiles": {
+  "mac": {
+   "when": "macOS",
+   "mode": "exact",
+   "resident": "resident_q8",
+   "precision": "8-bit",
+   "precision_detail": "8-bit affine, groups of 64",
+   "names": {
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
+   },
+   "cache": "auto",
+   "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
+   "parts": [
+    {
+     "path": "config.json",
+     "bytes": 2722,
+     "sha256": "a7a349601f0984c4abf999c480ef775d8567d21f5f84b4e8a3e035b44f288dc2"
+    },
+    {
+     "path": "generation_config.json",
+     "bytes": 98,
+     "sha256": "a08737c07a65a8fdf69f7cf086576210e5aad4b241437090b26d7b0c4f7905f7"
+    },
+    {
+     "path": "tokenizer.json",
+     "bytes": 26178678,
+     "sha256": "7f332727f9a3f093dd452a39cc978e6757627e5dad1b0673aa4e75174f236dd6"
+    },
+    {
+     "path": "tokenizer_config.json",
+     "bytes": 13235,
+     "sha256": "bf09342d285139fd37ce10c70878af1d52cb390e9901e10248654293a80ee636"
+    },
+    {
+     "path": "chat_template.jinja",
+     "bytes": 6868,
+     "sha256": "53a9035f3255945704b5857657cfb00c1165090c0641c4f782a0cbf268cc16dc"
+    },
+    {
+     "path": "LICENSE",
+     "bytes": 11343,
+     "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32"
+    },
+    {
+     "path": "NOTICE.md",
+     "bytes": 2101,
+     "sha256": "d5e3b8cb2fd0ab80b2b028874ad4b388a8ef35a03c52937e4a02583f3592ca03"
+    },
+    {
+     "path": "embeddings.safetensors",
+     "bytes": 926319056,
+     "sha256": "93b761e9c2cfe04dcc4ccfb381ac27257fe854026cadda44ffa56344938ae01f"
+    },
+    {
+     "path": "derived/resident_q8.dmres1.15a39fa8aa48.bin",
+     "bytes": 1266515968,
+     "sha256": "f87550c84cfcf721d2d643503583aba75a1f30069b24b18e389622c2ff04b4bd"
+    },
+    {
+     "path": "derived/router.xtok_s47_h512.q8.dmr1.1e0e7f1cfc2e.bin",
+     "bytes": 20709376,
+     "sha256": "2b394e3f397202183ed75f6cd9c9c1d58205fce896028f759f781cd7848aa97e"
+    },
+    {
+     "path": "store/layer_00.bin",
+     "bytes": 574619648,
+     "sha256": "58d8fd082e4b61c10c35e23395eeaf40feb50f34141981de153380e488598b66"
+    },
+    {
+     "path": "store/layer_01.bin",
+     "bytes": 574619648,
+     "sha256": "65bd7575fbec3f3d9b5dba06fba9b7c79322ee5de385f45b290d0b9717e75bc3"
+    },
+    {
+     "path": "store/layer_02.bin",
+     "bytes": 574619648,
+     "sha256": "8655c7ce67e449d90d60d79dbcee357f4cd88f8a7a9ae035bc24cea76a52f135"
+    },
+    {
+     "path": "store/layer_03.bin",
+     "bytes": 574619648,
+     "sha256": "a771081e8d9944e141c0627ad7894bf95bff120deecc24edddb2f52e07e39325"
+    },
+    {
+     "path": "store/layer_04.bin",
+     "bytes": 574619648,
+     "sha256": "b144969275b67f9222a95f52c9086266d9908c5ca5b197c77dabd3792d63e280"
+    },
+    {
+     "path": "store/layer_05.bin",
+     "bytes": 574619648,
+     "sha256": "78c95650229a5a97de4ea8934908933e515f978cc573d962cc105fd82ce395eb"
+    },
+    {
+     "path": "store/layer_06.bin",
+     "bytes": 574619648,
+     "sha256": "4780abacfebc78e1fbab3cc54e00697e241232af05c567e2d61cf7d75b516c93"
+    },
+    {
+     "path": "store/layer_07.bin",
+     "bytes": 574619648,
+     "sha256": "e9d8b6b753fb9cc302dff7d3168db2aca5bff96539a0116c4d871981b88e6654"
+    },
+    {
+     "path": "store/layer_08.bin",
+     "bytes": 574619648,
+     "sha256": "4a1770ddd1aa445fca3e26a7e7fc335ec6afde6cf21081606d14fabdae30fc0b"
+    },
+    {
+     "path": "store/layer_09.bin",
+     "bytes": 574619648,
+     "sha256": "15af8255cb79e193b24344c98bc0a526bb486b19e002526935d3f2dd5e85871f"
+    },
+    {
+     "path": "store/layer_10.bin",
+     "bytes": 574619648,
+     "sha256": "b8bc047e89b848bf05eb2d020518583b6e59c4e75e01a76a34728d8fb9c20b93"
+    },
+    {
+     "path": "store/layer_11.bin",
+     "bytes": 574619648,
+     "sha256": "e9cd833d4d0fc90e44c925bd333d4a03c197d4f301e00e8a2c42e7a3a3de20ed"
+    },
+    {
+     "path": "store/layer_12.bin",
+     "bytes": 574619648,
+     "sha256": "70a185557b2a7c2225213f7dc7cff5bc94e6e67e89f522b19de4695df6e84e09"
+    },
+    {
+     "path": "store/layer_13.bin",
+     "bytes": 574619648,
+     "sha256": "3bafd586b95a06c564af48b520792d17ccae8dd794ef56e4d2b98b21e4dd8263"
+    },
+    {
+     "path": "store/layer_14.bin",
+     "bytes": 574619648,
+     "sha256": "f2108a790b08ef622ff147ec23d25c61d38597be2454e4eaa27ee0568b773054"
+    },
+    {
+     "path": "store/layer_15.bin",
+     "bytes": 574619648,
+     "sha256": "c8158643f244aecf6ea30fe0326a262402bb0e193cd76dbfcbc9ae32795d10a6"
+    },
+    {
+     "path": "store/layer_16.bin",
+     "bytes": 574619648,
+     "sha256": "b783e6178fe8321e02fbb79a5e9bedaeae86e9059c1a1486b28dbc7953615744"
+    },
+    {
+     "path": "store/layer_17.bin",
+     "bytes": 574619648,
+     "sha256": "b4ea395489df8a14bc3622d4733dceb0b302996bdad4a21c8011825b2631ea58"
+    },
+    {
+     "path": "store/layer_18.bin",
+     "bytes": 574619648,
+     "sha256": "8b514f903cd9fd28cb2d4718b7160b26d3d4af9170abbf09b61d147b7fe046bf"
+    },
+    {
+     "path": "store/layer_19.bin",
+     "bytes": 574619648,
+     "sha256": "58c5853777e2d5f404db0b46109b28cc05b77548a0366ba601d6783d1effdfe4"
+    },
+    {
+     "path": "store/layer_20.bin",
+     "bytes": 1052770304,
+     "sha256": "fd279c7374d514253e5e1fc21114ab61db55a6ebc0bbf022ca286c74f7e83eb9"
+    },
+    {
+     "path": "store/layer_21.bin",
+     "bytes": 1052770304,
+     "sha256": "ab7a2f82bc3e1c578cfa343a6ea120d6ee48d357a1d92e295c941c88e54e3e4e"
+    },
+    {
+     "path": "store/layer_22.bin",
+     "bytes": 1052770304,
+     "sha256": "0391908e2eac8e10f557a400dc2dbcac309567ac439de8601a3746ef95161bef"
+    },
+    {
+     "path": "store/layer_23.bin",
+     "bytes": 1052770304,
+     "sha256": "cdfc33f226a360d1ab1797b86e8f6743e06d2f5372da5b9b881ba4aa731a20e9"
+    },
+    {
+     "path": "derived/router.linear_k2.q8.dmr1.1e7849984cbb.bin",
+     "bytes": 49152000,
+     "sha256": "cccfc6bd313a2058045b96a94c8d804ec87e3b18abcaa4c0b5cb7a21701975a3"
+    }
+   ],
+   "bytes": 17992385621,
+   "optional": [
+    {
+     "path": "derived/router.xtok_s41_h512.q8.dmr1.ba2c977e8db0.bin",
+     "bytes": 20709376,
+     "sha256": "8bebfe9c25d5df48ca892d7fc1d553b01e1fbf2f9fc235111f01a7ec5f9114a0"
+    },
+    {
+     "path": "mtp.safetensors",
+     "bytes": 635801416,
+     "sha256": "7c3b651317f01f73bcf4e1dceba66ef8b7e1a1eac6bc171e882e690a4b10a1d2"
+    },
+    {
+     "path": "resident.safetensors",
+     "bytes": 3218998456,
+     "sha256": "15a39fa8aa485786ba4b300a76b6a2053c6388b5f3babb16e7c03558a3eb381e"
+    }
+   ],
+   "bytes_with_optional": 21867894869,
+   "optional_note": "the background cross-token source (source 41); the release's draft head (dmeng --draft head|both, command-line tool only), which also needs resident.safetensors (its output layer is folded from the bf16 unembedding)",
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+  },
+  "phone": {
+   "when": "iOS with at least 5.0 GB available at open",
+   "mode": "exact",
+   "resident": "resident_q8",
+   "precision": "8-bit",
+   "precision_detail": "8-bit affine, groups of 64",
+   "names": {
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
+   },
+   "cache": "slab",
+   "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
+   "min_available_gb": 5.0,
+   "parts": [
+    {
+     "path": "config.json",
+     "bytes": 2722,
+     "sha256": "a7a349601f0984c4abf999c480ef775d8567d21f5f84b4e8a3e035b44f288dc2"
+    },
+    {
+     "path": "generation_config.json",
+     "bytes": 98,
+     "sha256": "a08737c07a65a8fdf69f7cf086576210e5aad4b241437090b26d7b0c4f7905f7"
+    },
+    {
+     "path": "tokenizer.json",
+     "bytes": 26178678,
+     "sha256": "7f332727f9a3f093dd452a39cc978e6757627e5dad1b0673aa4e75174f236dd6"
+    },
+    {
+     "path": "tokenizer_config.json",
+     "bytes": 13235,
+     "sha256": "bf09342d285139fd37ce10c70878af1d52cb390e9901e10248654293a80ee636"
+    },
+    {
+     "path": "chat_template.jinja",
+     "bytes": 6868,
+     "sha256": "53a9035f3255945704b5857657cfb00c1165090c0641c4f782a0cbf268cc16dc"
+    },
+    {
+     "path": "LICENSE",
+     "bytes": 11343,
+     "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32"
+    },
+    {
+     "path": "NOTICE.md",
+     "bytes": 2101,
+     "sha256": "d5e3b8cb2fd0ab80b2b028874ad4b388a8ef35a03c52937e4a02583f3592ca03"
+    },
+    {
+     "path": "embeddings.safetensors",
+     "bytes": 926319056,
+     "sha256": "93b761e9c2cfe04dcc4ccfb381ac27257fe854026cadda44ffa56344938ae01f"
+    },
+    {
+     "path": "derived/resident_q8.dmres1.15a39fa8aa48.bin",
+     "bytes": 1266515968,
+     "sha256": "f87550c84cfcf721d2d643503583aba75a1f30069b24b18e389622c2ff04b4bd"
+    },
+    {
+     "path": "derived/router.xtok_s47_h512.q8.dmr1.1e0e7f1cfc2e.bin",
+     "bytes": 20709376,
+     "sha256": "2b394e3f397202183ed75f6cd9c9c1d58205fce896028f759f781cd7848aa97e"
+    },
+    {
+     "path": "store/layer_00.bin",
+     "bytes": 574619648,
+     "sha256": "58d8fd082e4b61c10c35e23395eeaf40feb50f34141981de153380e488598b66"
+    },
+    {
+     "path": "store/layer_01.bin",
+     "bytes": 574619648,
+     "sha256": "65bd7575fbec3f3d9b5dba06fba9b7c79322ee5de385f45b290d0b9717e75bc3"
+    },
+    {
+     "path": "store/layer_02.bin",
+     "bytes": 574619648,
+     "sha256": "8655c7ce67e449d90d60d79dbcee357f4cd88f8a7a9ae035bc24cea76a52f135"
+    },
+    {
+     "path": "store/layer_03.bin",
+     "bytes": 574619648,
+     "sha256": "a771081e8d9944e141c0627ad7894bf95bff120deecc24edddb2f52e07e39325"
+    },
+    {
+     "path": "store/layer_04.bin",
+     "bytes": 574619648,
+     "sha256": "b144969275b67f9222a95f52c9086266d9908c5ca5b197c77dabd3792d63e280"
+    },
+    {
+     "path": "store/layer_05.bin",
+     "bytes": 574619648,
+     "sha256": "78c95650229a5a97de4ea8934908933e515f978cc573d962cc105fd82ce395eb"
+    },
+    {
+     "path": "store/layer_06.bin",
+     "bytes": 574619648,
+     "sha256": "4780abacfebc78e1fbab3cc54e00697e241232af05c567e2d61cf7d75b516c93"
+    },
+    {
+     "path": "store/layer_07.bin",
+     "bytes": 574619648,
+     "sha256": "e9d8b6b753fb9cc302dff7d3168db2aca5bff96539a0116c4d871981b88e6654"
+    },
+    {
+     "path": "store/layer_08.bin",
+     "bytes": 574619648,
+     "sha256": "4a1770ddd1aa445fca3e26a7e7fc335ec6afde6cf21081606d14fabdae30fc0b"
+    },
+    {
+     "path": "store/layer_09.bin",
+     "bytes": 574619648,
+     "sha256": "15af8255cb79e193b24344c98bc0a526bb486b19e002526935d3f2dd5e85871f"
+    },
+    {
+     "path": "store/layer_10.bin",
+     "bytes": 574619648,
+     "sha256": "b8bc047e89b848bf05eb2d020518583b6e59c4e75e01a76a34728d8fb9c20b93"
+    },
+    {
+     "path": "store/layer_11.bin",
+     "bytes": 574619648,
+     "sha256": "e9cd833d4d0fc90e44c925bd333d4a03c197d4f301e00e8a2c42e7a3a3de20ed"
+    },
+    {
+     "path": "store/layer_12.bin",
+     "bytes": 574619648,
+     "sha256": "70a185557b2a7c2225213f7dc7cff5bc94e6e67e89f522b19de4695df6e84e09"
+    },
+    {
+     "path": "store/layer_13.bin",
+     "bytes": 574619648,
+     "sha256": "3bafd586b95a06c564af48b520792d17ccae8dd794ef56e4d2b98b21e4dd8263"
+    },
+    {
+     "path": "store/layer_14.bin",
+     "bytes": 574619648,
+     "sha256": "f2108a790b08ef622ff147ec23d25c61d38597be2454e4eaa27ee0568b773054"
+    },
+    {
+     "path": "store/layer_15.bin",
+     "bytes": 574619648,
+     "sha256": "c8158643f244aecf6ea30fe0326a262402bb0e193cd76dbfcbc9ae32795d10a6"
+    },
+    {
+     "path": "store/layer_16.bin",
+     "bytes": 574619648,
+     "sha256": "b783e6178fe8321e02fbb79a5e9bedaeae86e9059c1a1486b28dbc7953615744"
+    },
+    {
+     "path": "store/layer_17.bin",
+     "bytes": 574619648,
+     "sha256": "b4ea395489df8a14bc3622d4733dceb0b302996bdad4a21c8011825b2631ea58"
+    },
+    {
+     "path": "store/layer_18.bin",
+     "bytes": 574619648,
+     "sha256": "8b514f903cd9fd28cb2d4718b7160b26d3d4af9170abbf09b61d147b7fe046bf"
+    },
+    {
+     "path": "store/layer_19.bin",
+     "bytes": 574619648,
+     "sha256": "58c5853777e2d5f404db0b46109b28cc05b77548a0366ba601d6783d1effdfe4"
+    },
+    {
+     "path": "store/layer_20.bin",
+     "bytes": 1052770304,
+     "sha256": "fd279c7374d514253e5e1fc21114ab61db55a6ebc0bbf022ca286c74f7e83eb9"
+    },
+    {
+     "path": "store/layer_21.bin",
+     "bytes": 1052770304,
+     "sha256": "ab7a2f82bc3e1c578cfa343a6ea120d6ee48d357a1d92e295c941c88e54e3e4e"
+    },
+    {
+     "path": "store/layer_22.bin",
+     "bytes": 1052770304,
+     "sha256": "0391908e2eac8e10f557a400dc2dbcac309567ac439de8601a3746ef95161bef"
+    },
+    {
+     "path": "store/layer_23.bin",
+     "bytes": 1052770304,
+     "sha256": "cdfc33f226a360d1ab1797b86e8f6743e06d2f5372da5b9b881ba4aa731a20e9"
+    },
+    {
+     "path": "derived/router.linear_k2.q8.dmr1.1e7849984cbb.bin",
+     "bytes": 49152000,
+     "sha256": "cccfc6bd313a2058045b96a94c8d804ec87e3b18abcaa4c0b5cb7a21701975a3"
+    }
+   ],
+   "bytes": 17992385621,
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+  },
+  "phone-small": {
+   "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
+   "mode": "fast",
+   "resident": "resident_q4",
+   "precision": "4-bit",
+   "precision_detail": "4-bit affine, groups of 64, calibrated (resident_q4); experts' layers 20-23 as NVFP4",
+   "names": {
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
+   },
+   "cache": "slab",
+   "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
+   "parts": [
+    {
+     "path": "config.json",
+     "bytes": 2722,
+     "sha256": "a7a349601f0984c4abf999c480ef775d8567d21f5f84b4e8a3e035b44f288dc2"
+    },
+    {
+     "path": "generation_config.json",
+     "bytes": 98,
+     "sha256": "a08737c07a65a8fdf69f7cf086576210e5aad4b241437090b26d7b0c4f7905f7"
+    },
+    {
+     "path": "tokenizer.json",
+     "bytes": 26178678,
+     "sha256": "7f332727f9a3f093dd452a39cc978e6757627e5dad1b0673aa4e75174f236dd6"
+    },
+    {
+     "path": "tokenizer_config.json",
+     "bytes": 13235,
+     "sha256": "bf09342d285139fd37ce10c70878af1d52cb390e9901e10248654293a80ee636"
+    },
+    {
+     "path": "chat_template.jinja",
+     "bytes": 6868,
+     "sha256": "53a9035f3255945704b5857657cfb00c1165090c0641c4f782a0cbf268cc16dc"
+    },
+    {
+     "path": "LICENSE",
+     "bytes": 11343,
+     "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32"
+    },
+    {
+     "path": "NOTICE.md",
+     "bytes": 2101,
+     "sha256": "d5e3b8cb2fd0ab80b2b028874ad4b388a8ef35a03c52937e4a02583f3592ca03"
+    },
+    {
+     "path": "embeddings.safetensors",
+     "bytes": 926319056,
+     "sha256": "93b761e9c2cfe04dcc4ccfb381ac27257fe854026cadda44ffa56344938ae01f"
+    },
+    {
+     "path": "derived/resident_q4.dmres1.15a39fa8aa48.bin",
+     "bytes": 712900608,
+     "sha256": "42c130377dedada5d51c5dfc76a4c8bff9d17864dc713e1b7b92d2eb8e1c85ef"
+    },
+    {
+     "path": "derived/router.xtok_s47_h512.q8.dmr1.1e0e7f1cfc2e.bin",
+     "bytes": 20709376,
+     "sha256": "2b394e3f397202183ed75f6cd9c9c1d58205fce896028f759f781cd7848aa97e"
+    },
+    {
+     "path": "store/layer_00.bin",
+     "bytes": 574619648,
+     "sha256": "58d8fd082e4b61c10c35e23395eeaf40feb50f34141981de153380e488598b66"
+    },
+    {
+     "path": "store/layer_01.bin",
+     "bytes": 574619648,
+     "sha256": "65bd7575fbec3f3d9b5dba06fba9b7c79322ee5de385f45b290d0b9717e75bc3"
+    },
+    {
+     "path": "store/layer_02.bin",
+     "bytes": 574619648,
+     "sha256": "8655c7ce67e449d90d60d79dbcee357f4cd88f8a7a9ae035bc24cea76a52f135"
+    },
+    {
+     "path": "store/layer_03.bin",
+     "bytes": 574619648,
+     "sha256": "a771081e8d9944e141c0627ad7894bf95bff120deecc24edddb2f52e07e39325"
+    },
+    {
+     "path": "store/layer_04.bin",
+     "bytes": 574619648,
+     "sha256": "b144969275b67f9222a95f52c9086266d9908c5ca5b197c77dabd3792d63e280"
+    },
+    {
+     "path": "store/layer_05.bin",
+     "bytes": 574619648,
+     "sha256": "78c95650229a5a97de4ea8934908933e515f978cc573d962cc105fd82ce395eb"
+    },
+    {
+     "path": "store/layer_06.bin",
+     "bytes": 574619648,
+     "sha256": "4780abacfebc78e1fbab3cc54e00697e241232af05c567e2d61cf7d75b516c93"
+    },
+    {
+     "path": "store/layer_07.bin",
+     "bytes": 574619648,
+     "sha256": "e9d8b6b753fb9cc302dff7d3168db2aca5bff96539a0116c4d871981b88e6654"
+    },
+    {
+     "path": "store/layer_08.bin",
+     "bytes": 574619648,
+     "sha256": "4a1770ddd1aa445fca3e26a7e7fc335ec6afde6cf21081606d14fabdae30fc0b"
+    },
+    {
+     "path": "store/layer_09.bin",
+     "bytes": 574619648,
+     "sha256": "15af8255cb79e193b24344c98bc0a526bb486b19e002526935d3f2dd5e85871f"
+    },
+    {
+     "path": "store/layer_10.bin",
+     "bytes": 574619648,
+     "sha256": "b8bc047e89b848bf05eb2d020518583b6e59c4e75e01a76a34728d8fb9c20b93"
+    },
+    {
+     "path": "store/layer_11.bin",
+     "bytes": 574619648,
+     "sha256": "e9cd833d4d0fc90e44c925bd333d4a03c197d4f301e00e8a2c42e7a3a3de20ed"
+    },
+    {
+     "path": "store/layer_12.bin",
+     "bytes": 574619648,
+     "sha256": "70a185557b2a7c2225213f7dc7cff5bc94e6e67e89f522b19de4695df6e84e09"
+    },
+    {
+     "path": "store/layer_13.bin",
+     "bytes": 574619648,
+     "sha256": "3bafd586b95a06c564af48b520792d17ccae8dd794ef56e4d2b98b21e4dd8263"
+    },
+    {
+     "path": "store/layer_14.bin",
+     "bytes": 574619648,
+     "sha256": "f2108a790b08ef622ff147ec23d25c61d38597be2454e4eaa27ee0568b773054"
+    },
+    {
+     "path": "store/layer_15.bin",
+     "bytes": 574619648,
+     "sha256": "c8158643f244aecf6ea30fe0326a262402bb0e193cd76dbfcbc9ae32795d10a6"
+    },
+    {
+     "path": "store/layer_16.bin",
+     "bytes": 574619648,
+     "sha256": "b783e6178fe8321e02fbb79a5e9bedaeae86e9059c1a1486b28dbc7953615744"
+    },
+    {
+     "path": "store/layer_17.bin",
+     "bytes": 574619648,
+     "sha256": "b4ea395489df8a14bc3622d4733dceb0b302996bdad4a21c8011825b2631ea58"
+    },
+    {
+     "path": "store/layer_18.bin",
+     "bytes": 574619648,
+     "sha256": "8b514f903cd9fd28cb2d4718b7160b26d3d4af9170abbf09b61d147b7fe046bf"
+    },
+    {
+     "path": "store/layer_19.bin",
+     "bytes": 574619648,
+     "sha256": "58c5853777e2d5f404db0b46109b28cc05b77548a0366ba601d6783d1effdfe4"
+    },
+    {
+     "path": "store_nv4/layer_20.bin",
+     "bytes": 574619648,
+     "sha256": "6e7921496cd70e3c15523ec68539e5bf32ab2799dce35de19f5967d4c43ab48c"
+    },
+    {
+     "path": "store_nv4/layer_21.bin",
+     "bytes": 574619648,
+     "sha256": "0b8a7cfd4c24cf7b347748ce97d377cfae6609a7abb69c7fd695b552d87ea317"
+    },
+    {
+     "path": "store_nv4/layer_22.bin",
+     "bytes": 574619648,
+     "sha256": "21a84a7ce1f46d653ad4ff3f8327c45d989202e0de19b77cd765964430d88471"
+    },
+    {
+     "path": "store_nv4/layer_23.bin",
+     "bytes": 574619648,
+     "sha256": "c294d7bf3b621e17d645cb3d0f3136eca708aae36085fe5fbb6693cb07669460"
+    },
+    {
+     "path": "derived/router.linear_k2.q8.dmr1.1e7849984cbb.bin",
+     "bytes": 49152000,
+     "sha256": "cccfc6bd313a2058045b96a94c8d804ec87e3b18abcaa4c0b5cb7a21701975a3"
+    }
+   ],
+   "bytes": 15526167637,
+   "status": "top choice equal to the exact 8-bit engine, prose / agent text: exact 0.934 / 0.961, fast at a 1.7 GB cache 0.911 / 0.943 (Mac); a device run is still to do",
+   "experts": {
+    "layer_format": [
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16",
+     "nvfp4_g16"
+    ],
+    "layer_files": {
+     "20": "store_nv4/layer_20.bin",
+     "21": "store_nv4/layer_21.bin",
+     "22": "store_nv4/layer_22.bin",
+     "23": "store_nv4/layer_23.bin"
+    },
+    "note": "layers 20-23 re-quantised from the release's MXFP8 to NVFP4 (least-squares block scales); the release's files stay as they are for the other profiles"
+   }
+  }
+ },
+ "defaults": {
+  "routers": [
+   "linear_k2"
+  ],
+  "names": {
+   "rule": "confidence",
+   "tau": 0.5,
+   "candidates": 16
+  },
+  "cross_token": {
+   "routers": [
+    "xtok_s47_h512"
+   ],
+   "source": 47,
+   "tau": 0.5,
+   "priority_reads": true
+  },
+  "eviction": "auto",
+  "drafts": false,
+  "experts": "as released: NVFP4 (layers 0-19), MXFP8 (layers 20-23)",
+  "notes": {
+   "routers": "linear_k2 names experts 2 steps early (one linear layer: about a fifth of the MLP's router bytes per token); its engine file is derived/router.linear_k2.q8...bin; mlp_k2_h512 stays available (--routers or routers_id)",
+   "cross_token": "source 47 names the next token's experts for its first six steps (engine targets 0-5), with priority reads",
+   "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
+   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only); the release's draft head through the command-line tool only (the mac profile's optional parts)"
+  }
+ },
+ "cross_token_routers": [
+  {
+   "id": "xtok_s47_h512",
+   "path": "routers/xtok_s47_h512.safetensors",
+   "default": true,
+   "form": "xtok",
+   "source_app": 47,
+   "targets": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "engine_targets": "0-5",
+   "hidden": 512,
+   "index": "application",
+   "role_in_engine": "dmeng --xtok FILE (source 47) and --xtok-bg FILE (source 41, a background second source)",
+   "features": {
+    "inputs": [
+     "h_src",
+     "h_target"
+    ],
+    "layout": "x = [h_t@S, h_t@a]: token t's MoE-block inputs at the source application S and at the target a",
+    "output": "the top m of z = lin(x) + mlp.2(gelu(mlp.0(x))) name token t+1's experts at application a"
+   },
+   "dtypes": "matrices f16, vectors (biases) f32",
+   "training": {
+    "run": "ink_x_main",
+    "variant": "xtok_s47",
+    "note": "trained by imitation of the next token's released routing; data and token count are not recorded in the exported file"
+   }
+  },
+  {
+   "id": "xtok_s41_h512",
+   "path": "routers/xtok_s41_h512.safetensors",
+   "default": false,
+   "form": "xtok",
+   "source_app": 41,
+   "targets": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+   ],
+   "engine_targets": "0-5",
+   "hidden": 512,
+   "index": "application",
+   "role_in_engine": "dmeng --xtok FILE (source 47) and --xtok-bg FILE (source 41, a background second source)",
+   "features": {
+    "inputs": [
+     "h_src",
+     "h_target"
+    ],
+    "layout": "x = [h_t@S, h_t@a]: token t's MoE-block inputs at the source application S and at the target a",
+    "output": "the top m of z = lin(x) + mlp.2(gelu(mlp.0(x))) name token t+1's experts at application a"
+   },
+   "dtypes": "matrices f16, vectors (biases) f32",
+   "training": {
+    "run": "ink_x_main",
+    "variant": "xtok_s41",
+    "note": "trained by imitation of the next token's released routing; data and token count are not recorded in the exported file"
+   }
+  }
+ ],
+ "notes": [
+  "cross_token_routers: not in `routers` because the engine's manifest reader expects every entry there to name all 48 steps (targets == steps); the engine reads them through dmeng --xtok"
+ ],
+ "layout": {
+  "derived_dir": "derived/",
+  "engine_cache_dir": ".dmeng/",
+  "rule": "engine-ready files are in derived/ under the engine's own names (<id>.<engine_format>.<first 12 hex of the source part's sha256>.bin); the engine looks for them in DIR/derived/ as well as DIR/.dmeng/ and derives what is missing into DIR/.dmeng/",
+  "profile_rule": "the engine picks the profile from the device; --profile NAME overrides it, --mode exact|fast overrides the profile's mode"
+ }
+}

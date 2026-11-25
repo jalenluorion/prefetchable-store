@@ -364,7 +364,97 @@ std::string Resolved::json() const {
     << ",\"eviction\":" << qq(evict) << ",\"drafts\":" << drafts << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
-    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "}}";
+    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
+    << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk << "}";
   return o.str();
+}
+
+Resolved RunOpts::resolved(double cache_gb_in_force) const {
+  Resolved x;
+  x.profile = profiled ? preset.profile : "none";
+  x.mode = mode;
+  x.routers = routers;
+  x.m = m;
+  x.tau = tau;
+  x.cand = cand;
+  x.xtok = xtok;
+  x.cache_gb = cache_gb_in_force;
+  x.cache_auto = cache != "fixed";
+  x.evict = evict;
+  x.drafts = drafts > 0 ? 1 : 0;
+  x.gpu_frac = gpu_frac;
+  x.gpu_experts = gpu_experts;
+  x.run_ahead = run_ahead > 0 ? run_ahead : 0;
+  x.run_ahead_depth = run_ahead_depth;
+  x.ra_budget = ra_budget;
+  x.ra_max_tok = ra_max_tok;
+  x.ra_sat_skip = ra_sat_skip;
+  x.readers = readers;
+  x.bg_ranks = bg_ranks;
+  x.bg_gate = bg_ranks > 0 ? bg_gate : 0;
+  x.layer_caps = layer_caps;
+  x.xtok_tau = xtok_tau;
+  x.rd_prio = rd_prio;
+  x.prefill_chunk = prefill_chunk;
+  return x;
+}
+
+bool resolve_run(const std::string& dir, const std::string& profile_req, const Given& g, const std::string& derived_dir, int64_t avail,
+                 RunOpts& r, std::string& err) {
+  Preset& P = r.preset;
+  P = Preset();
+  if (profile_req != "none" && !resolve_preset(dir, profile_req, g.mode ? *g.mode : "", derived_dir, avail, P, err)) return false;
+  r.profiled = profile_req != "none" && P.profile != "none";
+  const bool pf = r.profiled;
+  r.notes = P.notes;
+  // the mode
+  r.mode = pf ? P.engine_mode : engine_mode_of(g.mode ? *g.mode : r.mode);
+  // the in-memory weights
+  if (g.resident) r.resident = *g.resident;
+  else if (pf && !P.resident.empty()) r.resident = P.resident;
+  // names: the profile's routers (and cross-token routers) only when no early address was given
+  const bool addr = g.routers || g.xtok || g.other_address;
+  if (g.routers) r.routers = *g.routers == "none" ? "" : *g.routers;
+  if (g.xtok) r.xtok = *g.xtok == "none" ? "" : *g.xtok;
+  r.routers_from_profile = pf && !addr && !P.routers.empty();
+  if (pf && !addr) {
+    r.routers = P.routers;
+    r.xtok = P.xtok;
+    if (!P.xtok.empty()) {
+      r.xtok_tau = P.xtok_tau;
+      if (P.rd_prio) r.rd_prio = 1;
+    }
+  }
+  if (g.xtok_tau) r.xtok_tau = *g.xtok_tau;
+  if (g.rd_prio) r.rd_prio = *g.rd_prio ? 1 : 0;
+  names_rule(P, r.routers_from_profile, (bool)g.m, g.m ? *g.m : r.m, (bool)g.tau, g.tau ? *g.tau : r.tau, (bool)g.cand, g.cand ? *g.cand : r.cand, r.m,
+             r.tau, r.cand);
+  // the cache
+  r.evict = g.evict ? *g.evict : pf ? P.evict : r.evict;
+  if (g.layer_caps) r.layer_caps = *g.layer_caps;
+  else if (pf && !P.layer_caps.empty()) r.layer_caps = P.layer_caps;
+  if (g.cache_gb) r.cache = "fixed", r.cache_gb = *g.cache_gb;
+  else if (g.cache_auto) r.cache = "auto";
+  else if (pf) r.cache = P.cache;
+  // the prompt path
+  r.gpu_frac = g.gpu_frac ? *g.gpu_frac : pf ? P.gpu_frac : r.gpu_frac;
+  r.gpu_experts = g.gpu_experts ? *g.gpu_experts : pf ? P.gpu_experts : r.gpu_experts;
+  if (g.gpu_off) r.gpu_frac = r.gpu_experts = 0;
+  if (g.prefill_chunk) r.prefill_chunk = *g.prefill_chunk;
+  else if (pf && !g.recording) r.prefill_chunk = 512;
+  // run-ahead, readers, background reads
+  r.run_ahead = g.run_ahead ? *g.run_ahead : pf ? P.run_ahead : r.run_ahead;
+  r.run_ahead_depth = g.run_ahead_depth ? *g.run_ahead_depth : pf ? P.run_ahead_depth : r.run_ahead_depth;
+  r.ra_budget = g.ra_budget ? *g.ra_budget : pf ? P.ra_budget : r.ra_budget;
+  r.ra_max_tok = g.ra_max_tok ? *g.ra_max_tok : pf ? P.ra_max_tok : r.ra_max_tok;
+  r.ra_sat_skip = g.ra_sat_skip ? *g.ra_sat_skip : pf ? P.ra_sat_skip : r.ra_sat_skip;
+  if (g.readers) r.readers = *g.readers;
+  else if (pf && P.readers > 0) r.readers = P.readers;
+  r.bg_ranks = g.bg_ranks ? *g.bg_ranks : pf ? P.bg_ranks : r.bg_ranks;
+  r.bg_gate = g.bg_gate ? *g.bg_gate : pf ? P.bg_gate : r.bg_gate;
+  // drafting
+  if (g.drafts) r.drafts = *g.drafts;
+  else if (pf) r.drafts = P.drafts ? 1 : 0;
+  return true;
 }
 }  // namespace dm

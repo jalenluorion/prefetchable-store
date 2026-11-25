@@ -8,13 +8,37 @@ tests/prefill_check.sh MODEL_DIR                     # batched prefill == single
 build/dmeng --model MODEL_DIR --prompt-file bench/prompts/qwen3_5_moe/pitt.ids --n 64 --verify-check 32   # verify passes == single steps (exit 3 if not)
 build/dm_gate --model MODEL_DIR --prompt-ids bench/prompts/qwen3_5_moe/pitt.ids --n 400 --out capi.ids   # then compare with dmeng --out-ids
 build/manifest_dump MODEL_DIR --check --sha          # a downloaded folder against its moved-store.json (--profile mac: a one-profile download)
-tests/draft_check.sh Q36_TINY INK_TINY INK_RES0 INK_RES8      # needs the tiny models (below)
+TORCH_PY=PY_TORCH MLX_PY=PY_MLX tests/tiny_all.sh   # tiny models of all three families, the same checks on each (below)
 ```
 
 The scripts print a verdict line and exit 0 only when they pass; `dmeng --verify-check` reports in its JSON line and
 exits 3 on a difference; `dm_gate` writes ids for a comparison. A real model folder is a weight repository downloaded
-from the Hub (the README's quick start). The tiny random models of the checks are made by generators in this
-repository (`tests/tiny_all.sh` builds all three and runs every check on each).
+from the Hub (the README's quick start).
+
+## One command for the tiny models: `tests/tiny_all.sh [OUT]`
+
+Builds a tiny random model of each family with its generator here (`tests/<family>/make_tiny.py`: a synthetic release
+in the real release's layout, run through the repo's converter, a random router set as the weight repo publishes it, and
+the manifest written by `tests/tiny_manifest.py` from the family's published manifest in `python/convert/<family>/`, so
+the tiny folder resolves its defaults as the real one does), derives the engine-ready files with `ms_derive`, lists them
+with their sha256 in the manifest, and runs `tests/family_check.py` on each: the same checks for every family, read from
+the engine itself (its JSON's `"capabilities"`) and the manifest, never from the family's name. It ends with a family x
+check matrix; a check a family cannot run is "not supported for this family", and the engine's refusal is checked.
+`TORCH_PY` is a python with torch, transformers, safetensors, numpy and tokenizers (the 35B's and Flash-Next's
+generators and references), `MLX_PY` one with mlx and mlx-lm with the Inkling 2 model (mlx-lm PR 2086).
+
+| check | what it compares |
+|---|---|
+| reference | exact decode against an independent reference: `tests/<family>/tiny_check.py` (transformers' model for the 35B and Flash-Next, the PR's MLX model for Inkling, each given exactly the engine's weights): the fp32 reference path within 1e-4 of max \|logit\| where the family has one, the speed path's agreement |
+| invariance | exact mode: logits (300 positions) and greedy ids bit-identical with every expert held / few slots, 1 / 4 / 5 threads, router names, run-ahead, oracle replays |
+| prefill | batched prefill == single steps (dmserve --check: logits, fixed state, KV, greedy continuation; CPU, sub-chunks, GPU share, few slots) and dmeng's ids batched == token by token |
+| checkpoint | dmserve --check-ckpt (long / identical / diverging requests, each equal to a cold computation) and dmeng --state-check |
+| server | the server worker's greedy and sampled ids equal dmeng's |
+| drafting | --verify-check (verify passes with rollbacks == single steps), --draft fixed / lookup == plain decoding (greedy, sampled), the server worker the same; a family without a verify pass: dmeng and dmserve must refuse `--draft`, `--drafts 1`, `--verify-check` |
+| presets | the precedence (explicit > profile > manifest > built-in) for every declared profile in dmeng, the C API and dmserve, read back from each one's `"resolved"` JSON, and the three printing the same settings |
+
+`tests/fingerprint.py MODEL OUT.json [--against OLD.json]`: sha256 of the logits and ids of eleven fixed runs (every
+setting explicit), to prove a change moves no bit (two builds, or before and after a refactor).
 
 The binaries come from `build/` (configure and build the repo first); `DMENG_BIN` / `DMSERVE_BIN` point a check at
 another build. The checks print a verdict line and exit 0 only when they pass; the two drivers write ids or decision
@@ -24,14 +48,11 @@ lines for a comparison made outside them.
 
 | check | what it compares | needs |
 |---|---|---|
-| `qwen3_5_moe/tiny_check.py` | dmeng on a tiny random Qwen3.6-geometry model against transformers / MLX references, every precision and several expert budgets | `Q36_TINY` (the tiny model and its references), numpy, torch |
-| `qwen4_exp/tiny_check.py` | dmeng on the tiny random Qwen3.8-Flash-Next against transformers' Qwen4ExpForCausalLM (float32, the engine's 8-bit codes, the store's experts and n-gram rows): the reference path within 1e-4 of max \|logit\|; exact mode bit-identical across budgets, threads, routers (lag 4, from the npz), run-ahead and oracle replays; fast mode; batched prefill == single steps (CPU and GPU share); the prefix cache's checkpoints and a restored state | `FLASH_TINY` (make_tiny.py's OUT), numpy, torch, transformers |
-| `qwen4_exp/server_check.py` | the OpenAI-compatible server on the tiny Flash-Next: /v1/models, a completion with tools, the same streamed, a follow-up from the prefix cache | `FLASH_TINY`, tokenizers, jinja2 |
+| `qwen3_5_moe/tiny_check.py` | dmeng on the tiny random Qwen3.6 against transformers' Qwen3_5MoeForCausalLM (float32, the engine's 8-bit codes, the store's experts): the fp32 reference path within 1e-4 of max \|logit\| where it exists; the speed path's agreement | `TINY` (make_tiny.py's OUT), numpy, torch, transformers |
+| `qwen4_exp/tiny_check.py` | dmeng on the tiny random Qwen3.8-Flash-Next against transformers' Qwen4ExpForCausalLM (float32, the engine's 8-bit codes, the store's experts and n-gram rows): the reference path within 1e-4 of max \|logit\|; exact mode bit-identical across budgets, threads, routers (lag 4, from the npz), run-ahead and oracle replays; fast mode; batched prefill == single steps (CPU and GPU share); the prefix cache's checkpoints and a restored state | `TINY` (make_tiny.py's OUT), numpy, torch, transformers |
+| `qwen4_exp/server_check.py` | the OpenAI-compatible server on the tiny Flash-Next: /v1/models, a completion with tools, the same streamed, a follow-up from the prefix cache | `TINY`, tokenizers, jinja2 |
 | `qwen4_exp/chat_check.py FOLDER` | Flash-Next's chat format (python/serve/qwen4_exp) against transformers' apply_chat_template on the release's text files: token ids of conversations with tools, tool results and every reasoning effort; parsing a generated turn | the release's tokenizer and template files, transformers |
-| `inkling2_loop/tiny_check.py` | dmeng on the tiny random Inkling against the MLX model of the release, exact across budgets and oracle replays | `INK_TINY`, `INK_RES0`, `INK_RES8`, numpy, mlx |
-| `draft_check.sh Q36_TINY INK_TINY INK_RES0 INK_RES8` | draft and verify: kept logits and the final state bit-identical through verify passes with rollbacks (both tiny models, several precisions, split-K attention); ids with drafting on equal plain decoding in dmeng and in the server worker | the tiny models |
-| `preset_check.sh Q36_TINY` | the settings' precedence (explicit option > profile > manifest default > built-in) in dmeng, the C API (`dm_gate`) and the server worker: mode, names on / off, names rule, router file, cache size, eviction, drafting, GPU share, each read back from the run's `"resolved"` JSON | the tiny Qwen3.6 model and its `routers_full_k4_h512.dmr` |
-| `ckpt_check.sh Q36_TINY_MODEL INK_TINY_MODEL INK_RES8` | the prefix cache's checkpoints: a long request, the identical request and one diverging at 60%, each equal bit for bit to a cold computation, the last two restored from a checkpoint kept by the minimum count | the tiny models |
+| `inkling2_loop/tiny_check.py` | dmeng on the tiny random Inkling against the MLX model of the release (the fp32 path within 1e-4 with the bf16 and the engine's 8-bit resident), exact across budgets and oracle replays | `TINY`, numpy, mlx, mlx-lm (PR 2086) |
 | `prefill_check.sh MODEL_DIR` | a batched prefill leaves byte-identical logits, state and KV to single decode steps, and the same greedy continuation | a real model folder |
 | `c_api/dm_gate.c` (driver, built as `dm_gate`) | greedy ids through the C API only (optional mid-decode budget change and cancel test), to compare with dmeng's | a real model folder |
 | `evict_check/evict_check.cpp` (driver) | the cache's eviction decisions on a recorded routing, one line per eviction, to compare with the offline simulator | a recorded routing |
