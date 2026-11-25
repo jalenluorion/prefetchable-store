@@ -112,6 +112,7 @@ struct Ctx {
   float* rout = nullptr;
   int o_chunks = 0, o_nb = 0;  // claims of the output projection: o_nb of 32 rows, then 8-row claims (a short tail)
   std::atomic<int> heads_left{0};
+  std::atomic<int64_t> heads_done_ns{0};  // steady-clock ns when the last head finished (with o_chunks: the stage split)
   alignas(128) std::atomic<int> next{0};
 };
 void phase_conv(void* p, int tid, int nt);

@@ -2,6 +2,7 @@
 #include "gdn.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 
@@ -65,7 +66,9 @@ void phase_conv_heads(void* p, int, int) {
     }
     while (X.qk_done[h / rep].load(std::memory_order_acquire) == 0) __builtin_arm_yield();
     ctx_head(X, h);
-    if (X.o_chunks) X.heads_left.fetch_sub(1, std::memory_order_release);
+    if (X.o_chunks && X.heads_left.fetch_sub(1, std::memory_order_release) == 1)
+      X.heads_done_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(),
+                            std::memory_order_relaxed);
   }
 }
 

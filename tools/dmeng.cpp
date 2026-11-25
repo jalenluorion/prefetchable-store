@@ -522,6 +522,7 @@ int main(int argc, char** argv) {
       if (!has("--rd-prio") && P.rd_prio) a.rd_prio = 1;
     }
     if (!has("--evict")) a.evict = P.evict;
+    if (!has("--layer-caps") && !P.layer_caps.empty()) a.layer_caps = P.layer_caps;
     if (!has("--cache-gb")) a.cache_auto = true;
     if (!has("--prefill-chunk") && a.record.empty()) a.prefill_chunk = 512;
     if (!has("--prefill-gpu-frac")) a.prefill_gpu_frac = P.gpu_frac;
@@ -825,7 +826,7 @@ int main(int argc, char** argv) {
        << ",\"by_stage_ms_per_token\":{\"embed\":" << per(T.embed)
        << ",\"depth_attn\":" << per(T.depth) << ",\"message_gates_norms\":" << per(T.msg) << ",\"attn_proj\":" << per(T.attn_proj)
        << ",\"attn_core\":" << per(T.attn_core) << ",\"attn_out\":" << per(T.attn_out) << ",\"moe_router\":" << per(T.router)
-       << ",\"experts\":" << per(T.experts) << ",\"wait\":" << per(T.wait) << ",\"cache_mgmt\":" << per(T.cache)
+       << ",\"experts\":" << per(T.experts) << ",\"run_ahead\":" << per(T.ra) << ",\"wait\":" << per(T.wait) << ",\"cache_mgmt\":" << per(T.cache)
        << ",\"prefetch_hooks\":" << per(T.pf) << ",\"post_mlp\":" << per(T.misc) << ",\"head\":" << per(T.head) << "}"
        << ",\"weight_mb_touched_per_token\":{\"resident\":" << per(T.bytes_res / 1e6) << ",\"experts\":" << per(T.bytes_exp / 1e6) << "}"
        << ",\"mb_read_per_token\":" << per((CS.bytes_urgent + CS.bytes_pf) / 1e6) << ",\"mb_read_urgent_per_token\":" << per(CS.bytes_urgent / 1e6)

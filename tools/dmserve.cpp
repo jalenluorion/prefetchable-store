@@ -120,7 +120,7 @@ struct Args {
   int mem_watch = -1;         // follow macOS memory pressure (default: on with --cache-gb auto)
   int mem_low = 20, mem_high = 35;  // kern.memorystatus_level thresholds (shrink below low, grow back at or above high)
   double mem_grow_s = 30, mem_retry_s = 600;
-  std::string evict = "auto", xtok;
+  std::string evict = "auto", xtok, layer_caps;
   double rt_tau = -1, xtok_tau = 0.5;
   int rd_prio = -1, rt_cand = 16;
   // the user-facing surface (include/dmeng/presets.h)
@@ -158,7 +158,7 @@ model and memory
   --cache-gb G|auto      default auto under a profile (5 with --profile none); --reserve-gb G (5.5) --cache-min-gb G
                          --headroom-gb G; the watcher: --mem-watch 0|1 --mem-low-pct N --mem-high-pct N
                          --mem-grow-after-s S --mem-retry-s S
-  --evict auto|hazard|freq
+  --evict auto|hazard|freq  --layer-caps auto|uniform|none (default: the profile's, else auto)
 early names (lossless: names only schedule reads)
   --routers F|none --m M --rt-tau T --rt-cand C     the profile's routers and names rule by default
   --xtok F|none --xtok-tau T --rd-prio 0|1   cross-token names (Inkling: source 47 with priority reads by default)
@@ -370,6 +370,7 @@ int main(int argc, char** argv) {
     else if (k == "--mem-retry-s") a.mem_retry_s = std::stod(v());
     else if (k == "--headroom-gb") a.mr.headroom_gb = std::stod(v());
     else if (k == "--evict") a.evict = v();
+    else if (k == "--layer-caps") a.layer_caps = v();
     else if (k == "--rt-tau") a.rt_tau = std::stod(v());
     else if (k == "--rt-cand") a.rt_cand = std::stoi(v());
     else if (k == "--xtok") a.xtok = v();
@@ -470,6 +471,7 @@ int main(int argc, char** argv) {
       if (!has("--rd-prio") && P.rd_prio) a.rd_prio = 1;
     }
     if (!has("--evict")) a.evict = P.evict;
+    if (!has("--layer-caps") && !P.layer_caps.empty()) a.layer_caps = P.layer_caps;
     if (!has("--gpu-frac")) a.gpu_frac = P.gpu_frac;
     if (!has("--run-ahead")) a.run_ahead = P.run_ahead;
     if (!has("--run-ahead-depth")) a.run_ahead_depth = P.run_ahead_depth;
@@ -522,6 +524,7 @@ int main(int argc, char** argv) {
   co.cache_gb = a.cache_gb;
   co.mem = mem_of(a.mem);
   co.evict = a.evict;
+  if (!a.layer_caps.empty()) co.layer_caps = a.layer_caps;
   co.cache_start_gb = cache_start;  // auto: slots for the ceiling reserved, the start size locked
   Core C;
   if (!C.init(M->info(), co, a.model, err) || !M->bind(C, err)) {

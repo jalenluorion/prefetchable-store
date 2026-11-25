@@ -3,10 +3,11 @@
 // routed experts (the 35B: + its shared expert, synthetic AFF8 of the real shape) from a set of distinct records larger
 // than the caches; its arm is drawn at random, so every arm sees the same load. Per arm: GB/s of weight bytes through
 // the call(s), spin thread-ms per application.
-//   bench_kmulti_step ink|q36 MODEL_DIR [applications] [reader GB/s]
+//   bench_kmulti_step ink|q36|flash MODEL_DIR [applications] [reader GB/s]
+// (flash: Qwen3.8-Flash-Next, 10 routed experts per step from store/layer_00.bin + a synthetic AFF8 shared expert of 640)
 // Arms: engine (one call, as the engine's first wave) | nodep (down rows do not wait for gate-up) | noact (no activation
 // or its quantisation) | ponly (efficiency-core threads claim nothing) | ptail (they stop at the down tail) | smalltail
-// (single quarters from 8 per thread left) | twojoins (the step split into two calls) | warm (the previous application's
+// (single quarters from 8 per thread left) | twojoins (the step split into two calls) | split1 (every expert its own call) | warm (the previous application's
 // records again) | reader (a concurrent reader: F_NOCACHE preads of another layer file at the given rate) | stream (the
 // same matrices' rows claimed 64 at a time, no activation, no dependency: the kernels' streaming rate in this process).
 // The name matches engine/bench/guard.py's model-process pattern, so the queue waits for it. No model process.
@@ -46,16 +47,16 @@ static bool read_all(int fd, uint8_t* dst, size_t n, off_t off) {
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    fprintf(stderr, "usage: bench_kmulti_step ink|q36 MODEL_DIR [applications] [reader GB/s]\n");
+    fprintf(stderr, "usage: bench_kmulti_step ink|q36|flash MODEL_DIR [applications] [reader GB/s]\n");
     return 2;
   }
-  const bool ink = std::string(argv[1]) == "ink";
+  const bool ink = std::string(argv[1]) == "ink", flash = std::string(argv[1]) == "flash";
   const std::string md = argv[2];
   const int NAPP = argc > 3 ? atoi(argv[3]) : 6000;
   const double RD_GBS = argc > 4 ? atof(argv[4]) : 2.0;
   const int BUSY = argc > 5 ? atoi(argv[5]) : 0;  // co-runners: threads spinning at default QoS for the whole run
   set_qos_interactive();
-  const int K = 8;
+  const int K = flash ? 10 : 8;
   ExpertFormat F;
   int NREC, H, I, SH = 0;
   std::string err;
@@ -63,6 +64,13 @@ int main(int argc, char** argv) {
     F.fmt = Fmt::NVFP4, F.rec = 4489216, F.H = H = 2304, F.I = I = 1152, F.fused = true;
     F.gu_c = 0, F.gu_s = 2654208, F.dn_c = 2985984, F.dn_s = 4313088, F.trailer = 4478976;
     NREC = 48;  // 215 MB
+  } else if (flash) {  // the published record layout (store/layer_NN.bin, 2768896 B per expert)
+    F.fmt = Fmt::AFF4, F.rec = 2768896, F.H = H = 2560, F.I = I = 640, F.fused = false;
+    F.gu_c = 0, F.gu_s = 819200, F.gu_b = 870400;
+    F.up_c = 921600, F.up_s = 1740800, F.up_b = 1792000;
+    F.dn_c = 1843200, F.dn_s = 2662400, F.dn_b = 2713600;
+    SH = 640;
+    NREC = 80;  // 221 MB
   } else {
     std::map<std::string, std::string> cfg;
     if (!ResFile::read_cfg(md + "/dmeng_resident.bin", cfg, err)) return fprintf(stderr, "%s\n", err.c_str()), 1;
@@ -166,7 +174,7 @@ int main(int argc, char** argv) {
   struct Stream {
     std::vector<std::pair<const Weight*, int>> ch;  // (matrix, first row)
     std::atomic<int> next{0};
-    const XQ *xg, *xd[K + 1];
+    const XQ *xg, *xd[17];
   } SR;
   auto stream_phase = [](void* p, int, int) {
     Stream& R = *(Stream*)p;
@@ -179,11 +187,11 @@ int main(int argc, char** argv) {
   };
 
   const char* NAMES[] = {"engine", "nodep", "noact", "ponly", "ptail", "smalltail", "twojoins", "warm", "reader", "stream",
-                         "parked", "wave7+1", "e_no_gateup", "e_no_down", "rerun"};
-  const unsigned ARMS[] = {0, STEP_NODEP, STEP_NOACT, STEP_PONLY, STEP_PTAIL, STEP_SMALLTAIL, 0, 0, 0, 0, 0, 0, STEP_ENOGU, STEP_ENODN, STEP_RERUN};
-  const int NA = 15;
+                         "parked", "wave7+1", "e_no_gateup", "e_no_down", "rerun", "split1"};
+  const unsigned ARMS[] = {0, STEP_NODEP, STEP_NOACT, STEP_PONLY, STEP_PTAIL, STEP_SMALLTAIL, 0, 0, 0, 0, 0, 0, STEP_ENOGU, STEP_ENODN, STEP_RERUN, 0};
+  const int NA = 16;
   {  // the arms that keep the arithmetic give the engine arm's outputs bit for bit (all work done, each row once)
-    ExpertJob jobs[K + 1];
+    ExpertJob jobs[17];
     int n = 0;
     if (SH > 0) jobs[n++] = shj;
     for (int k = 0; k < K; k++) jobs[n] = all[k], jobs[n].slot_out = k, n++;
@@ -213,7 +221,7 @@ int main(int argc, char** argv) {
     const int arm = app < 0 ? 0 : (int)((lcg >> 8) % NA);
     const int b0 = arm == 7 ? last : base;
     if (arm != 7) base = (base + K) % NREC, last = b0;
-    ExpertJob jobs[K + 1];
+    ExpertJob jobs[17];
     int n = 0;
     if (SH > 0) jobs[n++] = shj;
     for (int k = 0; k < K; k++) {
@@ -247,6 +255,9 @@ int main(int argc, char** argv) {
       S.arms = 0;
       expert_step(S, jobs, n / 2);
       expert_step(S, jobs + n / 2, n - n / 2);
+    } else if (arm == 15) {
+      S.arms = STEP_RERUN;
+      for (int j = 0; j < n; j++) expert_step(S, jobs + j, 1);
     } else if (arm == 11) {
       S.arms = 0;
       expert_step(S, jobs, n - 1);
@@ -268,6 +279,6 @@ int main(int argc, char** argv) {
   const double g0 = by[0] / ns[0];
   for (int a = 0; a < NA; a++)
     printf("{\"model\":\"%s\",\"busy\":%d,\"arm\":\"%s\",\"apps\":%.0f,\"gb_s\":%.1f,\"vs_engine\":%.3f,\"us_per_app\":%.1f,\"spin_thread_ms_per_app\":%.3f}\n",
-           ink ? "inkling" : "35b", BUSY, NAMES[a], cnt[a], by[a] / ns[a], (by[a] / ns[a]) / g0, ns[a] / cnt[a] / 1e3, sp[a] / cnt[a]);
+           ink ? "inkling" : flash ? "flash" : "35b", BUSY, NAMES[a], cnt[a], by[a] / ns[a], (by[a] / ns[a]) / g0, ns[a] / cnt[a] / 1e3, sp[a] / cnt[a]);
   return 0;
 }

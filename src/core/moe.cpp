@@ -27,7 +27,33 @@ void Approx::reset_stats() {
   w_tok.clear();
 }
 
-bool Approx::preset(const std::string& name) {
+bool Approx::preset(const std::string& spec) {
+  // PRESET[:k=v...]: a preset, then its rule set by key (a model's manifest tunes fast mode this way): w = read_w, mass =
+  // read_mass, late = late_ms (< 0: never wait for a light pick in flight), bg = background fetch of left-out picks
+  const size_t c = spec.find(':');
+  const std::string name = spec.substr(0, c);
+  if (!preset_base(name)) return false;
+  for (size_t i = c == std::string::npos ? spec.size() : c + 1; i < spec.size();) {
+    size_t j = spec.find(':', i);
+    if (j == std::string::npos) j = spec.size();
+    const std::string kv = spec.substr(i, j - i);
+    const size_t q = kv.find('=');
+    if (q == std::string::npos) return false;
+    const std::string k = kv.substr(0, q);
+    char* end = nullptr;
+    const double v = std::strtod(kv.c_str() + q + 1, &end);
+    if (end == kv.c_str() + q + 1 || *end) return false;
+    if (k == "w") read_w = v;
+    else if (k == "mass") read_mass = v;
+    else if (k == "late") late_ms = v;
+    else if (k == "bg") bg = v != 0;
+    else return false;
+    i = j + 1;
+  }
+  return true;
+}
+
+bool Approx::preset_base(const std::string& name) {
   if (name == "bounded" || name.empty()) {  // wait for named picks in flight, read on the spot any pick with weight > 0.1
     late_ms = 1000;
     read_w = 0.1;
@@ -59,7 +85,7 @@ bool Approx::preset(const std::string& name) {
 const char* Approx::presets_help() {
   return "bounded (wait for named picks in flight, read any missing pick with released weight > 0.1, replace the rest), "
          "drop (as bounded, but the rest is left out: no substitute, released weights kept, no floor of experts in memory), "
-         "never (replace whatever has not landed: a speed bound)";
+         "never (replace whatever has not landed: a speed bound); each may be followed by :w=W:mass=M:late=MS:bg=0|1 (the rule set)";
 }
 
 // ------------------------------------------------------------------------------------------------ setup
@@ -792,7 +818,7 @@ void Core::lossless(int step, const float* x, float* y, const MoeView& v) {
   // its own row and the combination below adds them in pick order, so the waves change when an expert runs, not the sum.
   bool done[MAXK] = {false};
   bool ra_done = false;
-  const double wait0 = S.wait_ms;
+  const double wait0 = S.wait_ms, ra0 = ra.ms;
   for (int left = K, first = 1; left > 0 || first; first = 0) {
     ExpJob jb[MAXK + 1];
     int n = 0;
@@ -833,10 +859,11 @@ void Core::lossless(int step, const float* x, float* y, const MoeView& v) {
   std::copy(pk, pk + K, used.data() + (size_t)step * K);
   std::copy(w, w + K, uw.data() + (size_t)step * K);
   auto t3 = clk::now();
-  const double wt = S.wait_ms - wait0;
+  const double wt = S.wait_ms - wait0, rat = ra.ms - ra0;
   t.wait += wt;
   wait_step[step] += wt;
-  t.experts += ms_between(t2, t3) - wt;
+  t.experts += ms_between(t2, t3) - wt - rat;
+  t.ra += rat;
   ra_where(wt);
   stage_mark(ST_MOE_CACHE);
   finish_step(step, sl, K);
@@ -1194,7 +1221,7 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
   stage_mark(ST_MOE_EXPERTS);
 
   // pass A: shared expert + everything landed; then the waits; pass B: the rest
-  const double wait0 = S.wait_ms;
+  const double wait0 = S.wait_ms, ra0 = ra.ms;
   auto run_pass = [&](bool first) {
     ExpJob jb[MAXK + 1];
     int n = 0;
@@ -1278,10 +1305,11 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
     uw[(size_t)step * K + i] = wf[i];
   }
   auto t3 = clk::now();
-  const double wt = S.wait_ms - wait0;
+  const double wt = S.wait_ms - wait0, rat = ra.ms - ra0;
   t.wait += wt;
   wait_step[step] += wt;
-  t.experts += ms_between(t2, t3) - wt;
+  t.experts += ms_between(t2, t3) - wt - rat;
+  t.ra += rat;
   ra_where(wt);
   auto& ut = used_tok[L];
   if (looped(step)) {

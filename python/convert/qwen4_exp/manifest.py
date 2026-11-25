@@ -132,6 +132,14 @@ types = "".join("L" if t == "linear_attention" else "Q" for t in tc["layer_types
 off, soff, boff, shp = meta["offsets"], meta["scale_offsets"], meta["bias_offsets"], meta["shapes"]
 ple = [int(x) - 1 for x in tc.get("ple_layer_ids", [])]
 assert len(ple) == 1, "one PLE layer expected"
+# fast mode and the names, measured on the base M4 (docs/MANIFEST-PRESETS.md): with 10 picks the routing weights are
+# about 0.1 each, so a per-pick threshold of 0.1 left out a third of the weight; instead the heaviest missing picks are read
+# until what is left out weighs <= 0.13 (mean 0.087 left out); the routers name a top 4 (fewer wasted reads than 10, same
+# speed); one slot pool (per-layer caps refuse names below 2 x 10 slots per layer)
+FAST_DEF = ("The model's own router still picks. The picked experts that are not in memory are read, heaviest first, until "
+            "those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation). "
+            "A light pick whose read is in flight is not waited for. Router names are on.")
+NAMES_M = 4
 m = {
     "format": "moved-store", "format_version": "1.0", "family": "qwen4_exp", "name": a.name,
     "source": {"repo": a.repo, "revision": None, "license": "qwen-community-1.0", "license_file": "LICENSE"},
@@ -168,10 +176,10 @@ m = {
     "legacy": [p["path"] for p in parts if p["role"] == "legacy"],
     "modes": {"exact": {"definition": f"Generated tokens never depend on the cache, the routers or timing: the model's own router picks {K} experts per layer and the engine waits for every one.",
                         "engine": "lossless"},
-              "fast": {"definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
-                       "engine": "approx:drop", "wait_if": {"routing_weight_over": 0.1, "read_in_flight": True}, "otherwise": "left out", "substitute": False, "renormalise": False}},
+              "fast": {"definition": FAST_DEF, "engine": "approx:drop:w=0.13:mass=0.13:late=-1",
+                       "read_if": {"missing_routing_weight_over": 0.13, "order": "heaviest missing pick first"}, "otherwise": "left out", "substitute": False, "renormalise": False}},
     "profiles": {},
-    "defaults": {"routers": [], "names": {"rule": "top", "m": K}, "cross_token": None, "eviction": "auto", "drafts": False},
+    "defaults": {"routers": [], "names": {"rule": "top", "m": NAMES_M}, "cross_token": None, "eviction": "auto", "layer_caps": "none", "drafts": False},
     "layout": {"derived_dir": "derived/", "engine_cache_dir": ".dmeng/",
                "rule": "engine-ready files are in derived/ under the engine's own names (<id>.<engine_format>.<first 12 hex of the source part's sha256>.bin); the engine looks for them in DIR/derived/ as well as DIR/.dmeng/ and derives what is missing into DIR/.dmeng/"},
 }
@@ -196,7 +204,7 @@ for p in parts:
 if emb and "resident.safetensors" in shipped:
     mac = [p for p in mac if p["path"] != "resident.safetensors"] + [emb]
 m["profiles"]["mac"] = {"when": "macOS", "mode": "exact", "resident": "resident_q8", "precision": "8-bit", "precision_detail": "8-bit affine, groups of 64",
-                        "names": {"rule": "top", "m": K}, "cache": "auto",
+                        "names": {"rule": "top", "m": NAMES_M}, "cache": "auto",
                         "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
                         "prefill_gpu": {"projections": 0.4, "experts": 0.4}, "run_ahead": {"picks": K, "depth": 1},
                         "parts": [{"path": p["path"], "bytes": p["bytes"], "sha256": p["sha256"]} for p in mac],

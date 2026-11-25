@@ -67,6 +67,7 @@ struct MoeView {
 struct Times {
   double embed = 0, attn_proj = 0, attn_core = 0, attn_out = 0, depth = 0, msg = 0, router = 0, experts = 0, wait = 0,
          cache = 0, pf = 0, head = 0, misc = 0;
+  double ra = 0;  // run-ahead (Core::ra_predict) inside the MoE steps' expert sections: out of `experts`, which it used to inflate
   double bytes_res = 0, bytes_exp = 0;
   void zero() { *this = Times(); }
 };
@@ -91,8 +92,9 @@ struct Approx {
   double w_tok_cur = 0;          // released weight replaced / dropped in the current token (summed over its steps)
   std::vector<float> w_tok;      // ... per finished token since the last reset (mean and p90 in the stats)
   void reset_stats();
-  // named rule sets; false if the name is unknown
-  bool preset(const std::string& name);
+  // named rule sets, optionally followed by :w=W:mass=M:late=MS:bg=0|1; false if the name or a key is unknown
+  bool preset(const std::string& spec);
+  bool preset_base(const std::string& name);
   static const char* presets_help();
 };
 

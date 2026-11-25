@@ -46,12 +46,16 @@ static const char* BUILTIN_INK = R"({
 
 // Qwen3.8-Flash-Next: the Mac only (its 68 GB of experts and 52 GB of n-gram rows are not a phone's); its trained routers
 // are the lag-4 set the repo publishes as the trainer's npz (routers_k4.npz), derived in place on first use; top-k is 10
+// Flash-Next (10 picks of 512, routing weights about 0.1 each; docs/MANIFEST-PRESETS.md): fast mode leaves out at most 0.13
+// of a step's routing weight (the heaviest missing picks are read until the rest weighs <= 0.13, and a light pick in
+// flight is not waited for); the routers name a top 4; one slot pool (per-layer caps would refuse names at these sizes)
 static const char* BUILTIN_FLASH = R"({
- "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
+ "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop:w=0.13:mass=0.13:late=-1"}},
  "profiles": {
-  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
-          "run_ahead": {"picks": 10, "depth": 1}}},
- "defaults": {"routers": ["mlp_k4"], "names": {"rule": "top", "m": 10}, "cross_token": null, "eviction": "auto", "drafts": false}})";
+  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "names": {"rule": "top", "m": 4},
+          "prefill_gpu": {"projections": 0.4, "experts": 0.4}, "run_ahead": {"picks": 10, "depth": 1}}},
+ "defaults": {"routers": ["mlp_k4"], "names": {"rule": "top", "m": 4}, "cross_token": null, "eviction": "auto", "layer_caps": "none",
+              "drafts": false}})";
 
 static bool exists(const std::string& p) {
   struct stat st;
@@ -270,6 +274,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.rd_prio = !p.xtok.empty() && (*xt)["priority_reads"].kind == Json::BOOL && (*xt)["priority_reads"].b;
   }
   if (const Json* ev = dflt("eviction")) p.evict = ev->str_or("auto");
+  if (const Json* lc = dflt("layer_caps")) p.layer_caps = lc->str_or("");
   if (const Json* dr = dflt("drafts")) p.drafts = dr->kind == Json::BOOL && dr->b;
   if (const Json* pg = prof("prefill_gpu"); pg && pg->kind == Json::OBJ) {  // per profile only (the device decides)
     p.gpu_frac = (*pg)["projections"].f(0);
@@ -325,7 +330,7 @@ std::string Preset::json() const {
     << ",\"names\":" << (tau > 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
-    << ",\"eviction\":" << q(evict) << ",\"drafts\":" << (drafts ? "true" : "false") << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
+    << ",\"eviction\":" << q(evict) << ",\"layer_caps\":" << q(layer_caps) << ",\"drafts\":" << (drafts ? "true" : "false") << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers << ",\"notes\":[";
   for (size_t i = 0; i < notes.size(); i++) o << (i ? "," : "") << q(notes[i]);

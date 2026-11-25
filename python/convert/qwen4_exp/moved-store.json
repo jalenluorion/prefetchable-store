@@ -741,11 +741,11 @@
    "engine": "lossless"
   },
   "fast": {
-   "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
-   "engine": "approx:drop",
-   "wait_if": {
-    "routing_weight_over": 0.1,
-    "read_in_flight": true
+   "definition": "The model's own router still picks. The picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation). A light pick whose read is in flight is not waited for. Router names are on.",
+   "engine": "approx:drop:w=0.13:mass=0.13:late=-1",
+   "read_if": {
+    "missing_routing_weight_over": 0.13,
+    "order": "heaviest missing pick first"
    },
    "otherwise": "left out",
    "substitute": false,
@@ -761,7 +761,7 @@
    "precision_detail": "8-bit affine, groups of 64",
    "names": {
     "rule": "top",
-    "m": 10
+    "m": 4
    },
    "cache": "auto",
    "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
@@ -1155,10 +1155,11 @@
   ],
   "names": {
    "rule": "top",
-   "m": 10
+   "m": 4
   },
   "cross_token": null,
   "eviction": "auto",
+  "layer_caps": "none",
   "drafts": false
  },
  "layout": {

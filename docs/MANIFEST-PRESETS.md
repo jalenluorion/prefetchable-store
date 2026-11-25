@@ -14,8 +14,11 @@ lists (notes, download lists).
 }
 ```
 
-The engine reads only `engine` (the internal mode string: `lossless` or `approx:PRESET`). `definition` is for
-people. Built-in: `exact` = `lossless`, `fast` = `approx:drop`.
+The engine reads only `engine` (the internal mode string: `lossless` or `approx:PRESET[:k=v...]`). `definition` is for
+people. Built-in: `exact` = `lossless`, `fast` = `approx:drop` (Flash-Next: `approx:drop:w=0.13:mass=0.13:late=-1`).
+The optional `:k=v` pairs set the preset's rule: `w` (a missing pick heavier than this is read), `mass` (then the
+heaviest missing picks are read until those left weigh at most this; left out per step <= `mass`), `late` (ms a light
+pick in flight is waited for; < 0 never, >= 1000 always) and `bg` (0 | 1: background fetch of left-out picks).
 
 ## `profiles`
 
@@ -93,6 +96,7 @@ Inkling 2 Mini:
 | `names` | object | how many experts the routers name per step: `{"rule": "top", "m": 8}` (a fixed top m) or `{"rule": "confidence", "tau": 0.5, "candidates": 16}` (the top candidates whose calibrated probability is at least tau) |
 | `cross_token` | object or `null` | routers that name the next token's first steps from a late step of this one: `routers` (ids from `cross_token_routers`), `source` (the step they read, informational; the file carries it), `tau` (threshold), `priority_reads` (speculative reads by priority instead of first in, first out) |
 | `eviction` | string | `auto`, `hazard` or `freq` |
+| `layer_caps` | string | per-layer slot caps: `auto` (the engine's rule), `uniform` or `none` (one pool); absent = `auto` |
 | `drafts` | bool | draft and verify on by default (`false` in v1; `--drafts 1` turns it on) |
 
 Inkling's `linear_k2` (one linear layer, lag 2; engine file 49 MB, source `routers/linear_k2.safetensors`) replaced the
@@ -101,18 +105,34 @@ reads about a fifth of the router bytes per token (44 against 222 MB). The MLP s
 (`--routers FILE`, `routers_id = "mlp_k2_h512"`); the built-in list is `["linear_k2", "mlp_k2_h512"]` (the MLP when the
 linear file is absent).
 
-Qwen3.8-Flash-Next (`qwen4_exp`; one profile, `mac`: exact, 8-bit in-memory weights, cache auto, the GPU's share of the
-prefill 0.4 / 0.4, run-ahead naming 10 at depth 1):
+Qwen3.8-Flash-Next (`qwen4_exp`; one profile, `mac`: exact, 8-bit in-memory weights, cache auto, names a top 4, the
+GPU's share of the prefill 0.4 / 0.4, run-ahead naming 10 at depth 1):
 
 ```json
 "defaults": {
   "routers": ["mlp_k4"],
-  "names": {"rule": "top", "m": 10},
+  "names": {"rule": "top", "m": 4},
   "cross_token": null,
   "eviction": "auto",
+  "layer_caps": "none",
   "drafts": false
 }
 ```
+
+Measured on the base M4 (16 GB; 120 tokens of the reference prompt, counters from one process each, timing from
+alternating runs) at 2.0 GB (15 records per layer) and 3.1 GB (24):
+
+- Fast mode: with 10 picks the routing weights are about 0.1 each, so the 35B's rule (wait for a pick over 0.1, leave
+  out the rest) left out 0.32 of each step's weight. The rule here reads the heaviest missing picks until the rest
+  weighs at most 0.13: 0.087 of the weight is left out on average (0.09 at the 90th percentile of tokens), at 465 MB
+  read per token at 3.1 GB and 604 MB at 2.0 GB. A cap of 0.10 left out 0.066 at 650 MB (2.0 GB), 0.20 left out 0.15 at
+  486 MB, 0.25 left out 0.19 at 419 MB.
+- Names: a top 4 against a top 6, 10 and the confidence rule (tau 0.5 of 16): in fast mode 4 and 6 run at the same
+  speed in alternating runs and 4 reads 6-9% less; 10 and the confidence rule read 785-918 MB at 2.0 GB, a third of
+  their names wasted. In exact mode a top 4 in one pool ran 8% faster than a top 10 with per-layer caps in two
+  alternating pairs (hit rate 0.58 against 0.49).
+- One pool: below 2 x 10 records per layer the per-layer caps of `auto` refuse almost every name (a name must leave 20
+  unpinned records in its layer: 241 of 352 names per token refused at 2.0 GB), so the cache runs on misses alone.
 
 Its router entry `mlp_k4` points at `routers_k4.npz`, the lag-4 set as the trainer exported it (float32): the engine reads
 the npz in place and derives its 8-bit file from it (step 5 below), the same bytes as the Python converter's.

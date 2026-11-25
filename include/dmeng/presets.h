@@ -23,6 +23,7 @@ struct Preset {
   double xtok_tau = 0.5;
   bool rd_prio = false;            // speculative reads by priority (with the cross-token names)
   std::string evict = "auto";
+  std::string layer_caps;          // per-layer slot caps (CoreOpts::layer_caps): "" = the core's rule (auto)
   bool drafts = false;
   // the batched prefill's exact CPU + GPU split (Metal builds): shares of the attention projections' and the experts'
   // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for both models, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)

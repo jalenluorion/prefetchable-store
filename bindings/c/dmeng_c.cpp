@@ -275,6 +275,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   else if (profiled) co.evict = P.evict;
   if (o.layer_caps == 1) co.layer_caps = "uniform";
   else if (o.layer_caps == 2) co.layer_caps = "none";
+  else if (profiled && !P.layer_caps.empty()) co.layer_caps = P.layer_caps;
   co.qos = (int)e->qos;
   if (o.reader_qos > 0) co.reader_qos = (int)qos_of(o.reader_qos - 1);
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
@@ -335,29 +336,10 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   }
   if (mode != "lossless") {  // fast or an advanced approximate preset (dmeng --mode)
     const std::string md = mode;
-    std::string preset = md == "approx" ? "" : md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
-    std::string opts;  // P2 lever cells: approx:PRESET:w=W:bg=0|1:late=MS (read_w, background fetch, late wait)
-    if (const size_t c = preset.find(':'); c != std::string::npos) {
-      opts = preset.substr(c + 1);
-      preset = preset.substr(0, c);
-    }
-    if (!e->C->ns.preset(preset)) {
-      g_err = "mode: exact|fast|lossless|approx[:PRESET[:w=W:bg=0|1:late=MS]], got " + md;
+    const std::string preset = md == "approx" ? "" : md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
+    if (!e->C->ns.preset(preset)) {  // PRESET[:w=W:mass=M:late=MS:bg=0|1] (Approx::preset)
+      g_err = "mode: exact|fast|lossless|approx[:PRESET[:w=W:mass=M:late=MS:bg=0|1]], got " + md;
       return nullptr;
-    }
-    for (size_t i = 0; i < opts.size();) {
-      size_t j = opts.find(':', i);
-      if (j == std::string::npos) j = opts.size();
-      const std::string kv = opts.substr(i, j - i);
-      const size_t q = kv.find('=');
-      if (q != std::string::npos) {
-        const std::string k = kv.substr(0, q);
-        const double v = std::atof(kv.c_str() + q + 1);
-        if (k == "w") e->C->ns.read_w = v;
-        else if (k == "bg") e->C->ns.bg = v != 0;
-        else if (k == "late") e->C->ns.late_ms = v;
-      }
-      i = j + 1;
     }
     if (e->C->ns.prio) e->C->cache.rd.prio = true;
     if (e->C->ns.cancel) e->C->cancel_stale = true;
