@@ -51,9 +51,19 @@ ap.add_argument("--log-bodies", action="store_true", help=adv("log every request
 ap.add_argument("--allow-force", action="store_true", help=adv("benchmarks only: honour a request's dm_force (a recorded answer fed as the model's turn, so a replay's next request matches the live state)"))
 ap.add_argument("--preserve-thinking", type=int, default=None, choices=[0, 1], help=adv("1: every earlier assistant turn keeps its reasoning in the prompt (the chat template's preserve_thinking; a request's chat_template_kwargs still wins), so the history stays the token sequence the model produced and a new user message reuses the live prefix instead of recomputing the last turn; 0: the template's default (Qwen3.6 drops the reasoning of turns before the last user message). Default: 1 where the model's chat template has the switch (Qwen3.6; Flash-Next's template keeps the reasoning already), else the template's own"))
 ap.add_argument("--idle-s", type=float, default=300, help=adv("stop the model worker after this long without a request (frees its locked memory); the next request starts it again and the prefix cache resumes from disk (0: never)"))
+ap.add_argument("--reasoning-effort", default=None, help="thinking effort when a request names none (xhigh, medium, low, none; default: the template's own)")
+ap.add_argument("--canned-title", type=int, default=0, help=adv("1: a request without tools whose model name ends in 'title' (a client's thread-title request) is answered from the last user message's first words, without the model (the old runner's demo)"))
+ap.add_argument("--warm", type=int, default=0, help=adv("1: at start and when the date changes, prefill the last main request's system prompt and first user message (today's date written in) while idle, so a new thread finds its prefix (the old runner's --warm); the request is kept in <model>/.dmeng/last_request.json"))
+ap.add_argument("--retok-reuse", type=int, default=0, help=adv("1: when a main request sends the model's own last turn back re-rendered (the same text, other token boundaries), continue from the state computed on the model's own tokens instead of prefilling the turn again (the old runner's re-tokenized prefix)"))
+ap.add_argument("--demo", action="store_true", help="the old runner's demo settings: --warm 1 --canned-title 1 --retok-reuse 1 --idle-s 0 --reasoning-effort low, and the worker's --ckpt-min 2 (each still overridable)")
 argv = sys.argv[1:]
 wargs = argv[argv.index("--") + 1:] if "--" in argv else []
 a = ap.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
+if a.demo:  # the old runner's demo conditions, where the command line does not say otherwise
+    _given = set(x.split("=")[0] for x in (argv[: argv.index("--")] if "--" in argv else argv) if x.startswith("--"))
+    for _k, _v in (("--warm", 1), ("--canned-title", 1), ("--idle-s", 0.0), ("--reasoning-effort", "low"), ("--retok-reuse", 1)):
+        if _k not in _given:
+            setattr(a, _k[2:].replace("-", "_"), _v)
 try:
     MAN = json.load(open(os.path.join(a.model_dir, "moved-store.json")))
 except Exception:
@@ -92,6 +102,8 @@ import agent_profile as PR  # noqa: E402
 # the profile, mode and drafts go to the worker, which resolves the defaults (a worker flag after "--" wins)
 _prof = "auto" if a.profile == "agent" else a.profile
 _extra = PR.agent_profile(a.model_dir, drafts=bool(a.drafts), reserve_gb=a.reserve_gb, profile=_prof, mode=a.mode)
+if a.demo and "--ckpt-min" not in wargs:  # the demo: two in-memory checkpoints whatever their size (Flash-Next's are 118 MB each:
+    wargs = wargs + ["--ckpt-min", "2"]   # the other two held memory the expert cache needs; the disk copy keeps the system prefix)
 wargs = [x for i, x in enumerate(_extra) if not (x.startswith("--") and x in wargs) and not (i and _extra[i - 1].startswith("--") and _extra[i - 1] in wargs)] + wargs
 sys.path.insert(0, HERE)
 import ahead as AH  # noqa: E402
@@ -324,6 +336,32 @@ def release(job):
 
 
 LAST_MAIN = {"ids": None}
+LIVE_SEQ = {"ids": None}  # the last main request's prompt + the tokens it generated (the worker's live sequence after it)
+
+
+def retok_reuse(ids, marks):
+    """ids with the live sequence in place of a re-tokenized copy of it: if ids[:j] spells exactly the live sequence's text
+    (the model's own turn sent back through the template, other token boundaries), the live tokens replace ids[:j], so the
+    worker continues from the state it has (the old runner's _retokenized_prefix)"""
+    L = LIVE_SEQ["ids"]
+    if not L or ids[: len(L)] == L:
+        return ids, marks
+    text = tok.decode(L, skip_special_tokens=False)
+    lo, hi = 0, len(ids)
+    while lo < hi:  # decoded length grows with the token count
+        mid = (lo + hi + 1) // 2
+        if len(tok.decode(ids[:mid], skip_special_tokens=False)) <= len(text):
+            lo = mid
+        else:
+            hi = mid - 1
+    if not lo or tok.decode(ids[:lo], skip_special_tokens=False) != text:
+        return ids, marks
+    lcp = 0
+    while lcp < min(len(L), lo) and L[lcp] == ids[lcp]:
+        lcp += 1
+    d = len(L) - lo
+    log({"event": "retok_reuse", "replaced": lo - lcp, "with": len(L) - lcp})
+    return L + ids[lo:], [m for m in marks if m <= lcp] + [m + d for m in marks if m >= lo]
 
 
 def divergence(ids):
@@ -347,8 +385,87 @@ def sse(rid, created, model, delta, finish=None):
                                    "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]}) + "\n\n").encode()
 
 
+def title_of(messages):
+    """a thread title from the last user message's first seven words (the old runner's title_of)"""
+    text = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            c = m.get("content")
+            text = c if isinstance(c, str) else " ".join(x.get("text", "") for x in (c or []) if isinstance(x, dict))
+            break
+    words = " ".join(text.split()).split(" ")
+    return (" ".join(words[:7]) + ("..." if len(words) > 7 else "")) or "New thread"
+
+
+LAST_REQ = os.path.join(a.model_dir, ".dmeng", "last_request.json")
+
+
+def save_last_request(req):
+    """the head of the agent's request (its system prompt and first user message: what a new thread starts from)"""
+    msgs = req.get("messages", [])
+    head = msgs[: next((i for i, m in enumerate(msgs) if m.get("role") == "user"), len(msgs) - 1) + 1]
+    try:
+        os.makedirs(os.path.dirname(LAST_REQ), exist_ok=True)
+        rec = {"messages": head, "tools": req.get("tools"), "reasoning_effort": req.get("reasoning_effort"), "reasoning": req.get("reasoning"),
+               "chat_template_kwargs": req.get("chat_template_kwargs")}
+        tmp = LAST_REQ + ".tmp"
+        json.dump(rec, open(tmp, "w"))
+        os.replace(tmp, LAST_REQ)
+    except Exception as e:
+        log({"event": "warm_save_failed", "error": str(e)[:200]})
+
+
+def warm(reason):
+    """the last request's head with today's date written in (OpenCode writes "Today's date: <toDateString()>" into its
+    system prompt), handed to the worker as an idle-time prefill: a new thread then finds its prefix"""
+    import re
+    if not os.path.exists(LAST_REQ):
+        return
+    last = json.load(open(LAST_REQ))
+    today = time.strftime("%a %b %d %Y")
+    for m in last.get("messages", []):
+        if m.get("role") == "system" and isinstance(m.get("content"), str):
+            m["content"] = re.sub(r"(Today's date: )[A-Za-z]{3} [A-Za-z]{3} \d{2} \d{4}", lambda g: g.group(1) + today, m["content"])
+    kw, _ = CF.template_kwargs(last, default_effort=a.reasoning_effort)
+    ids, marks = tok.prompt_ids(CF.to_template(last["messages"]), last.get("tools") or None, **kw)
+    with QLOCK:
+        AHEAD["pred"] = (ids, marks)
+    send_ahead()
+    log({"event": "warm", "reason": reason, "tokens": len(ids)})
+
+
+def rewarm_at_midnight():
+    day = time.strftime("%Y-%m-%d")
+    while True:
+        time.sleep(30)
+        if time.strftime("%Y-%m-%d") != day:
+            day = time.strftime("%Y-%m-%d")
+            try:
+                warm("new day")
+            except Exception as e:
+                log({"event": "warm_failed", "error": str(e)[:200]})
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+
+    def _canned(self, req, text):
+        """an answer given without the model (a thread title)"""
+        rid_s, created, model = "chatcmpl-" + uuid.uuid4().hex[:12], int(time.time()), str(req.get("model") or a.model_id)
+        if req.get("stream"):
+            b = sse(rid_s, created, model, {"role": "assistant", "content": text}) + sse(rid_s, created, model, {}, "stop") + b"data: [DONE]\n\n"
+            ctype = "text/event-stream"
+        else:
+            b = json.dumps({"id": rid_s, "object": "chat.completion", "created": created, "model": model,
+                            "choices": [{"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "stop"}],
+                            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}).encode()
+            ctype = "application/json"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+        log({"event": "request", "kind": "title", "canned": True})
 
     def log_message(self, *x):
         pass
@@ -372,8 +489,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         t0 = time.time()
         req = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))) or b"{}")
         tools = req.get("tools") or None
+        if a.canned_title and not tools and str(req.get("model", "")).endswith("title"):
+            return self._canned(req, title_of(req.get("messages", [])))
+        if a.warm and tools:
+            save_last_request(req)
         try:
-            kw, budget = CF.template_kwargs(req)
+            kw, budget = CF.template_kwargs(req, default_effort=a.reasoning_effort)
             ids, marks = tok.prompt_ids(CF.to_template(req.get("messages", [])), tools, **kw)
         except Exception as e:
             return self._json(400, {"error": {"message": f"chat template: {e}", "type": "invalid_request_error"}})
@@ -401,6 +522,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         stops = [stops] if isinstance(stops, str) else list(stops)
         stream = bool(req.get("stream"))
         side = tools is None
+        if a.retok_reuse and not side and forced is None:
+            ids, marks = retok_reuse(ids, marks)
         job = Job(1 if side else 0, req)
         rid_s, created, model = "chatcmpl-" + uuid.uuid4().hex[:12], int(time.time()), str(req.get("model") or a.model_id)
         div = divergence(ids) if not side else {}
@@ -451,6 +574,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             release(job)
         text, new_ids, finish, binfo, einfo, t_first = res
+        if not side:
+            LIVE_SEQ["ids"] = list(ids) + list(new_ids) if finish == "stop" or calls_hint(finish) else None
         reasoning, content, calls = CF.parse_turn(text, thinking and forced is None, tools or [])
         if calls:
             finish = "tool_calls"
@@ -567,6 +692,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return text, new, finish, binfo, einfo, t_first
 
 
+def calls_hint(finish):
+    return finish == "tool_calls"
+
+
 def alive_check(write):
     return write(b"") is not False
 
@@ -576,4 +705,10 @@ threading.Thread(target=idle_watch, daemon=True).start()
 threading.Thread(target=ticker, daemon=True).start()
 http.server.ThreadingHTTPServer.allow_reuse_address = True
 log({"event": "serving", "port": a.port, "worker": W.info, "worker_args": wargs})
+if a.warm:
+    try:
+        warm("start")
+    except Exception as e:
+        log({"event": "warm_failed", "error": str(e)[:200]})
+    threading.Thread(target=rewarm_at_midnight, daemon=True).start()
 http.server.ThreadingHTTPServer(("127.0.0.1", a.port), Handler).serve_forever()

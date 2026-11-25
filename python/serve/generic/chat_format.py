@@ -89,16 +89,27 @@ class Tok:
         enc = self.tk.encode(text, add_special_tokens=False)
         ids, starts = enc.ids, {s: i for i, (s, e) in enumerate(enc.offsets)}
         marks = []
+        kw2 = {k: v for k, v in kw.items() if k != "add_generation_prompt"}
         for i in range(1, len(messages)):
             try:
-                part = self.render(messages[:i], tools, add_generation_prompt=False, **{k: v for k, v in kw.items() if k != "add_generation_prompt"})
-            except Exception:
-                continue
+                part = self.render(messages[:i], tools, add_generation_prompt=False, **kw2)
+                whole = True
+            except Exception:  # a template that refuses a conversation without a user message (Qwen3.6's: the system
+                # prompt alone): the messages before i with a stand-in user message; the boundary is where they part
+                try:
+                    part = self.render(messages[:i] + [{"role": "user", "content": "\x00"}], tools, add_generation_prompt=False, **kw2)
+                    whole = False
+                except Exception:
+                    continue
             n = min(len(part), len(text))
             c = 0
             while c < n and part[c] == text[c]:
                 c += 1
-            if c == len(part) and c in starts and starts[c] > 0 and (not marks or starts[c] > marks[-1]):
+            if not whole:  # the last token start at or before the parting (the stand-in's header is shared when message i is a user's)
+                c = max([s for s in starts if s <= c] or [0])
+            if (whole and c != len(part)) or c not in starts:
+                continue
+            if starts[c] > 0 and (not marks or starts[c] > marks[-1]):
                 marks.append(starts[c])
         return ids, marks
 
