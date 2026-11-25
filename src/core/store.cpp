@@ -110,6 +110,11 @@ bool Readers::saturated() {
   return inflight_[0] + inflight_[1] + inflight_[2] >= (int)th_.size() && !(urgent_.empty() && normal_.empty());
 }
 
+bool Readers::urgent_backlog() {
+  std::lock_guard<std::mutex> lk(mu_);
+  return inflight_[0] + inflight_[1] + inflight_[2] >= (int)th_.size() && !urgent_.empty();
+}
+
 uint64_t Readers::busy_wall() {
   std::lock_guard<std::mutex> lk(mu_);
   return busy_wall_ns_;
@@ -771,6 +776,10 @@ int Cache::name(int L, int e, long step, int reserve) {
     S.s[sl].pins++;
     S.s[sl].pf_pins++;
     return sl;
+  }
+  if (name_gate && !skip_reads && rd.urgent_backlog()) {
+    st.n_pf_gated++;
+    return -1;
   }
   evict_pf_ctx = true;
   int v = victim(L, reserve >= 0 ? reserve : 2 * K + extra_reserve[layer_pool[L]]);  // a name leaves the slots the misses and holds need

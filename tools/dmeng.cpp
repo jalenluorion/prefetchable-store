@@ -114,6 +114,7 @@ early address (lossless: names only schedule reads; the released router decides)
                          m+1..D of the steps already named, while no urgent read and at most G speculative ones are in
                          flight, in P pieces (N in flight), at most Q records queued (default: the profile's; Flash-Next mac 8, 2, 2, 2, 1;
                          --bg-ranks 0 = off)
+  --name-gate 0|1        1: a name that needs a read is not issued while urgent reads wait for a reader (default 0)
                          auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
                          EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
                          pick (35B below 2.26 GB), else one pool (results/cache-policy/POLICY.md); freq: the decayed use
@@ -175,7 +176,13 @@ outputs
   --verify-names 0|1     with --draft and an early-address hook: inside a verify pass, the hook names every position's
                          experts of later steps as one-position steps do (routers: the first two blocks per position at
                          the pass's start, the lag rows in each step's router fork-join; oracle: the recorded picks); names
-                         only schedule reads (default 0 under a profile, 1 with --profile none)
+                         only schedule reads (default 1)
+  --verify-old 0|1       1: the previous verify pass (recurrent states copied at the pass's start and streamed once per
+                         position, the packed gemm from 6 positions, the full head), for A/B measurements (default 0)
+  --copy-free 0|1        with --draft lookup: copy drafts are not rationed by the probe interval and budget once their
+                         drafts are being kept (default 1)
+  --draft-cost F         with --draft: the pass costs a run measured, read at the start in place of the family's prior when
+                         F exists, and this run's written to F at the end (a line "draft_cost FAMILY r1 .. r8")
   --draft-gate 0|1       with --draft lookup: the controller's cost model from per-pass counters per pass width (compute as a
                          ratio to a plain step's, wait for reads, urgent MB, the next step's excess wait): a draft runs when
                          its expected tokens per estimated ms beat a plain step's by --draft-margin (default 0.05)
@@ -199,12 +206,13 @@ struct Args {
               plan_calib = "rank", late, evict_policy, router_heavy, layer_caps;
   int reader_io_low = -1;  // -1: CoreOpts' platform default
   int n = 120, start_pos = 0, ctx = 16384, threads = 8, readers = 4, split = 1, m = 8, top_k = 0, dump_from = 0, stop_eos = -1, drop = -1;
-  int rt_cand = 16, router_ecache = 0, fast_head = -1, run_ahead = 0, run_ahead_depth = 1, ra_max = 0, ra_sat = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1;
+  int rt_cand = 16, router_ecache = 0, fast_head = -1, run_ahead = 0, run_ahead_depth = 1, ra_max = 0, ra_sat = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1, name_gate = 0;
   int plan_budget = 1, plan_revoke = 1, plan_maxcand = 32;
   int cold_floor = -1;  // approximate mode's cold-cache floor (Approx::cold_floor)
   int bg_ranks = 0, bg_gate = 0, bg_split = 2, bg_queue = 2, bg_max = 1;
   double bg_margin = 0;  // background reads (the profile's; --bg-ranks 0 = off)
-  int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1;
+  int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1, verify_old = 0, copy_free = 1;
+  std::string draft_cost;
   double draft_margin = 0.05;
   double prefill_gpu_frac = 0, prefill_gpu_experts = 0;
   bool prefill_gpu_off = false;
@@ -426,6 +434,7 @@ int main(int argc, char** argv) {
     else if (k == "--router-heavy") a.router_heavy = v();
     else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
     else if (k == "--rd-excl") a.rd_excl = std::stoi(v());
+    else if (k == "--name-gate") a.name_gate = std::stoi(v());
     else if (k == "--spec-max") a.spec_max = std::stoi(v());
     else if (k == "--bg-ranks") a.bg_ranks = std::stoi(v());
     else if (k == "--bg-gate") a.bg_gate = std::stoi(v());
@@ -477,6 +486,9 @@ int main(int argc, char** argv) {
     else if (k == "--early") a.early = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
     else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
+    else if (k == "--verify-old") a.verify_old = std::stoi(v());
+    else if (k == "--copy-free") a.copy_free = std::stoi(v());
+    else if (k == "--draft-cost") a.draft_cost = v();
     else if (k == "--draft-margin") a.draft_margin = std::stod(v());
     else if (k == "--skeleton") a.skeleton = v();
     else if (k == "--draft-light") a.draft_light = v();
@@ -549,7 +561,6 @@ int main(int argc, char** argv) {
     if (!has("--bg-gate")) a.bg_gate = P.bg_gate;
     if (!has("--run-ahead-max")) a.ra_max = P.ra_max_tok;
     if (!has("--run-ahead-sat-skip")) a.ra_sat = P.ra_sat_skip ? 1 : 0;
-    if (!has("--verify-names")) a.verify_names = 0;
     if (a.drafts < 0) a.drafts = P.drafts ? 1 : 0;
   } else {
     if (a.print_defaults) {
@@ -708,6 +719,7 @@ int main(int argc, char** argv) {
   C.ns.cold_floor = a.cold_floor;  // --drop overrides the preset (approx:drop sets it, the others clear it)
   C.cache.rd.prio = a.rd_prio < 0 ? (plan || (C.ns.on && C.ns.prio)) : a.rd_prio != 0;
   C.cache.rd.excl = a.rd_excl != 0;
+  C.cache.name_gate = a.name_gate != 0;
   if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;
   if (a.bg_ranks > 0 && C.hook == &rts) {  // background reads: the routers' next ranks for the drive's idle time
     rts.bg_ranks = a.bg_ranks;
@@ -767,7 +779,9 @@ int main(int argc, char** argv) {
   const bool fh_auto = a.fast_head < 0;
   const bool fh_family = family == "qwen3_5_moe" || family == "inkling2_loop" || family == "qwen4_exp";
   if (fh_auto) a.fast_head = fh_family ? 1 : 0;
-  const bool fh_greedy_ok = a.temp <= 0 && a.draft == "none" && a.verify_check <= 0 && a.draft_check.empty();
+  // (drafting too: plain steps and verify passes then screen the same way; the verify check compares the full logits
+  // unless --fast-head is given, then the screened ones)
+  const bool fh_greedy_ok = a.temp <= 0 && a.draft_check.empty() && (a.verify_check <= 0 || !fh_auto);
   bool head_topk = a.fast_head > 0 && a.temp > 0 && a.top_k > 0 && a.top_k <= 64 && fh_family;
   if (a.fast_head > 0 && (fh_greedy_ok || head_topk) && a.teacher.empty()) {
     std::string e2;
@@ -780,6 +794,7 @@ int main(int argc, char** argv) {
   }
   if (!a.taps_out.empty() && !M->set_option("taps", "1", err)) return die("model", err);
   if (a.run_ahead > 0 && !M->set_option("run_ahead", std::to_string(a.run_ahead), err)) return die("model", err);
+  if (a.verify_old && !M->set_option("verify_old", "1", err)) return die("model", err);
   C.ra_budget = a.ra_budget;
   C.ra_max_tok = a.ra_max;
   C.ra_sat_skip = a.ra_sat != 0;
@@ -889,7 +904,7 @@ int main(int argc, char** argv) {
        << ",\"hit_rate_looped\":" << (double)CS.n_hit_r[0] / std::max<uint64_t>(1, CS.n_pick_r[0])
        << ",\"hit_rate_other\":" << (double)CS.n_hit_r[1] / std::max<uint64_t>(1, CS.n_pick_r[1])
        << ",\"looped_picks_used_by_an_earlier_pass\":" << (double)CS.n_reuse_hit / std::max<uint64_t>(1, CS.n_pick_r[0])
-       << ",\"pf_issued_per_token\":" << per(CS.n_pf_issued) << ",\"pf_dropped_per_token\":" << per(CS.n_pf_dropped)
+       << ",\"pf_issued_per_token\":" << per(CS.n_pf_issued) << ",\"pf_dropped_per_token\":" << per(CS.n_pf_dropped) << ",\"pf_gated_per_token\":" << per(CS.n_pf_gated)
        << ",\"pf_evicted_unused_per_token\":" << per(CS.n_pf_unused_evicted) << ",\"pf_stolen_per_token\":" << per(CS.n_pf_stolen)
        << ",\"purged\":" << CS.n_purged << ",\"held_at_end\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.held(p);
@@ -1195,8 +1210,14 @@ int main(int argc, char** argv) {
       hs.backoff_max = a.backoff_max;
       dr.extra.push_back(&hs);
     }
+    dr.o.copy_free = a.copy_free != 0;
     dr.init(family, a.early > 0 ? &C : nullptr);
     dr.reads = &C;
+    if (!a.draft_cost.empty() && a.draft != "none") {  // a cost file: the prior an earlier run measured (absent: the family's)
+      struct stat sb;
+      std::string e2;
+      if (stat(a.draft_cost.c_str(), &sb) == 0 && !dr.load_cost(a.draft_cost, e2)) return die("draft cost", e2);
+    }
     if (!a.skeleton.empty()) {
       std::vector<std::vector<int32_t>> fr;
       std::ifstream sf(a.skeleton);
@@ -1249,7 +1270,6 @@ int main(int argc, char** argv) {
     const int bg_ranks0 = rts.bg_ranks;
     std::vector<int> step_n, step_acc;
     const bool drafting = a.draft != "none";
-    if ((drafting || a.verify_check > 0) && fast) return die("draft", "the full head only (no --fast-head)");
     if (a.verify_check > 0 && a.temp > 0) return die("verify-check", "greedy only");
     // under sampling, each produced token takes its own draw by index (sample_at): the same tokens as sampled decoding
     Draws draws(a.seed);
@@ -1258,21 +1278,22 @@ int main(int argc, char** argv) {
     struct ModelTarget : DraftTarget {
       Model& M;
       State& S;
-      ModelTarget(Model& m, State& s) : M(m), S(s) {}
+      Want w;  // the head plain decoding uses (the screened one when it can): plain steps and verify passes alike
+      ModelTarget(Model& m, State& s, Want w_) : M(m), S(s), w(w_) {}
       int pos() const override { return S.pos; }
       int* li = nullptr;
       void step(int id) override {
-        M.step(S, id, Want::LAST);
+        M.step(S, id, w);
         if (li) *li = -1;
       }
       const float* logits() const override { return M.logits().data(); }
-      bool verify(const int* ids, int n) override { return M.verify(S, (const int32_t*)ids, n); }
+      bool verify(const int* ids, int n) override { return M.verify(S, (const int32_t*)ids, n, w); }
       const float* logits_at(int i) const override { return M.logits_at(i); }
       void commit(int a2) override {
         M.commit(S, a2);
         if (li) *li = a2 - 1;
       }
-    } tgt(*M, *S);
+    } tgt(*M, *S, want);
     tgt.li = &light_li;
     std::string vcheck_json;
     if (a.verify_check > 0) {
@@ -1286,7 +1307,7 @@ int main(int argc, char** argv) {
       std::vector<int> t{argmax(lg0.data(), VO)};
       std::vector<float> ref((size_t)N * VO);
       for (int k = 0; k < N; k++) {
-        M->step(*S, t[k], Want::LAST);
+        M->step(*S, t[k], want);  // (--fast-head: the screened head, in the passes below too)
         std::memcpy(ref.data() + (size_t)k * VO, M->logits().data(), 4 * (size_t)VO);
         t.push_back(argmax(M->logits().data(), VO));
       }
@@ -1301,7 +1322,7 @@ int main(int argc, char** argv) {
         std::vector<int32_t> toks(t.begin() + j, t.begin() + j + w);
         const bool wrong = w >= 2 && passes % 3 == 2;
         if (wrong) toks[w - 1] = (toks[w - 1] + 1) % VO;
-        if (!M->verify(*S, toks.data(), w)) return die("verify-check", "this model has no multi-position verify");
+        if (!M->verify(*S, toks.data(), w, want)) return die("verify-check", "this model has no multi-position verify");
         const int keep = wrong ? w - 1 : w;
         for (int i = 0; i < keep; i++, cmpd++) bad += std::memcmp(M->logits_at(i), ref.data() + (size_t)(j + i) * VO, 4 * (size_t)VO) != 0;
         M->commit(*S, keep);
@@ -1392,6 +1413,7 @@ int main(int argc, char** argv) {
     if ((int)out.size() > a.n) out.resize(a.n);
     const double dec_s = ms_since(td) / 1000;
     dr.end();
+    if (!a.draft_cost.empty() && drafting) dr.save_cost(a.draft_cost);  // this run's measured ratios, the next run's prior
     C.pick_log = nullptr;
     const int steps = (int)out.size() - 1;  // generated tokens (a verify step can produce several)
     int state_same = -1;

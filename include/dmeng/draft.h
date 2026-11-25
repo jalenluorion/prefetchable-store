@@ -234,7 +234,7 @@ struct DraftCtl {
   double rr[DMAX + 1];  // cost of a pass of n positions / cost of one position
   double c1 = 0;        // ms of a one-position step (running)
   int seen[DMAX + 1] = {0};
-  long offered = 0, declined = 0, probes = 0, since_probe = 0;
+  long offered = 0, declined = 0, probes = 0, since_probe = 0, copy_runs = 0;
   void init(const std::vector<int>& buckets_per_source, const double* cost_prior);
   // the draft length to run for a proposal of source s (0: a plain step)
   int choose(int s, const Draft& d, int max_len, double* gain = nullptr);
@@ -252,6 +252,8 @@ struct DraftOpts {
   bool lookup = true;         // the lookup source (off: only the skeleton and the extra sources draft)
   bool gate = true;           // the cost model from per-pass counters (WidthStat); off: the cost ratio table alone (the earlier rule)
   double margin = 0.05;       // a draft runs only when its estimated time per token beats a plain step's by this share
+  bool copy_free = true;      // copy drafts (the lookup) are not rationed once they are being kept (Drafter::step)
+  double copy_keep = 0.75;    // ... share of its recent drafts kept from which they count as being kept
 };
 
 // Per-pass counters for passes of one width (n positions; n = 1: plain steps). The controller's estimate of a pass of n
@@ -292,7 +294,7 @@ class Drafter {
   // statistics
   long steps = 0, tokens = 0, verifies = 0, drafted = 0, acc_total = 0;
   long by_n[DraftCtl::DMAX + 1] = {0}, by_src_steps[4] = {0}, by_src_acc[4] = {0};
-  long early_names = 0, early_cancelled = 0, prenamed = 0, explored = 0, probes_held = 0;
+  long early_names = 0, early_cancelled = 0, prenamed = 0, explored = 0, probes_held = 0, copy_free_runs = 0;
   // reads by kind of step, [0] plain steps, [1] verify passes: steps, tokens produced, on-the-spot reads (misses), picks
   // late (named, still in flight), bytes read on the spot / by names
   double rd_steps[2] = {0, 0}, rd_tok[2] = {0, 0}, rd_miss[2] = {0, 0}, rd_late[2] = {0, 0}, rd_urg[2] = {0, 0}, rd_pf[2] = {0, 0},
@@ -304,6 +306,12 @@ class Drafter {
   double c1 = 0;                // a plain step's compute ms (running)
   long plain_n = 0;
   double est(int n) const;      // estimated ms of a pass of n positions (1: a plain step)
+  // the compute ratios of passes measured by an earlier run (a line "draft_cost FAMILY r1 .. r8"), in place of the
+  // family's prior (DraftCtl::cost_prior); after init. save_cost writes this run's (false: too few passes, or not
+  // written): the measured prior of the next run
+  bool load_cost(const std::string& path, std::string& err);
+  bool save_cost(const std::string& path) const;
+  std::string cost_loaded;      // the file the prior came from (empty: the family's table)
   struct Fit {                  // decayed least squares of y = a + b x
     double sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
     void add(double x, double y, double dec) { sw = dec * sw + 1, sx = dec * sx + x, sy = dec * sy + y, sxx = dec * sxx + x * x, sxy = dec * sxy + x * y; }
@@ -320,6 +328,8 @@ class Drafter {
   std::map<std::pair<long, long>, std::vector<std::array<int, 3>>> ea_held_;
   void early(const Draft& d, int L, long p);
   double rho0_[DraftCtl::DMAX + 1] = {0};  // the family's prior compute ratios
+  std::string family_;
+  double cp_n_ = 0, cp_k_ = 0;  // the copy source's drafts verified / kept (decayed per pass)
   int pend_n_ = 0;
   bool last_full_ = false;  // the last pass kept every draft
   // the probe budget (ms, MB): 1% of every step's cost, minus what probes / explorations / names ahead cost beyond plain

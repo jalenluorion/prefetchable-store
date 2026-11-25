@@ -28,9 +28,8 @@
 // rows on the GPU beside the CPU, --gpu-experts F the same for the experts' products (builds with DM_METAL; the same
 // bits; default 0 = CPU only; --gpu-min N: sub-chunks of at least N positions).
 #include <mach/mach.h>
-#include <unistd.h>
-
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include <atomic>
 #include <chrono>
@@ -99,7 +98,8 @@ struct Args {
   int check_gen = 16, bench_rep = 1;
   int ref_chunk = 1;
   std::string draft = "none";  // draft and verify for greedy requests: none | lookup (controller) | fixed
-  int draft_max = 7, early = 0, probe_every = 48, verify_names = 0, draft_gate = 1;
+  int draft_max = 7, early = 0, probe_every = 48, verify_names = 1, draft_gate = 1, verify_old = 0, copy_free = 1;
+  std::string draft_cost;  // the measured pass costs: read at start (when present), written after each drafted request
   double draft_margin = 0.05;
   double gpu_frac = 0;       // prefill: share of each attention projection's rows on the GPU (exact); 0 = CPU only
   double gpu_experts = 0;    // prefill: share of the experts' rows on the GPU (exact); 0 = CPU only
@@ -125,7 +125,7 @@ struct Args {
   double mem_grow_s = 30, mem_retry_s = 600;
   std::string evict = "auto", xtok, layer_caps;
   double rt_tau = -1, xtok_tau = 0.5;
-  int rd_prio = -1, rt_cand = 16;
+  int rd_prio = -1, rt_cand = 16, name_gate = 0;
   // the user-facing surface (include/dmeng/presets.h)
   std::string profile = "auto", mode;
   int drafts = -1;
@@ -167,6 +167,7 @@ model and memory
 early names (lossless: names only schedule reads)
   --routers F|none --m M --rt-tau T --rt-cand C     the profile's routers and names rule by default
   --xtok F|none --xtok-tau T --rd-prio 0|1   cross-token names (Inkling: source 47 with priority reads by default)
+  --name-gate 0|1        1: no new named read while urgent reads wait for a reader (default 0)
 prompt path
   --chunk N (512) --span N (8192) --stream N (3) --gpu-frac F --gpu-experts F (the profile's: mac 0.4 / 0.4)
   --prefill-gpu off (CPU only) --keep-scratch
@@ -177,7 +178,8 @@ prompt path
   --ahead-span N (512) --ahead-park 0|1   idle-time prefill (the front end sends the predicted prefix)
   --hotset F|none        saved hot set (default DIR/.dmeng/hotset.bin)
 draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed)
-  --draft none|lookup|fixed --draft-max N (7) --early N (0) --probe-every N (48) --verify-names 0|1 (default 0)
+  --draft none|lookup|fixed --draft-max N (7) --early N (0) --probe-every N (48) --verify-names 0|1 (default 1)
+  --draft-cost F|none (default DIR/.dmeng/draft_cost.txt under a profile) --copy-free 0|1 (1) --verify-old 0|1 (0: A/B only)
 measurement
   --check IDS --ref-chunk N --gen N | --prefill-bench IDS --rep N --record-routing F | --check-ahead A B --check-ahead-len N
 )";
@@ -381,6 +383,7 @@ int main(int argc, char** argv) {
     else if (k == "--xtok") a.xtok = v();
     else if (k == "--xtok-tau") a.xtok_tau = std::stod(v());
     else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
+    else if (k == "--name-gate") a.name_gate = std::stoi(v());
     else if (k == "--ctx") a.ctx = std::stoi(v());
     else if (k == "--kv-plan") a.kv_plan = std::stoi(v());
     else if (k == "--threads") a.threads = std::stoi(v());
@@ -424,6 +427,9 @@ int main(int argc, char** argv) {
     else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--early") a.early = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
+    else if (k == "--verify-old") a.verify_old = std::stoi(v());
+    else if (k == "--copy-free") a.copy_free = std::stoi(v());
+    else if (k == "--draft-cost") a.draft_cost = v();
     else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
     else if (k == "--draft-margin") a.draft_margin = std::stod(v());
     else if (k == "--probe-every") a.probe_every = std::stoi(v());
@@ -490,11 +496,12 @@ int main(int argc, char** argv) {
     if (!has("--disk")) a.s.disk_dir = P.cache_dir + "/prefix";
     if (!has("--disk-every") && (P.family == "inkling2_loop" || P.family == "qwen4_exp")) a.s.disk_every = 1024;  // fixed states of 173 / 118 MB
     if (!has("--hotset")) a.hotset = P.cache_dir + "/hotset.bin";
-    if (!has("--verify-names")) a.verify_names = 0;
+    if (!has("--draft-cost")) a.draft_cost = P.cache_dir + "/draft_cost.txt";
     if (a.drafts < 0) a.drafts = P.drafts ? 1 : 0;
   } else {
     a.mode = engine_mode_of(a.mode.empty() ? "lossless" : a.mode);
   }
+  if (a.draft_cost == "none") a.draft_cost.clear();
   if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
   if (a.gpu_off) a.gpu_frac = a.gpu_experts = 0;
   if (a.drafts > 0 && !has("--early")) a.early = 4;
@@ -574,6 +581,7 @@ int main(int argc, char** argv) {
     if (C.ns.prio) C.cache.rd.prio = true;
     if (C.ns.cancel) C.cancel_stale = true;
   }
+  C.cache.name_gate = a.name_gate != 0;
   C.ra_budget = a.ra_budget;
   C.ra_max_tok = a.ra_max;
   C.ra_sat_skip = a.ra_sat != 0;
@@ -652,8 +660,18 @@ int main(int argc, char** argv) {
   dr.o.probe_every = a.probe_every;
     dr.o.gate = a.draft_gate != 0;
     dr.o.margin = a.draft_margin;
+  dr.o.copy_free = a.copy_free != 0;
   dr.init(M->info().family, a.early > 0 && a.draft != "none" ? &C : nullptr);
   dr.reads = &C;
+  if (dr.on() && !a.draft_cost.empty()) {  // the pass costs an earlier session measured, in place of the family's prior
+    struct stat sb;
+    std::string e;
+    if (stat(a.draft_cost.c_str(), &sb) == 0 && !dr.load_cost(a.draft_cost, e)) fprintf(stderr, "dmserve: %s (the family's prior)\n", e.c_str());
+  }
+  if (a.verify_old) {
+    std::string e;
+    if (!M->set_option("verify_old", "1", e)) fprintf(stderr, "dmserve: --verify-old: %s\n", e.c_str());
+  }
   C.chunk_names = a.verify_names != 0;
   struct PcTarget : DraftTarget {
     PrefixCache& pc;
@@ -837,9 +855,9 @@ int main(int argc, char** argv) {
       out("E " + std::to_string(r.rid) + " cancel {}");
       continue;
     }
-    // the head this request needs: the argmax (greedy without drafting: verify passes keep the full head), the exact top
-    // k (top-k sampling, k <= 64), or every logit (anything else)
-    lm.set_head_k(!screened ? 0 : r.temp <= 0 ? (dr.on() ? 0 : 1) : r.top_k >= 1 && r.top_k <= 64 ? r.top_k : 0);
+    // the head this request needs: the argmax (greedy), the exact top k (top-k sampling, k <= 64), or every logit (anything
+    // else); verify passes screen each position the same way
+    lm.set_head_k(!screened ? 0 : r.temp <= 0 ? 1 : r.top_k >= 1 && r.top_k <= 64 ? r.top_k : 0);
     if (mw) mw->set_positions((int)r.ids.size() + std::max(0, r.max_new));  // the state this request will hold
     SyncResult sr = pc.sync(r.ids, r.marks, lg.data());
     double ttp = ms_since2(t0);
@@ -924,6 +942,7 @@ int main(int argc, char** argv) {
     if (drafting) {
       dr.lookup.add_archive(gen);  // a later prompt may drop it (the template drops earlier reasoning)
       dr.end();
+      if (!a.draft_cost.empty()) dr.save_cost(a.draft_cost);  // what the session measured so far: the next start's prior
     }
     double dec_ms = ms_since2(td);
     // the disk copy of this prompt's first long marked prefix (the agent's system prompt), off the answer's critical path

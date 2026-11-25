@@ -238,6 +238,7 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
   gd.CK = c.CK;
   gd.eps = c.eps;
   gd.sigmoid_gate = c.sigmoid_gate;
+  if (!gd.ok(err)) return false;
   // what the core needs
   mi.family = "qwen4_exp";
   mi.hidden = c.H;

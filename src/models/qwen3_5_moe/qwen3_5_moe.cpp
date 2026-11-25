@@ -62,6 +62,7 @@ bool Qwen35::load(const LoadOpts& op, std::string& err) {
   gd.CK = c.CK;
   gd.eps = c.eps;
   gd.sigmoid_gate = false;
+  if (!gd.ok(err)) return false;
   fnorm = (const float*)R.ptr("norm");
   head = R.weight("head");
   if (!rows.open(c.emb_file[0] == '/' ? c.emb_file : op.dir + "/" + c.emb_file, c.emb_off, c.H, err)) return false;
@@ -861,6 +862,7 @@ bool Qwen35::set_option(const std::string& name, const std::string& value, std::
     return true;
   }
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
+  if (name == "verify_old") return (verify_old = std::stoi(value) != 0), true;  // the previous verify pass (A/B measurements)
   if (name == "prefill_chunk") return (po.chunk = std::stoi(value)), true;  // 1: the decode path, one position at a time
   if (name == "prefill_span") return (po.span = std::stoi(value)), true;
   if (name == "prefill_stream") return (po.stream = std::stoi(value)), true;
@@ -886,7 +888,9 @@ std::string Qwen35::stats_json(int) const {
   std::ostringstream o;
   const double n = std::max(1.0, sh.n_calls);
   o << "{\"fast_head\":{\"candidates_per_token\":" << sh.n_cand / n << ",\"coarse_ms\":" << sh.ms_coarse / n << ",\"exact_ms\":" << sh.ms_exact / n
-    << ",\"check\":" << (fast_head_check ? "true" : "false") << ",\"mismatches\":" << hd_mismatch << "}}";
+    << ",\"check\":" << (fast_head_check ? "true" : "false") << ",\"mismatches\":" << hd_mismatch << "}";
+  if (V) o << ",\"verify\":" << verify_json();
+  o << "}";
   return o.str();
 }
 

@@ -144,9 +144,77 @@ void phase_coarse(void* p, int tid, int) {
   }
 }
 
+// The coarse level for several inputs (a verify pass): each row's planes, scales and bounds are read once and used for
+// every input; per input the arithmetic is phase_coarse's, statement for statement, so each input's upper ends and top
+// lists equal what run() computes for it alone.
+struct LevelNCtx {
+  ScreenHead* M;
+  const XQ* const* x;
+  const Tok* t;    // [n]
+  float* hi;       // [n][V]
+  TopK *lo, *mid;  // [NTMAX][n]
+  int n, k, njobs;
+  alignas(128) std::atomic<int> next{0};
+};
+
+void phase_coarse_n(void* p, int tid, int) {
+  LevelNCtx& C = *(LevelNCtx*)p;
+  ScreenHead& M = *C.M;
+  const Weight& w = *M.head;
+  const int NG = w.cols / XB, k = C.k, N = C.n;
+  for (int q = 0; q < N; q++) C.lo[(size_t)tid * N + q].clear(), C.mid[(size_t)tid * N + q].clear();
+  const float32x4_t quarter = vdupq_n_f32(0.25f);
+  for (int b; (b = C.next.fetch_add(1, std::memory_order_relaxed)) < C.njobs;) {
+    const int r0 = b * 64, r1 = std::min(M.V, r0 + 64);
+    for (int r = r0; r < r1; r++) {
+      const uint8_t* ch = aff8s_hi(w, r);
+      const uint8_t* e1 = M.e1.data() + (size_t)r * NG;
+      const _Float16* s = (const _Float16*)w.s + (size_t)r * NG;
+      const _Float16* bi = (const _Float16*)w.b + (size_t)r * NG;
+      for (int q = 0; q < N; q++) {
+        const XQ& x = *C.x[q];
+        const Tok& T = C.t[q];
+        float32x4_t cacc = vdupq_n_f32(0), racc = cacc, aacc = cacc, bacc = cacc;
+        int g = 0;
+        for (; g + 4 <= NG; g += 4) {
+          const int32x4_t a0 = hdot(ch + 32 * g, x.hn + XB * g, x.ln + XB * g);
+          const int32x4_t a1 = hdot(ch + 32 * (g + 1), x.hn + XB * (g + 1), x.ln + XB * (g + 1));
+          const int32x4_t a2 = hdot(ch + 32 * (g + 2), x.hn + XB * (g + 2), x.ln + XB * (g + 2));
+          const int32x4_t a3 = hdot(ch + 32 * (g + 3), x.hn + XB * (g + 3), x.ln + XB * (g + 3));
+          const float32x4_t pf = vcvtq_f32_s32(vpaddq_s32(vpaddq_s32(a0, a1), vpaddq_s32(a2, a3)));
+          const float32x4_t mid = vfmaq_n_f32(vld1q_f32(T.s75 + g), pf, 16.f);
+          const float32x4_t sd = vmulq_f32(vcvt_f32_f16(vld1_f16((const float16_t*)s + g)), vld1q_f32(x.d + g));
+          const float32x4_t bv = vcvt_f32_f16(vld1_f16((const float16_t*)bi + g)), gs = vld1q_f32(x.gsum + g);
+          const float32x4_t asd = vabsq_f32(sd);
+          cacc = vfmaq_f32(cacc, mid, sd);
+          cacc = vfmaq_f32(cacc, bv, gs);
+          racc = vfmaq_f32(racc, asd, vminq_f32(vld1q_f32(T.a75 + g), vmulq_f32(vmulq_f32(u8x4(e1 + g), quarter), vld1q_f32(T.q2 + g))));
+          aacc = vfmaq_f32(aacc, asd, vld1q_f32(T.aa + g));
+          bacc = vfmaq_f32(bacc, vabsq_f32(bv), vabsq_f32(gs));
+        }
+        float c = vaddvq_f32(cacc), R = vaddvq_f32(racc), AL = vaddvq_f32(aacc), B = vaddvq_f32(bacc);
+        for (; g < NG; g++) {  // groups beyond a multiple of 4
+          const float mid = 16.f * (float)vaddvq_s32(hdot(ch + 32 * g, x.hn + XB * g, x.ln + XB * g)) + T.s75[g];
+          const float sd = (float)s[g] * x.d[g], bv = (float)bi[g];
+          c += mid * sd + bv * x.gsum[g];
+          R += std::fabs(sd) * std::min(T.a75[g], 0.25f * (float)e1[g] * T.q2[g]);
+          AL += std::fabs(sd) * T.aa[g];
+          B += std::fabs(bv) * std::fabs(x.gsum[g]);
+        }
+        const float sl = 4e-5f * (300.f * AL + B) + 1e-30f, rad = R * (1.f + 1e-5f) + sl;
+        C.hi[(size_t)q * M.V + r] = c + rad;
+        if (r >= M.VO) continue;
+        C.lo[(size_t)tid * N + q].push(c - rad, r, k);
+        C.mid[(size_t)tid * N + q].push(c, r, k);
+      }
+    }
+  }
+}
+
 struct ExactCtx {
   ScreenHead* M;
   const XQ* x;
+  const float* hi;  // the upper ends of this input's rows
   float* lg;
   float lb, cap;
   int nch, k;
@@ -168,7 +236,7 @@ void phase_exact(void* p, int tid, int) {
   for (int ch; (ch = E.next.fetch_add(1, std::memory_order_relaxed)) < E.nch;) {
     const int r0 = ch * ExactCtx::CH, r1 = std::min(M.VO, r0 + ExactCtx::CH);
     for (int r = r0; r < r1; r++) {
-      if (M.hi[r] >= E.lb) {
+      if (E.hi[r] >= E.lb) {
         float v;
         mv_aff8s_i16(w.c, w.srows, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r, r + 1, *E.x, &v);  // the full head's row
         if (E.cap > 0) {
@@ -183,7 +251,7 @@ void phase_exact(void* p, int tid, int) {
         }
       } else {
         E.lg[r] = -INFINITY;
-        hmax = std::max(hmax, M.hi[r]);
+        hmax = std::max(hmax, E.hi[r]);
       }
     }
   }
@@ -195,18 +263,18 @@ void phase_exact(void* p, int tid, int) {
 
 // a lower bound on the k-th largest logit from a level's results: the k-th largest lower end, or the smallest exact logit
 // of the k rows with the largest midpoints, whichever is higher
-float floor_of(const ScreenHead& M, const LevelCtx& C, int nt, int k, const XQ& x) {
+float floor_of(const ScreenHead& M, const TopK* lo, const TopK* md, size_t stride, int nt, int k, const XQ& x) {
   float all[NTMAX * ScreenHead::KMAX];
   int n = 0;
   for (int t = 0; t < nt; t++)
-    for (int i = 0; i < C.lo[t].n; i++) all[n++] = C.lo[t].v[i];
+    for (int i = 0; i < lo[t * stride].n; i++) all[n++] = lo[t * stride].v[i];
   if (n < k) return -INFINITY;
   std::nth_element(all, all + (k - 1), all + n, [](float a, float b) { return a > b; });
   const float lb = all[k - 1];
   std::pair<float, int> mids[NTMAX * ScreenHead::KMAX];
   int m = 0;
   for (int t = 0; t < nt; t++)
-    for (int i = 0; i < C.mid[t].n; i++) mids[m++] = {C.mid[t].v[i], C.mid[t].r[i]};
+    for (int i = 0; i < md[t * stride].n; i++) mids[m++] = {md[t * stride].v[i], md[t * stride].r[i]};
   std::nth_element(mids, mids + (k - 1), mids + m, [](const std::pair<float, int>& a, const std::pair<float, int>& b) { return a.first > b.first; });
   float ek = INFINITY;
   const Weight& w = *M.head;
@@ -219,6 +287,12 @@ float floor_of(const ScreenHead& M, const LevelCtx& C, int nt, int k, const XQ& 
 }
 
 }  // namespace
+
+struct ScreenHead::Scratch {
+  std::vector<Tok> tn;
+  std::vector<TopK> lo, mid;
+  std::vector<float> hi;
+};
 
 bool ScreenHead::build(Pool& pool, Weight& w, int vrows, int vout, std::string& err) {
   if (w.kind != Weight::AFF8 || w.cols % XB || w.cols / XB > 64 || pool.size() > NTMAX) {
@@ -338,11 +412,12 @@ int ScreenHead::run(Pool& pool, const XQ& x, int k, float* lg, float cap) {
   C1.k = k;
   C1.njobs = (V + 63) / 64;
   pool.run(phase_coarse, &C1);
-  const float lb2 = floor_of(*this, C1, nt, k, x);
+  const float lb2 = floor_of(*this, C1.lo, C1.mid, 1, nt, k, x);
   auto t1 = clk::now();
   ExactCtx E;
   E.M = this;
   E.x = &x;
+  E.hi = hi.data();
   E.lg = lg;
   E.lb = lb2;
   E.cap = cap;
@@ -376,9 +451,101 @@ int ScreenHead::run(Pool& pool, const XQ& x, int k, float* lg, float cap) {
   }
   n_cand += nc;
   n_calls += 1;
+  bytes += coarse_bytes() + (double)nc * row_bytes();
   ms_coarse += std::chrono::duration<double, std::milli>(t1 - t0).count();
   ms_exact += ms_since(t1);
   return b;
+}
+
+double ScreenHead::coarse_bytes() const { return (double)V * (head->cols / 2 + (head->cols / XB) * 5); }
+double ScreenHead::row_bytes() const { return (double)head->cols + (head->cols / XB) * 4; }
+
+void ScreenHead::run_n(Pool& pool, const XQ* const* xs, int n, int k, float* const* lg, int* best, bool* oks, float cap) {
+  auto t0 = clk::now();
+  k = std::max(1, std::min(k, std::min(KMAX, VO)));
+  const int NG = head->cols / XB, nt = pool.size();
+  if (!sc_) sc_ = std::make_shared<Scratch>();
+  Scratch& W = *sc_;
+  W.tn.resize(n);
+  W.lo.resize((size_t)NTMAX * n);
+  W.mid.resize((size_t)NTMAX * n);
+  W.hi.resize((size_t)n * V);
+  for (int q = 0; q < n; q++) {  // run()'s per-token sums, per input
+    const XQ& x = *xs[q];
+    Tok& T = W.tn[q];
+    for (int g = 0; g < NG; g++) {
+      int64_t S = 0, A = 0;
+      double Q = 0;
+      for (int i = 0; i < XB; i++) {
+        const int v = 256 * (int)x.hn[g * XB + i] + (int)x.ln[g * XB + i];
+        S += v;
+        A += v < 0 ? -v : v;
+        Q += (double)v * v;
+      }
+      T.s75[g] = 7.5f * (float)S;
+      T.a75[g] = 7.5f * (float)A;
+      T.aa[g] = (float)A;
+      T.q2[g] = (float)(std::sqrt(Q) * (1.0 + 1e-6));
+    }
+  }
+  LevelNCtx C1;
+  C1.M = this;
+  C1.x = xs;
+  C1.t = W.tn.data();
+  C1.hi = W.hi.data();
+  C1.lo = W.lo.data();
+  C1.mid = W.mid.data();
+  C1.n = n;
+  C1.k = k;
+  C1.njobs = (V + 63) / 64;
+  pool.run(phase_coarse_n, &C1);
+  auto t1 = clk::now();
+  bytes += coarse_bytes();
+  for (int q = 0; q < n; q++) {  // per input: run()'s floor and exact level over its own upper ends
+    const float lb2 = floor_of(*this, C1.lo + q, C1.mid + q, (size_t)n, nt, k, *xs[q]);
+    ExactCtx E;
+    E.M = this;
+    E.x = xs[q];
+    E.hi = W.hi.data() + (size_t)q * V;
+    E.lg = lg[q];
+    E.lb = lb2;
+    E.cap = cap;
+    E.k = k;
+    E.nch = (VO + ExactCtx::CH - 1) / ExactCtx::CH;
+    pool.run(phase_exact, &E);
+    float bestv = -INFINITY, hmax = -INFINITY;
+    int b = -1, nc = 0;
+    bool okq = true;
+    if (cap > 0) {
+      float all[NTMAX * KMAX];
+      int m = 0;
+      for (int t = 0; t < nt; t++) {
+        hmax = std::max(hmax, E.hmax[t]);
+        for (int i = 0; i < E.top[t].n; i++) all[m++] = E.top[t].v[i];
+      }
+      if (m < k) {
+        okq = false;
+      } else if (hmax > -INFINITY) {
+        std::nth_element(all, all + (k - 1), all + m, [](float a, float c) { return a > c; });
+        okq = softcap(hmax, cap) < all[k - 1];
+      }
+      if (!okq) n_fallback += 1;
+    }
+    for (int t = 0; t < nt; t++) {
+      nc += E.nc[t];
+      if (E.bi[t] >= 0 && (b < 0 || E.bv[t] > bestv || (E.bv[t] == bestv && E.bi[t] < b))) {
+        bestv = E.bv[t];
+        b = E.bi[t];
+      }
+    }
+    if (best) best[q] = b;
+    if (oks) oks[q] = okq;
+    n_cand += nc;
+    n_calls += 1;
+    bytes += (double)nc * row_bytes();
+  }
+  ms_coarse += std::chrono::duration<double, std::milli>(t1 - t0).count();
+  ms_exact += ms_since(t1);
 }
 
 }  // namespace dm

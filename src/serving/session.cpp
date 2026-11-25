@@ -617,7 +617,7 @@ void PrefixCache::commit(int a) {
   live_.insert(live_.end(), ver_ids_.begin(), ver_ids_.begin() + a);
   std::memcpy(live_logits_.data(), m_.logits_at(a - 1), live_logits_.size() * 4);
   live_logits_ok_ = true;
-  live_k_ = 0;
+  live_k_ = m_.head_k();  // (the pass screened its positions as a step does)
 }
 
 std::string PrefixCache::stats_json() const {

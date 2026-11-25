@@ -7,6 +7,7 @@
 // row and 64-input group (the bound) and a float per row.
 #pragma once
 #include <atomic>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -30,7 +31,17 @@ struct ScreenHead {
   // (a softcap: monotone, but it can make distinct logits equal), and ok says whether every row left out is still below
   // the k-th kept one after the cap; when it is false the caller computes the full head.
   int run(Pool& pool, const XQ& x, int k, float* lg, float cap = 0.f);
-  void reset_stats() { n_cand = n_calls = ms_coarse = ms_exact = n_fallback = 0; }
+  // run() for n inputs at once (a multi-position verify pass): the coarse level reads the head's planes once for all of
+  // them; each input's lg, argmax (best[i]) and ok (oks[i], with a cap) equal run()'s on that input alone, bit for bit
+  void run_n(Pool& pool, const XQ* const* xs, int n, int k, float* const* lg, int* best, bool* oks, float cap = 0.f);
+  double bytes = 0;  // head bytes the runs read (statistics: the coarse planes, scales, biases and bounds, the exact rows)
+  double coarse_bytes() const;
+  double row_bytes() const;
+  void reset_stats() { n_cand = n_calls = ms_coarse = ms_exact = n_fallback = bytes = 0; }
+
+ private:
+  struct Scratch;  // run_n's per-input lists and bounds (screen_head.cpp)
+  std::shared_ptr<Scratch> sc_;
 };
 
 }  // namespace dm

@@ -93,7 +93,9 @@ int ModelLM::set_head_k(int k) {
   return head_k_ = k;
 }
 
-bool ModelLM::verify(const int* ids, int n) { return m_.verify(s_, (const int32_t*)ids, n); }
+bool ModelLM::verify(const int* ids, int n) {  // each position's head as a step's (set_head_k)
+  return m_.verify(s_, (const int32_t*)ids, n, head_k_ == 1 ? Want::GREEDY : head_k_ > 1 ? Want::TOPK : Want::LAST);
+}
 void ModelLM::commit(int a) {
   dec_steps_ += a;
   m_.commit(s_, a);

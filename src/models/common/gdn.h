@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <string>
 #include <vector>
 
 #include "dmeng/weights.h"
@@ -21,6 +22,12 @@ struct Dims {
   float eps = 1e-6f;
   bool sigmoid_gate = false;  // the gated norm's gate: sigmoid(z) (Flash-Next) or silu(z) (Qwen3.6)
   int C() const { return 2 * NKH * DK + NVH * DV; }
+  // the head's buffers are on the stack (head_io): DK, DV at most 256, DK a multiple of 4 (the NEON loops)
+  bool ok(std::string& err) const {
+    if (DK > 0 && DK <= 256 && DV > 0 && DV <= 256 && DK % 4 == 0 && NKH > 0 && NVH % NKH == 0) return true;
+    err = "Gated DeltaNet head sizes outside what the engine supports (key dim <= 256 and a multiple of 4, value dim <= 256)";
+    return false;
+  }
 };
 
 struct Weights {  // one layer's: conv [C, CK], A_log / dt_bias [NVH], the gated norm's weight [DV] (as released)
@@ -28,24 +35,29 @@ struct Weights {  // one layer's: conv [C, CK], A_log / dt_bias [NVH], the gated
 };
 
 // one channel of the causal convolution for one position: the taps over the state (oldest first) as a fused
-// multiply-add chain, the newest input's product rounded on its own and added; then the state shifts by one
-inline float conv_channel(float* st, const float* wc, float x, int C, int CK, int ch) {
+// multiply-add chain, the newest input's product rounded on its own and added; then the state shifts by one. _io: the
+// state read from sin and the shifted state written to sout (another buffer, or sin itself)
+inline float conv_channel_io(const float* sin, float* sout, const float* wc, float x, int C, int CK, int ch) {
   float v = 0;
-  for (int k = 0; k < CK - 1; k++) v = __builtin_fmaf(st[(size_t)k * C + ch], wc[k], v);
+  for (int k = 0; k < CK - 1; k++) v = __builtin_fmaf(sin[(size_t)k * C + ch], wc[k], v);
   v = add_unfused(v, x, wc[CK - 1]);
-  for (int k = 0; k + 1 < CK - 1; k++) st[(size_t)k * C + ch] = st[(size_t)(k + 1) * C + ch];
-  st[(size_t)(CK - 2) * C + ch] = x;
+  for (int k = 0; k + 1 < CK - 1; k++) sout[(size_t)k * C + ch] = sin[(size_t)(k + 1) * C + ch];
+  sout[(size_t)(CK - 2) * C + ch] = x;
   return silu(v);
 }
+inline float conv_channel(float* st, const float* wc, float x, int C, int CK, int ch) { return conv_channel_io(st, st, wc, x, C, CK, ch); }
 
 // One value head h of one position. cv: the position's convolved q, k, v [C]; z: the head's gate inputs [DV]; b, a: the
-// head's beta and alpha inputs (before their activations); St: the head's state [DV, DK] (updated); o: the head's
-// output [DV]. q = q / |q| / sqrt(DK), k = k / |k| (eps 1e-6 under the root: mlx-vlm's rms_norm form); the state decays
-// by g = exp(-exp(A_log) softplus(a + dt_bias)), then S += k (v - S k) beta, y = S q; the gated RMSNorm over the head.
-inline void head(const Dims& d, const Weights& w, float* St, const float* cv, const float* z, float b, float a, int h, float* o) {
+// head's beta and alpha inputs (before their activations); Sin: the head's state [DV, DK]; Sout: where the updated state
+// goes (Sin itself, or another buffer: the verify pass); o: the head's output [DV] (null: the state only, no output).
+// q = q / |q| / sqrt(DK), k = k / |k| (eps 1e-6 under the root: mlx-vlm's rms_norm form); the state decays by
+// g = exp(-exp(A_log) softplus(a + dt_bias)), then S += k (v - S k) beta, y = S q; the gated RMSNorm over the head.
+inline void head_io(const Dims& d, const Weights& w, const float* Sin, float* Sout, const float* cv, const float* z, float b, float a, int h,
+                    float* o) {
   const int DK = d.DK, DV = d.DV, rep = d.NVH / d.NKH;
   const int kh = h / rep;
-  std::vector<float> q(DK), k(DK);
+  float q[256], k[256], ob[256];  // DK, DV <= 256 (checked at load)
+  float* ov = o ? o : ob;
   const float* qs = cv + kh * DK;
   const float* ks = cv + d.NKH * DK + kh * DK;
   const float* v = cv + 2 * d.NKH * DK + h * DV;
@@ -64,22 +76,24 @@ inline void head(const Dims& d, const Weights& w, float* St, const float* cv, co
   const float sp = xa > 20.f ? xa : std::log1p(std::exp(xa));
   const float g = std::exp(-std::exp(w.A_log[h]) * sp);
   for (int vi = 0; vi < DV; vi++) {
-    float* s = St + (size_t)vi * DK;
+    const float* si = Sin + (size_t)vi * DK;
+    float* s = Sout + (size_t)vi * DK;
     float32x4_t acc = vdupq_n_f32(0), gv = vdupq_n_f32(g);
     for (int i = 0; i < DK; i += 4) {
-      float32x4_t sv = vmulq_f32(vld1q_f32(s + i), gv);
+      float32x4_t sv = vmulq_f32(vld1q_f32(si + i), gv);
       vst1q_f32(s + i, sv);
-      acc = vfmaq_f32(acc, sv, vld1q_f32(k.data() + i));
+      acc = vfmaq_f32(acc, sv, vld1q_f32(k + i));
     }
     const float delta = (v[vi] - vaddvq_f32(acc)) * beta;
     float32x4_t dv = vdupq_n_f32(delta), oa = vdupq_n_f32(0);
     for (int i = 0; i < DK; i += 4) {
-      float32x4_t sv = vfmaq_f32(vld1q_f32(s + i), vld1q_f32(k.data() + i), dv);
+      float32x4_t sv = vfmaq_f32(vld1q_f32(s + i), vld1q_f32(k + i), dv);
       vst1q_f32(s + i, sv);
-      oa = vfmaq_f32(oa, sv, vld1q_f32(q.data() + i));
+      oa = vfmaq_f32(oa, sv, vld1q_f32(q + i));
     }
-    o[vi] = vaddvq_f32(oa);
+    ov[vi] = vaddvq_f32(oa);
   }
+  if (!o) return;
   // gated RMSNorm over the head (weight as released), times the gate
   float ss = 0;
   for (int i = 0; i < DV; i++) ss += o[i] * o[i];
@@ -88,6 +102,9 @@ inline void head(const Dims& d, const Weights& w, float* St, const float* cv, co
     for (int i = 0; i < DV; i++) o[i] = o[i] * r * w.gnorm[i] * sigm(z[i]);
   else
     for (int i = 0; i < DV; i++) o[i] = o[i] * r * w.gnorm[i] * silu(z[i]);
+}
+inline void head(const Dims& d, const Weights& w, float* St, const float* cv, const float* z, float b, float a, int h, float* o) {
+  head_io(d, w, St, St, cv, z, b, a, h, o);
 }
 
 // The same head evaluated without writing anything (run-ahead: it only decides reads, so its arithmetic need not be the

@@ -92,6 +92,7 @@ struct Readers {
   // speculative limits); [2..5] 1, 2, 3, 4+ reads in flight. [6] = bursts (no read in flight -> one)
   void depth_times(uint64_t out[7]);
   bool saturated();  // every reader has a read in flight and reads wait behind them
+  bool urgent_backlog();  // every reader has a read in flight and urgent reads wait behind them (the drive is behind now)
   ~Readers() { stop(); }
 
  private:
@@ -140,6 +141,7 @@ struct SlotPool {
 
 struct CacheStats {
   uint64_t n_hit = 0, n_late = 0, n_miss = 0, n_pf_issued = 0, n_pf_dropped = 0, n_pf_unused_evicted = 0, n_purged = 0;
+  uint64_t n_pf_gated = 0;  // names that needed a read and were not issued: urgent reads were queued (Cache::name_gate)
   uint64_t n_pf_stolen = 0, n_pf_cancelled = 0, n_late_queued = 0, n_miss_evicted = 0, n_miss_pf_evicted = 0;
   uint64_t miss_pbin[6] = {0};          // misses by a planner's probability for them: none, <.1, <.3, <.5, <.7, >=.7
   uint64_t n_hit_r[2] = {0}, n_pick_r[2] = {0};  // [looped steps, other steps]
@@ -442,6 +444,9 @@ struct Cache {
   void* long_wait_ctx = nullptr;
   void use(int L, int slot, long t, long step);
   int name(int L, int e, long step, int reserve = -1);        // an early name: pins; the slot, or -1 if none could be had
+  // name_gate: a name that needs a read is not issued while urgent reads wait for a reader (Readers::urgent_backlog):
+  // the drive cannot serve it before them, and a read it starts now delays them (live sessions at small caches)
+  bool name_gate = false;
                                                               // (reserve: slots left free for misses; -1: 2K + holds)
   void unpin(int L, int slot) {
     Slot& x = pool(L).s[slot];

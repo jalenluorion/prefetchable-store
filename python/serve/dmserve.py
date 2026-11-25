@@ -49,20 +49,28 @@ ap.add_argument("--ahead", type=int, default=1, help=adv("idle-time prefill: whe
 ap.add_argument("--reserve-gb", type=float, default=None, help=adv("memory left to the rest of the system by the automatic cache size (worker default 5.5)"))
 ap.add_argument("--log-bodies", action="store_true", help=adv("log every request's body (a later warm-start replay sends one again)"))
 ap.add_argument("--allow-force", action="store_true", help=adv("benchmarks only: honour a request's dm_force (a recorded answer fed as the model's turn, so a replay's next request matches the live state)"))
+ap.add_argument("--preserve-thinking", type=int, default=None, choices=[0, 1], help=adv("1: every earlier assistant turn keeps its reasoning in the prompt (the chat template's preserve_thinking; a request's chat_template_kwargs still wins), so the history stays the token sequence the model produced and a new user message reuses the live prefix instead of recomputing the last turn; 0: the template's default (Qwen3.6 drops the reasoning of turns before the last user message). Default: 1 for Qwen3.6 (qwen3_5_moe), else the template's own"))
 ap.add_argument("--idle-s", type=float, default=300, help=adv("stop the model worker after this long without a request (frees its locked memory); the next request starts it again and the prefix cache resumes from disk (0: never)"))
 argv = sys.argv[1:]
 wargs = argv[argv.index("--") + 1:] if "--" in argv else []
 a = ap.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
-if a.format is None:
+try:
+    fam = json.load(open(os.path.join(a.model_dir, "moved-store.json"))).get("family", "")
+except Exception:
+    fam = ""
+if not fam:  # a folder without a manifest: the release's model_type
     try:
-        fam = json.load(open(os.path.join(a.model_dir, "moved-store.json"))).get("family", "")
+        fam = json.load(open(os.path.join(a.model_dir, "config.json"))).get("model_type", "")
     except Exception:
         fam = ""
+if a.format is None:
     a.format = os.path.join(HERE, fam) if fam and os.path.exists(os.path.join(HERE, fam, "chat_format.py")) else os.path.join(HERE, "generic")
     if a.model_id is None and fam == "qwen4_exp":
         a.model_id = "qwen3.8-flash-next"
 if a.model_id is None:
     a.model_id = "qwen3.6-35b-a3b"
+if a.preserve_thinking is None:
+    a.preserve_thinking = 1 if fam == "qwen3_5_moe" else None
 sys.path.insert(0, a.format)
 import chat_format as CF  # noqa: E402
 sys.path.insert(0, HERE)
@@ -74,7 +82,9 @@ wargs = [x for i, x in enumerate(_extra) if not (x.startswith("--") and x in war
 sys.path.insert(0, HERE)
 import ahead as AH  # noqa: E402
 
-tok = CF.Tok(a.model_dir)
+TEMPLATE_DEFAULTS = {} if a.preserve_thinking is None else {"preserve_thinking": bool(a.preserve_thinking)}
+tok = CF.Tok(a.model_dir, defaults=TEMPLATE_DEFAULTS)
+print(f"dmserve: family {fam or '?'}, chat template defaults {json.dumps(TEMPLATE_DEFAULTS)}", file=sys.stderr, flush=True)
 if hasattr(CF, "bind"):
     CF.bind(tok)
 KEEP_SPECIAL = getattr(CF, "PARSE_KEEP_SPECIAL", False)  # formats whose turn structure is special tokens parse with them kept

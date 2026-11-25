@@ -200,12 +200,19 @@ struct Inkling : Model {
         << sh.ms_exact / n << ",\"full_head_fallbacks\":" << gh_fallback << "}";
     }
     if (dh) o << (fast_head ? "," : "") << "\"draft_head\":" << dh->stats_json();
+    if (ver_passes > 0) {
+      const double p = ver_passes;
+      o << (fast_head || dh ? "," : "") << "\"verify\":{\"steps\":" << ver_passes << ",\"positions\":" << ver_positions << ",\"old_path\":"
+        << (verify_old ? "true" : "false") << ",\"mb_per_pass\":{\"resident\":" << ver_res_bytes / 1e6 / p << ",\"head\":"
+        << ver_head_bytes / 1e6 / p << ",\"touched\":" << (ver_res_bytes + ver_head_bytes) / 1e6 / p << "}}";
+    }
     o << "}";
     return o.str();
   }
   void reset_stats() override {
     sh.reset_stats();
     gh_fallback = 0;
+    ver_passes = ver_positions = ver_head_bytes = ver_res_bytes = 0;
     if (dh) dh->reset_stats();
   }
 
@@ -284,6 +291,8 @@ struct Inkling : Model {
   };
   void chunk_alloc(int n);
   void span_alloc(int n);
+  void release_scratch();
+  long n_scratch_releases = 0;
   void layer_chunk(int v, int i0, int n, bool msgs);
   // false: cancelled inside the span (the state is back at its start)
   bool forward_chunk(const int32_t* ids, int n, bool want_last, bool all_logits = false, bool rollback = false, int sub = 0,
@@ -295,9 +304,13 @@ struct Inkling : Model {
   int rb_n = 0, rb_pos0 = 0;
   std::vector<std::vector<float>> rb_snap, rb_in;  // [NV * 4]: conv state, inputs [n, width]
   std::vector<float> mlg;                           // [n, VU] every verified position's logits
-  bool verify(State& s, const int32_t* ids, int n) override;
+  bool verify(State& s, const int32_t* ids, int n, Want want = Want::LAST) override;
   void commit(State& s, int a) override;
   const float* logits_at(int i) const override { return mlg.data() + (size_t)i * c.VU; }
+  Want ver_want = Want::LAST;  // what the running verify's caller reads of each position's logits
+  bool verify_old = false;     // the previous verify pass (packed gemm from 6 positions, the full head): A/B only
+  int ver_best[RING_SLACK + 1];
+  double ver_passes = 0, ver_positions = 0, ver_head_bytes = 0, ver_res_bytes = 0, ver_hb_full_ = 0;
   bool prefill(State& s, const int32_t* ids, int n, bool want_logits, const std::vector<int>& capture, const LM::StateSink& sink,
                PrefillStats* st, const std::atomic<bool>* cancel) override;
   ModelMem mem(const State& s) const override;
@@ -1513,6 +1526,26 @@ void Inkling::chunk_alloc(int n) {
   }
 }
 
+// the batched prefill's scratch back to the system after a prefill (prefill_release; the server's default): the span
+// arrays (every prompt position's residual, block states and message sources: 0.74 GB after an 8K-token prompt on the
+// real model), the sub-chunk scratch past what a verify pass uses, the packed inputs and the draft-head taps. The next
+// prefill or pass allocates what it needs again; nothing computed depends on it.
+void Inkling::release_scratch() {
+  std::vector<float>().swap(sp_h);
+  std::vector<float>().swap(sp_hpre);
+  std::vector<float>().swap(sp_blk);
+  std::vector<float>().swap(sp_msrc);
+  std::vector<float>().swap(ctaps);
+  sp_n = 0;
+  if (pp.size() > (size_t)RING_SLACK + 1) pp.resize(RING_SLACK + 1);
+  for (XQB* q : {&xqb_a, &xqb_b, &xqb_c, &xqb_e, &xqb_h}) {
+    std::free(q->mem);
+    q->mem = nullptr;
+    q->cap = 0;
+  }
+  n_scratch_releases++;
+}
+
 void Inkling::span_alloc(int n) {
   if (!NBMAX) {
     for (int L = 0; L < c.NL; L++) NBMAX += L % c.BLOCK == 0;
@@ -1857,7 +1890,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
     ki[i] = three ? p.qn + H : p.qn;
     vi[i] = three ? p.qn + 2 * H : p.qn;
   }
-  const bool packed = !ref && prec == Prec::I16 && n >= 6;
+  const bool packed = !ref && prec == Prec::I16 && n >= (rb && !verify_old ? 2 : 6);  // (a verify pass: from 2 positions)
   if (packed) {
     xqb_a.reserve(H, n);
     if (three) {
@@ -2295,30 +2328,64 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
       fh[k] = hn.data() + (size_t)k * H;
       oh[k] = fl.data() + (size_t)k * c.V;
     }
-    const XQB* ph = nullptr;
-    if (!ref && prec == Prec::I16 && nh >= 6) {
-      xqb_h.reserve(H, nh);
-      for (int k = 0; k < nh; k++) xqb_set_from(xqb_h, k, pp[k]->xa.q);
-      xqb_pad(xqb_h);
-      ph = &xqb_h;
+    const bool scr = all_logits && rb && !verify_old && fast_head && !ref && (ver_want == Want::GREEDY || (ver_want == Want::TOPK && head_topk > 0));
+    std::vector<int> full_pos;  // positions whose logits come from the full head (all, or the screen's fallbacks)
+    if (scr) {
+      // the screened head with the softcap, as a single step under this Want: every position's capped logits of the rows
+      // that can be in the top k, -inf for the rest (the planes read once for all positions); a position whose cap makes
+      // a row left out tie the k-th kept one (ok false) takes the full head, as the single step does
+      mlg.resize((size_t)nh * c.VU);
+      std::vector<float*> ml(nh);
+      for (int k = 0; k < nh; k++) ml[k] = mlg.data() + (size_t)k * c.VU;
+      bool oks[RING_SLACK + 1];
+      const double hb0 = sh.bytes;
+      sh.run_n(*core->pool, xh.data(), nh, ver_want == Want::GREEDY ? 1 : head_topk, ml.data(), ver_best, oks, c.softcap);
+      ver_head_bytes += sh.bytes - hb0;
+      for (int k = 0; k < nh; k++)
+        if (!oks[k]) full_pos.push_back(k), gh_fallback++;
+    } else {
+      for (int k = 0; k < nh; k++) full_pos.push_back(k);
+      if (rb) std::fill(ver_best, ver_best + RING_SLACK + 1, -1);
     }
-    JobN jh = {&head, nh, xh.data(), fh.data(), oh.data(), ph};
-    run_rows_n(*core->pool, &jh, 1, 64, ref, &T->bytes_res);
+    if (!full_pos.empty()) {
+      const int nf = (int)full_pos.size();
+      std::vector<const XQ*> xf(nf);
+      std::vector<const float*> ff(nf);
+      std::vector<float*> of(nf);
+      for (int j = 0; j < nf; j++) xf[j] = xh[full_pos[j]], ff[j] = fh[full_pos[j]], of[j] = oh[full_pos[j]];
+      const XQB* ph = nullptr;
+      if (!ref && prec == Prec::I16 && nf >= (rb && !verify_old ? 2 : 6)) {
+        xqb_h.reserve(H, nf);
+        for (int j = 0; j < nf; j++) xqb_set_from(xqb_h, j, pp[full_pos[j]]->xa.q);
+        xqb_pad(xqb_h);
+        ph = &xqb_h;
+      }
+      JobN jh = {&head, nf, xf.data(), ff.data(), of.data(), ph};
+      const double rb0 = T->bytes_res;
+      run_rows_n(*core->pool, &jh, 1, 64, ref, &T->bytes_res);
+      if (rb) ver_head_bytes += T->bytes_res - rb0, ver_hb_full_ = T->bytes_res - rb0;
+    }
     if (all_logits) vhn.assign(hn.begin(), hn.end());  // (a verify: kept for light draft heads)
     // the softcaps (a tanh per logit: about 6 M cycles per position on one thread) on the pool, 4,096 logits per job
     constexpr int SCB = 4096;
     const int nbk = (c.VU + SCB - 1) / SCB;
     if (all_logits) {
       mlg.resize((size_t)nh * c.VU);
-      parallel_for(*core->pool, nh * nbk, [&](int j) {
-        const int k = j / nbk, i0 = (j % nbk) * SCB, i1 = std::min(c.VU, i0 + SCB);
+      const int nf = (int)full_pos.size();
+      parallel_for(*core->pool, nf * nbk, [&](int j) {
+        const int k = full_pos[j / nbk], i0 = (j % nbk) * SCB, i1 = std::min(c.VU, i0 + SCB);
         for (int i = i0; i < i1; i++) mlg[(size_t)k * c.VU + i] = softcap(fl[(size_t)k * c.V + i], c.softcap);
       });
     }
-    parallel_for(*core->pool, nbk, [&](int j) {
-      const int i0 = j * SCB, i1 = std::min(c.VU, i0 + SCB);
-      for (int i = i0; i < i1; i++) lgts[i] = softcap(fl[(size_t)(nh - 1) * c.V + i], c.softcap);
-    });
+    if (scr) {
+      for (int k : full_pos) ver_best[k] = argmax(mlg.data() + (size_t)k * c.VU, c.VU);  // the fallback's answer, as in step()
+      std::memcpy(lgts.data(), mlg.data() + (size_t)(nh - 1) * c.VU, sizeof(float) * c.VU);
+    } else {
+      parallel_for(*core->pool, nbk, [&](int j) {
+        const int i0 = j * SCB, i1 = std::min(c.VU, i0 + SCB);
+        for (int i = i0; i < i1; i++) lgts[i] = softcap(fl[(size_t)(nh - 1) * c.V + i], c.softcap);
+      });
+    }
     T->head += ms_since(th);
   }
   S->pos += n;
@@ -2344,15 +2411,22 @@ int Inkling::head_argmax(const float* hn, float* conf) {
   return id;
 }
 
-bool Inkling::verify(State& s0, const int32_t* ids, int n) {
+bool Inkling::verify(State& s0, const int32_t* ids, int n, Want want) {
   S = (IState*)&s0;
   if (n < 1 || n > RING_SLACK + 1 || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n)) return false;
+  ver_want = want;
+  const double r0 = T->bytes_res;
+  ver_hb_full_ = 0;
   forward_chunk(ids, n, false, true, true);
+  ver_res_bytes += T->bytes_res - r0 - ver_hb_full_;  // (the full head's bytes are in bytes_res too)
+  ver_passes += 1;
+  ver_positions += n;
   return true;
 }
 
 void Inkling::commit(State& s0, int a) {
   S = (IState*)&s0;
+  if (rb && fast_head) greedy_ = ver_best[std::max(1, std::min(a, rb_n)) - 1];  // -1 when the pass used the full head
   if (!rb || a >= rb_n) {
     if (rb) core->chunk_commit(rb_n);  // the hooks see the last position's MoE inputs (names only)
     rb = false;
@@ -2464,6 +2538,7 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
     st->json = o.str();
   }
   if (gpu && po_release) gpu->trim();
+  if (po_release) release_scratch();
   if (ok && fast_head && want_logits) greedy_ = argmax(lgts.data(), c.VU);
   return ok;
 }
@@ -2551,6 +2626,7 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
     return true;
   }
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
+  if (name == "verify_old") return (verify_old = std::stoi(value) != 0), true;  // the previous verify pass (A/B measurements)
   if (name == "prefill_span") return (po_span = std::max(1, std::stoi(value))), true;  // positions per application-major span
   if (name == "prefill_stream") return (po_names = std::stoi(value) != 0), true;  // 0: no early names in a span
   if (name == "prefill_batched_always") return true;                              // the 35B's knob

@@ -105,8 +105,10 @@ class Model {
                        const LM::StateSink& sink, PrefillStats* st, const std::atomic<bool>* cancel);
   // EXTENSION (multi-position verify of drafted tokens): n <= 8 given positions in one pass, each one's logits kept
   // (logits_at(i)); commit(a) keeps the first a and rolls the rest back, leaving the state bits n - a fewer single steps
-  // would have left. Default: not supported (false).
-  virtual bool verify(State&, const int32_t* ids, int n) { return false; }
+  // would have left. want: what the caller reads of each position's logits (GREEDY: the argmax, TOPK: the exact top k,
+  // as for a single step; a model with a screened head then screens every position); LAST: every logit. Default: not
+  // supported (false).
+  virtual bool verify(State&, const int32_t* ids, int n, Want want = Want::LAST) { return false; }
   virtual void commit(State&, int a) {}
   virtual const float* logits_at(int i) const { return nullptr; }
   virtual const std::vector<float>& logits() const = 0;  // [vocab_out]

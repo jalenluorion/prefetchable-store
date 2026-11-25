@@ -13,10 +13,8 @@ tests/draft_check.sh Q36_TINY INK_TINY INK_RES0 INK_RES8      # needs the tiny m
 
 The scripts print a verdict line and exit 0 only when they pass; `dmeng --verify-check` reports in its JSON line and
 exits 3 on a difference; `dm_gate` writes ids for a comparison. A real model folder is a weight repository downloaded
-from the Hub (the README's quick start). The tiny random models the `tiny_check.py` and `draft_check.sh` checks use are
-made by generator scripts that are not in this repository yet; those checks need them passed in. Qwen3.8-Flash-Next's
-is made here: `python tests/qwen4_exp/make_tiny.py OUT` (a synthetic release through the published converter, a random
-router set in the trainer's npz layout, the manifest).
+from the Hub (the README's quick start). The tiny random models of the checks are made by generators in this
+repository (`tests/tiny_all.sh` builds all three and runs every check on each).
 
 The binaries come from `build/` (configure and build the repo first); `DMENG_BIN` / `DMSERVE_BIN` point a check at
 another build. The checks print a verdict line and exit 0 only when they pass; the two drivers write ids or decision

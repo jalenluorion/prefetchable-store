@@ -544,11 +544,57 @@ std::string LightHeadSource::stats_json() const {
 
 // ------------------------------------------------------------------------------------------------ controller
 const double* DraftCtl::cost_prior(const std::string& family) {
-  // pass of n positions / one position, measured on the base M4 (dmeng step costs; the controller replaces them with
-  // its own measurements as it runs)
+  // compute of a pass of n positions / one position, per family, before the run has measured any (the controller fits
+  // its own from every pass as it runs, the prior weighing three passes; a cost file, Drafter::load_cost, replaces it).
+  // Inkling: measured on the base M4 (dmeng step costs). The 35B: the pass after the verify fixes (the recurrent state
+  // streamed once per pass, the screened head, the packed gemm from 2 positions), 1.15 at 2 positions and 2.8 at 8 as
+  // expected from the old pass's measured parts, linear between; to be replaced by its real-model measurement.
   static const double ink[DMAX + 1] = {0, 1.0, 1.64, 2.07, 2.50, 2.95, 3.41, 3.86, 4.32};
-  static const double q36[DMAX + 1] = {0, 1.0, 1.64, 2.07, 2.50, 2.95, 3.41, 3.86, 4.32};
+  static const double q36[DMAX + 1] = {0, 1.0, 1.15, 1.43, 1.70, 1.98, 2.25, 2.53, 2.80};
   return family == "qwen3_5_moe" ? q36 : ink;
+}
+
+bool Drafter::load_cost(const std::string& path, std::string& err) {
+  FILE* f = fopen(path.c_str(), "r");
+  if (!f) return (err = "cannot read " + path), false;
+  char fam[64] = {0};
+  double r[DraftCtl::DMAX + 1] = {0};
+  int got = fscanf(f, "draft_cost %63s", fam);
+  for (int k = 1; got == 1 && k <= DraftCtl::DMAX; k++)
+    if (fscanf(f, " %lf", &r[k]) != 1) got = 0;
+  fclose(f);
+  if (got != 1 || family_ != fam) return (err = path + ": not a draft cost line of " + family_), false;
+  for (int k = 2; k <= DraftCtl::DMAX; k++)
+    if (!(r[k] >= r[k - 1] && r[k] <= k)) return (err = path + ": the ratios must rise and stay at most n"), false;
+  r[0] = 0, r[1] = 1;
+  for (int k = 0; k <= DraftCtl::DMAX; k++) rho0_[k] = ctl.rr[k] = r[k];
+  cost_loaded = path;
+  return true;
+}
+
+bool Drafter::save_cost(const std::string& path) const {
+  // what this run measured: a width with three or more recent passes by its own ratio of sums, the others from the line
+  // fitted over every pass (the prior where nothing was measured); kept rising and at most n
+  double r[DraftCtl::DMAX + 1];
+  double a = rho0_[2] - 1, b = rho0_[3] - rho0_[2];
+  f_rho.solve(rho0_[2] - 1, rho0_[3] - rho0_[2], 3, a, b);
+  long passes = 0;
+  for (int k = 2; k <= DraftCtl::DMAX; k++) passes += ws[k].n;
+  if (passes < 8) return false;  // too few passes to say anything
+  r[1] = 1;
+  for (int k = 2; k <= DraftCtl::DMAX; k++) {
+    const WidthStat& M = ws[k];
+    double v = M.d_n >= 3 && M.d_ref > 0 ? M.d_cmp / M.d_ref : 1 + std::max(0.05, a) + std::max(0.05, b) * (k - 2);
+    r[k] = std::min<double>(k, std::max(r[k - 1], v));
+  }
+  const std::string tmp = path + ".tmp";
+  FILE* f = fopen(tmp.c_str(), "w");
+  if (!f) return false;
+  fprintf(f, "draft_cost %s", family_.c_str());
+  for (int k = 1; k <= DraftCtl::DMAX; k++) fprintf(f, " %.4f", r[k]);
+  fprintf(f, "\n");
+  fclose(f);
+  return rename(tmp.c_str(), path.c_str()) == 0;
 }
 
 void DraftCtl::init(const std::vector<int>& nb, const double* prior) {
@@ -626,10 +672,11 @@ void Drafter::init(const std::string& family, Core* c) {
   if (core && o.early > 0) core->pick_log = &pick_log;
   const double* pr = DraftCtl::cost_prior(family);
   for (int k = 0; k <= DraftCtl::DMAX; k++) rho0_[k] = pr[k];
+  family_ = family;
 }
 
 void Drafter::reset_stats() {
-  steps = tokens = verifies = drafted = acc_total = early_names = early_cancelled = prenamed = explored = probes_held = 0;
+  steps = tokens = verifies = drafted = acc_total = early_names = early_cancelled = prenamed = explored = probes_held = copy_free_runs = 0;
   for (int k = 0; k < 2; k++) rd_steps[k] = rd_tok[k] = rd_miss[k] = rd_late[k] = rd_urg[k] = rd_pf[k] = rd_pos[k] = 0;
   ms_steps = 0;
   std::fill(std::begin(by_n), std::end(by_n), 0);
@@ -815,6 +862,26 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
     if (bs >= 0) {
       ctl.offered++;
       L = bl;
+      // a copy draft (the lookup: a passage of the prompt or of earlier output continued) is not rationed like a
+      // speculative guess once its drafts are being kept (decayed kept / verified >= o.copy_keep, the last pass of it
+      // weighing most): a declined offer of it runs at once, at the most drafts expected all kept with probability >= 0.5
+      // (learned acceptance per draft index, the match length's prior where an index was never run: a long match is
+      // copied wide), not waiting for the probe interval nor the probe budget, and costs the budget nothing; a long
+      // match (8+ tokens) may always probe past the budget. Its acceptance is the guard: rejected copies take it under
+      // the bar and rationing comes back.
+      const bool copy = bs == 0 && o.copy_free && o.gate && !ctl.fixed;
+      const bool copy_kept = copy && cp_n_ >= 1 && cp_k_ >= o.copy_keep * cp_n_;
+      if (L == 0 && copy_kept && est(1) > 0) {
+        int lp = 1;
+        double pr = 1;
+        for (int k = 1; k <= std::min<int>(maxL, (int)d.toks.size()); k++) {
+          const double q = ctl.pa[bs][d.bucket][k] >= 0 ? ctl.pa[bs][d.bucket][k] : d.conf[k - 1];
+          pr *= q;
+          if (pr >= 0.5) lp = k;
+          else break;
+        }
+        L = lp, copy_free_runs++, ctl.copy_runs++;
+      }
       if (L == 0) {
         ctl.declined++;
         // a probe: one draft (the narrowest pass; a rejected probe pays two positions, not the controller's full length)
@@ -832,8 +899,8 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
             if (pr >= 0.5) lp = k;
             else break;
           }
-          if (probe_ok(lp)) {
-            L = lp, ctl.since_probe = 0, ctl.probes++, gamble_ = true;
+          if (probe_ok(lp) || (copy && d.bucket == 3)) {
+            L = lp, ctl.since_probe = 0, ctl.probes++, gamble_ = probe_ok(lp);
           } else {
             ctl.since_probe = ctl.probe_every;  // due: runs once the budget allows
             probes_held++;
@@ -884,6 +951,7 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
       }
       T.commit(1 + acc);
       last_full_ = acc == L;
+      if (bs == 0) cp_n_ = 0.8 * cp_n_ + L, cp_k_ = 0.8 * cp_k_ + acc;  // the copy source's drafts kept, decayed per pass
       ctl.accepted(bs, d, L, acc);
       srcs_[bs]->feedback(L, acc);
       verifies++;
@@ -958,7 +1026,11 @@ std::string Drafter::stats_json() const {
   o2.precision(4);
   o2 << "{\"mode\":\"" << o.mode << "\",\"max\":" << o.max << ",\"steps\":" << steps << ",\"tokens\":" << tokens
      << ",\"tokens_per_step\":" << (double)tokens / std::max<long>(1, steps) << ",\"verifies\":" << verifies << ",\"drafted\":" << drafted
-     << ",\"accepted\":" << acc_total << ",\"prenamed_steps\":" << prenamed << ",\"explored\":" << explored << ",\"probes_held\":" << probes_held << ",\"probe_budget_ms\":" << pb_ms << ",\"probe_budget_mb\":" << pb_mb << ",\"offered\":" << ctl.offered << ",\"declined\":" << ctl.declined << ",\"probes\":" << ctl.probes
+     << ",\"accepted\":" << acc_total << ",\"prenamed_steps\":" << prenamed << ",\"explored\":" << explored << ",\"probes_held\":" << probes_held << ",\"probe_budget_ms\":" << pb_ms << ",\"probe_budget_mb\":" << pb_mb << ",\"offered\":" << ctl.offered << ",\"declined\":" << ctl.declined << ",\"probes\":" << ctl.probes << ",\"copy_unrationed\":" << copy_free_runs << ",\"copy_kept_share\":" << (cp_n_ > 0 ? cp_k_ / cp_n_ : -1.0) << ",\"cost_prior\":[" << [&] {
+       std::ostringstream q;
+       for (int k = 1; k <= DraftCtl::DMAX; k++) q << (k > 1 ? "," : "") << rho0_[k];
+       return q.str();
+     }() << "],\"cost_file\":\"" << cost_loaded << "\""
      << ",\"steps_by_positions\":[";
   for (int k = 1; k <= DraftCtl::DMAX; k++) o2 << (k > 1 ? "," : "") << by_n[k];
   o2 << "],\"verifies_by_source\":{\"lookup\":" << by_src_steps[0] << ",\"skeleton\":" << by_src_steps[1] << ",\"extra\":" << by_src_steps[2]

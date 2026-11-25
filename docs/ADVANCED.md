@@ -38,8 +38,10 @@ resolve to, as JSON, without loading the model.
   `--disk-gb`, `--disk-every`, `--preload`), idle-time prefill (`--ahead-span`, `--ahead-park`; the front end's
   `--ahead 0|1`), the saved hot set (`--hotset F|none`), the memory watcher (`--mem-watch`, `--mem-low-pct`,
   `--mem-high-pct`, `--mem-grow-after-s`, `--mem-retry-s`, `--cache-min-gb`, `--headroom-gb`) (dmserve).
-- **Draft and verify** (greedy only; the tokens are plain decoding's): `--draft lookup|fixed|head|both`,
-  `--draft-max`, `--draft-thr`, `--head-backoff`, `--early`, `--verify-names`, `--skeleton`, `--probe-every`.
+- **Draft and verify** (greedy and sampled; the tokens are plain decoding's): `--draft lookup|fixed|head|both`,
+  `--draft-max`, `--draft-thr`, `--head-backoff`, `--early`, `--verify-names`, `--skeleton`, `--probe-every`,
+  `--copy-free`, `--draft-cost`, `--verify-old` (the previous verify pass, for A/B measurements).
+- **Reads**: `--name-gate 0|1` (no new named read while urgent reads wait for a reader; default 0).
 - **Outputs and checks**: `--json`, `--out-ids`, `--steps-out`, `--record`, `--dump-names`, teacher forcing
   (`--teacher`, `--dump-logits`, `--nll-out`, `--ref-nll`, `--qual-out`, `--ref-qual`, `--taps-out`), `--state-check`,
   `--verify-check`, `--draft-check`, `--skip-reads`, `--force-routing`; the worker's `--check`, `--prefill-bench`,
