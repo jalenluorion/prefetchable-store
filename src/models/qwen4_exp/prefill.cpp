@@ -633,6 +633,9 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
         << ",\"wait_ms\":" << gacct.ms_wait - ga0.ms_wait << ",\"sets\":" << gacct.sets - ga0.sets << ",\"failed\":" << gacct.failed - ga0.failed
         << "},\"experts\":{\"frac\":" << po.gpu_experts << ",\"gmac_gpu\":" << (core->moe_gpu_macs - me_m0) / 1e9 << ",\"wait_ms\":" << core->moe_gpu_wait_ms - me_w0
         << ",\"sets\":" << core->moe_gpu_sets - me_n0 << ",\"failed\":" << core->moe_gpu_failed - me_f0 << "}}";
+    // what this prefill held before the release below: the span's scratch and the GPU paths' buffers (MB)
+    o << ",\"held_mb\":{\"scratch\":" << span_bytes() / MB << ",\"gpu_split\":" << (gpu ? gpu->buffer_bytes() / MB : 0.0)
+      << ",\"gpu_half\":" << (gpu.half() ? gpu.half()->buffer_bytes() / MB : 0.0) << "}";
     o << "}";
     st->json = o.str();
   }

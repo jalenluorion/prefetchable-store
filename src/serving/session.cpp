@@ -546,8 +546,7 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
     auto& c = mem[p];
     if (!c) {
       c = std::make_unique<Ckpt>();
-      c->pos = p;
-      c->fixed.resize(m_.info().fixed_bytes);
+      c->pos = p;  // (its blob is allocated below, once the memory cap's rule has kept it)
     }
     c->pinned |= pin;
   };
@@ -555,6 +554,47 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
   want_mem(n, false);
   if (o_.ckpt_every > 0)
     for (int p = (start / o_.ckpt_every + 1) * o_.ckpt_every; p < n; p += o_.ckpt_every) want_mem(p, false);
+  // only the checkpoints that the memory cap keeps once this prefill's are added (trim_checkpoints after each add, run
+  // here on positions alone) are filled: the others were evicted right after the prefill, but every one of them was a
+  // whole fixed state in memory during it (Flash-Next: 118 MB each, six for a cold agent prompt). The kept set is the
+  // same as before; a prefill cancelled after some of its spans keeps fewer of the skipped intermediate ones.
+  {
+    struct Sim {
+      int pos;
+      bool pinned;
+      uint64_t used;
+      bool fresh;
+    };
+    std::vector<Sim> sim;
+    for (auto& c : ck_) sim.push_back({c->pos, c->pinned, c->used, false});
+    const size_t each = m_.info().fixed_bytes, cap = std::max((size_t)(o_.ckpt_gb * 1e9), (size_t)std::max(0, o_.ckpt_min) * each);
+    uint64_t clk = clock_;
+    for (auto& kv : mem) {
+      sim.push_back({kv.first, kv.second->pinned, ++clk, true});
+      std::sort(sim.begin(), sim.end(), [](const Sim& a, const Sim& b) { return a.pos < b.pos; });
+      while (sim.size() * each > cap && !sim.empty()) {
+        int best = -1;
+        for (int i = 0; i < (int)sim.size(); i++) {
+          if (sim[i].pinned || i + 1 == (int)sim.size() || sim[i].pos <= protect_upto_) continue;
+          if (best < 0 || sim[i].used < sim[best].used) best = i;
+        }
+        if (best < 0) break;
+        sim.erase(sim.begin() + best);
+      }
+    }
+    for (auto it = mem.begin(); it != mem.end();) {
+      const bool kept = std::any_of(sim.begin(), sim.end(), [&](const Sim& s) { return s.fresh && s.pos == it->first; });
+      it = kept ? std::next(it) : mem.erase(it);
+    }
+  }
+  // the prompt's end is the state the prefill leaves: saved from it afterwards (not filled during the pass, beside the
+  // pass's scratch: one fixed state less at the prefill's peak)
+  std::unique_ptr<Ckpt> end_ck;
+  if (auto e = mem.find(n); e != mem.end()) {
+    end_ck = std::move(e->second);
+    mem.erase(e);
+  }
+  for (auto& kv : mem) kv.second->fixed.resize(m_.info().fixed_bytes);
   pend_ok_ = true;
   if (!o_.disk_dir.empty() && first_mark > start && o_.disk_every > 0) {
     begin_disk(ids, first_mark, start);
@@ -581,6 +621,11 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
   live_.assign(ids.begin(), ids.begin() + m_.pos());
   for (auto& kv : mem)
     if (kv.first <= m_.pos()) add_checkpoint(std::move(kv.second));
+  if (ok && end_ck && m_.pos() == n) {
+    end_ck->fixed.resize(m_.info().fixed_bytes);
+    m_.save_fixed(end_ck->fixed.data());
+    add_checkpoint(std::move(end_ck));
+  }
   if (!ok) {
     R.cancelled = true;
     live_logits_ok_ = false;

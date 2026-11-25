@@ -1,6 +1,7 @@
 #include "dmeng/model_lm.h"
 
 #include <mach/mach.h>
+#include <malloc/malloc.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -168,13 +169,18 @@ std::string ModelLM::mem_json() const {
     for (int p = 0; p < C.npools; p++) slab += C.P[p].slab_bytes;
   task_vm_info_data_t vi;
   mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
-  const double foot = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS ? vi.phys_footprint / MB : -1;
+  const bool vi_ok = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS;
+  const double foot = vi_ok ? vi.phys_footprint / MB : -1, peak = vi_ok ? vi.ledger_phys_footprint_peak / MB : -1;
+  // the heap: bytes the process's malloc zones hand out now, and what they hold from the system for it (the difference is
+  // freed memory the allocator keeps, which the footprint still counts)
+  malloc_statistics_t ms{};
+  malloc_zone_statistics(nullptr, &ms);
   char b[768];
   snprintf(b, sizeof b,
-           "{\"footprint_mb\":%.0f,\"resident_mb\":%.0f,\"expert_slab_mb\":%.0f,\"kv_reserved_mb\":%.0f,\"kv_touched_mb_at_pos\":%.0f,\"recurrent_mb\":%.0f,"
-           "\"prefill_scratch_mb\":%.0f,\"prefill_xqb_mb\":%.0f}",
-           foot, mb(mm.resident), mb(slab), mb(mm.kv_reserved), mb((size_t)s_.pos * inf_.pos_bytes), mb(mm.recurrent), mb(mm.prefill_scratch),
-           mb(mm.prefill_xqb));
+           "{\"footprint_mb\":%.0f,\"footprint_peak_mb\":%.0f,\"resident_mb\":%.0f,\"expert_slab_mb\":%.0f,\"kv_reserved_mb\":%.0f,\"kv_touched_mb_at_pos\":%.0f,"
+           "\"recurrent_mb\":%.0f,\"prefill_scratch_mb\":%.0f,\"prefill_xqb_mb\":%.0f,\"malloc_in_use_mb\":%.0f,\"malloc_held_mb\":%.0f}",
+           foot, peak, mb(mm.resident), mb(slab), mb(mm.kv_reserved), mb((size_t)s_.pos * inf_.pos_bytes), mb(mm.recurrent), mb(mm.prefill_scratch),
+           mb(mm.prefill_xqb), mb(ms.size_in_use), mb(ms.size_allocated));
   return b;
 }
 

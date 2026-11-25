@@ -726,7 +726,10 @@ int main(int argc, char** argv) {
            r.cache = a.cache_auto ? r.cache : "fixed";
            return r.resolved(a.cache_gb).json();
          }()
-      << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << "}";
+      << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << ",\"routers_file_mb\":" << [&] {
+           struct stat rs;
+           return !a.routers.empty() && stat(a.routers.c_str(), &rs) == 0 ? rs.st_size / 1e6 : 0.0;
+         }() << "}";
     out(s.str());
   }
   // stdin reader: requests into a queue, cancels applied at once
