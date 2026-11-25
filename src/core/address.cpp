@@ -299,6 +299,37 @@ void phase_split_rows(void* p, int, int) {  // previous-token columns of every t
 }
 }  // namespace
 
+namespace {
+// a router's MLP after its first layer, on the pool: the gelu and quantisation of the hidden values block by block, then
+// the second layer's rows (16 per claim) once every block is done. Each value is the serial path's (gelu_erf, xq_block,
+// mv per row).
+struct MlpCtx {
+  const float* z;
+  float* hv;
+  XQ* xq;
+  const Weight* m2;
+  float* out;
+  int nb, nr, NE;
+  alignas(128) std::atomic<int> next{0};
+  alignas(128) std::atomic<int> left{0};
+};
+void phase_mlp(void* p, int, int) {
+  MlpCtx& X = *(MlpCtx*)p;
+  for (int ch; (ch = X.next.fetch_add(1, std::memory_order_relaxed)) < X.nb + X.nr;) {
+    if (ch < X.nb) {
+      float* h = X.hv + (size_t)ch * XB;
+      for (int i = 0; i < XB; i++) h[i] = gelu_erf(X.z[(size_t)ch * XB + i]);
+      xq_block(*X.xq, ch, h);
+      X.left.fetch_sub(1, std::memory_order_release);
+      continue;
+    }
+    while (X.left.load(std::memory_order_acquire) > 0) __builtin_arm_yield();
+    const int r0 = (ch - X.nb) * 16, r1 = std::min(X.NE, r0 + 16);
+    mv(*X.m2, r0, r1, X.xq, nullptr, X.out + r0);
+  }
+}
+}  // namespace
+
 void Routers::finish(Core& c, int t, bool with_lag) {
   finish_z(c, t, pre_out.data() + (size_t)t * rows, with_lag ? lag_out.data() : nullptr, c.pos, -1, nm.data() + (size_t)t * 16,
            nq.data() + (size_t)t * 16, nbin.data() + (size_t)t * 16);
@@ -315,7 +346,19 @@ void Routers::finish_z(Core& c, int t, const float* pre, const float* lagr, int 
   zz.resize(NE);
   idx.resize(NE);
   for (int r = 0; r < rows; r++) z[r] = pre[r] + y.b_pre[r] + (lagr ? lagr[r] : 0.f);
-  if (hid > 0) {  // the MLP path (a linear router has none)
+  // the MLP path in one fork-join (MlpCtx) when its second layer is large enough for the pool to beat one thread on it
+  // (Flash-Next's: 512 x 1024 8-bit, 0.54 MB, an estimated 25 us on one core; token by token, DMENG_AB, the token was
+  // faster in three runs of three); smaller ones (the other families' published MLP routers, hidden 512) stay on the
+  // calling thread
+  if (hid > 0 && hid % XB == 0 && y.m2.bytes() >= (256u << 10) && c.pool->size() > 1) {
+    hv.resize(hid);
+    MlpCtx X;
+    X.z = z.data() + NE, X.hv = hv.data(), X.xq = &xh.q, X.m2 = &y.m2, X.out = z2.data();
+    X.nb = hid / XB, X.nr = (NE + 15) / 16, X.NE = NE;
+    xh.reset(hid);
+    X.left.store(X.nb, std::memory_order_relaxed);
+    c.pool->run_any(phase_mlp, &X);
+  } else if (hid > 0) {  // the MLP path (a linear router has none)
     hv.resize(hid);
     for (int i = 0; i < hid; i++) hv[i] = gelu_erf(z[NE + i]);
     xh.prep(hv.data(), hid);

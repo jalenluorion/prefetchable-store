@@ -20,6 +20,8 @@
 
 namespace dm {
 
+int g_ab = getenv("DMENG_AB") ? atoi(getenv("DMENG_AB")) : 0, g_ab_arm = 0;
+
 // ---------------------------------------------------------------------------------------------- memory
 uint8_t* alloc_region(size_t bytes, Mem mode, std::string* err) {
   bytes = (bytes + 16383) & ~size_t(16383);

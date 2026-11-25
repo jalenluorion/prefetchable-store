@@ -45,6 +45,7 @@ bool Approx::preset(const std::string& spec) {
   const size_t c = spec.find(':');
   const std::string name = spec.substr(0, c);
   if (!preset_base(name)) return false;
+  cold_floor = -1;
   for (size_t i = c == std::string::npos ? spec.size() : c + 1; i < spec.size();) {
     size_t j = spec.find(':', i);
     if (j == std::string::npos) j = spec.size();
@@ -59,6 +60,7 @@ bool Approx::preset(const std::string& spec) {
     else if (k == "mass") read_mass = v;
     else if (k == "late") late_ms = v;
     else if (k == "bg") bg = v != 0;
+    else if (k == "floor") cold_floor = (int)v;  // the cold-cache floor (-1: 2K; 0: never, the old runner's substitution)
     else return false;
     i = j + 1;
   }
@@ -97,7 +99,8 @@ bool Approx::preset_base(const std::string& name) {
 const char* Approx::presets_help() {
   return "bounded (wait for named picks in flight, read any missing pick with released weight > 0.1, replace the rest), "
          "drop (as bounded, but the rest is left out: no substitute, released weights kept, no floor of experts in memory), "
-         "never (replace whatever has not landed: a speed bound); each may be followed by :w=W:mass=M:late=MS:bg=0|1 (the rule set)";
+         "never (replace whatever has not landed: a speed bound); each may be followed by :w=W:mass=M:late=MS:bg=0|1:floor=N "
+         "(the rule set; floor: the cold-cache floor of the replacing rules, 0 = never read on the spot for it)";
 }
 
 // ------------------------------------------------------------------------------------------------ setup
@@ -238,7 +241,34 @@ long Core::next_use(int step) const {
 }
 
 // ------------------------------------------------------------------------------------------------ per token
+namespace {
+// DMENG_AB (weights.h): per arm, decode tokens, their ms and each stage's ms (Times' fields), printed at exit
+constexpr int NT = sizeof(Times) / sizeof(double);
+struct AbAcc {
+  double n[2] = {0, 0}, ms[2] = {0, 0}, st[2][NT] = {};
+  clk::time_point t0;
+  double s0[NT];
+  bool in = false;
+  ~AbAcc() {
+    if (!g_ab) return;
+    static const char* nm[] = {"embed", "attn_proj", "attn_core", "attn_out", "depth", "msg", "router", "experts", "wait", "cache", "pf", "head", "misc", "ra"};
+    for (int a = 0; a < 2; a++) {
+      const double k = std::max(1.0, n[a]);
+      fprintf(stderr, "DMAB %d arm %d tokens %.0f ms %.3f |", g_ab, a, n[a], ms[a] / k);
+      for (int i = 0; i < 14 && i < NT; i++) fprintf(stderr, " %s %.3f", nm[i], st[a][i] / k);
+      fprintf(stderr, "\n");
+    }
+  }
+} g_abacc;
+}  // namespace
+
 void Core::token_start(int position, int tok, const float* router_emb) {
+  if (g_ab) {
+    g_ab_arm = (int)(tok_clock & 1);
+    g_abacc.t0 = clk::now();
+    std::memcpy(g_abacc.s0, &t, sizeof g_abacc.s0);
+    g_abacc.in = true;
+  }
   pos = position;
   if (cache.budget_req.load(std::memory_order_relaxed) >= 0) cache.apply_budget();  // a run-time budget (any thread)
   if (hook) {
@@ -251,6 +281,14 @@ void Core::token_start(int position, int tok, const float* router_emb) {
 }
 
 void Core::token_end() {
+  if (g_ab && g_abacc.in) {
+    const int a = g_ab_arm;
+    g_abacc.n[a] += 1;
+    g_abacc.ms[a] += ms_since(g_abacc.t0);
+    const double* now_t = (const double*)&t;
+    for (int i = 0; i < NT; i++) g_abacc.st[a][i] += now_t[i] - g_abacc.s0[i];
+    g_abacc.in = false;
+  }
   tok_clock++;
   if (cache.mem == Mem::FILE && (cache.fa.on || cache.core_n)) {  // adaptive budget, locked core
     auto tc = clk::now();

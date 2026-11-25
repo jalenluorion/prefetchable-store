@@ -150,8 +150,6 @@ struct Flash : Model {
   std::vector<int> sel_;  // the keys the current QSA query attends to
   int greedy_ = -1;
   bool fast_head = false;
-  int ab_on = 0, ab_arm = 0;  // DMENG_AB: alternate an arm token by token (measurement)
-  double ab_ms[2] = {0, 0}, ab_msg[2] = {0, 0}, ab_n[2] = {0, 0};  // the hyper-connection mixer of a decode step in one fork-join (hc_step)
   int head_topk = 0;
   ScreenHead sh;
   // run-ahead (Core::run_ahead)

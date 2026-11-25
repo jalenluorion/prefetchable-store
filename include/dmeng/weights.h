@@ -21,6 +21,13 @@ using clk = std::chrono::steady_clock;
 inline double ms_since(clk::time_point t) { return std::chrono::duration<double, std::milli>(clk::now() - t).count(); }
 inline double ms_between(clk::time_point a, clk::time_point b) { return std::chrono::duration<double, std::milli>(b - a).count(); }
 
+// ---------------------------------------------------------------------------------------------- measurement
+// DMENG_AB=N (measurement only): decode tokens alternate arm 0 and arm 1 (g_ab_arm, set at Core::token_start from the
+// token's parity); a candidate N reads ab(N) to take its arm-1 path. Per-arm token and stage times are printed at exit
+// ("DMAB" lines on stderr). 0 (the default): every ab() is false.
+extern int g_ab, g_ab_arm;
+inline bool ab(int n) { return g_ab == n && g_ab_arm; }
+
 // ---------------------------------------------------------------------------------------------- memory
 // PLAIN: anonymous pages, resident as touched. MLOCK: wired at allocation. PURGEABLE (expert slots only): each slot is
 // its own VM object; idle slots are marked volatile so the system may drop them instead of compressing them.
