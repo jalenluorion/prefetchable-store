@@ -46,6 +46,11 @@ struct PrefillOpts {
   // the scratch bound of a prefill in MB (the span's streams first, then the sub-chunk and MoE-block buffers); 0: the
   // family's own default. A longer span reads each layer's experts once for more positions.
   double scratch_mb = 0;
+  // fast mode: a prompt of at most drop_upto positions keeps the decode's leave-out rule (approx:drop) in its batched pass
+  // (each position's light missing picks left out, as a decode step leaves them; its short-span names are only the picks
+  // the rule would read), as the old runner ran its short prompts through its approximate decode; longer prompts, and
+  // every prompt in exact mode, run lossless. 0: never (every family's default)
+  int drop_upto = 0;
   // the early names of a span of n positions (multi: several sub-chunks): 0 none, 1 whole next layer, 2 router picks
   int names_for(int n, bool multi) const {
     if (stream != 3) return stream;

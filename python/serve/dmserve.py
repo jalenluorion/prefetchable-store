@@ -55,7 +55,7 @@ ap.add_argument("--reasoning-effort", default=None, help="thinking effort when a
 ap.add_argument("--canned-title", type=int, default=0, help=adv("1: a request without tools whose model name ends in 'title' (a client's thread-title request) is answered from the last user message's first words, without the model (the old runner's demo)"))
 ap.add_argument("--warm", type=int, default=0, help=adv("1: at start and when the date changes, prefill the last main request's system prompt and first user message (today's date written in) while idle, so a new thread finds its prefix (the old runner's --warm); the request is kept in <model>/.dmeng/last_request.json"))
 ap.add_argument("--retok-reuse", type=int, default=0, help=adv("1: when a main request sends the model's own last turn back re-rendered (the same text, other token boundaries), continue from the state computed on the model's own tokens instead of prefilling the turn again (the old runner's re-tokenized prefix)"))
-ap.add_argument("--demo", action="store_true", help="the old runner's demo settings: --warm 1 --canned-title 1 --retok-reuse 1 --idle-s 0 --reasoning-effort low, and the worker's --ckpt-min 2 (each still overridable)")
+ap.add_argument("--demo", action="store_true", help="the old runner's demo settings: --warm 1 --canned-title 1 --retok-reuse 1 --idle-s 0 --reasoning-effort low, and the worker's --ckpt-min 2 --ahead-min 64 (each still overridable)")
 argv = sys.argv[1:]
 wargs = argv[argv.index("--") + 1:] if "--" in argv else []
 a = ap.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
@@ -102,6 +102,8 @@ import agent_profile as PR  # noqa: E402
 # the profile, mode and drafts go to the worker, which resolves the defaults (a worker flag after "--" wins)
 _prof = "auto" if a.profile == "agent" else a.profile
 _extra = PR.agent_profile(a.model_dir, drafts=bool(a.drafts), reserve_gb=a.reserve_gb, profile=_prof, mode=a.mode)
+if a.demo and "--ahead-min" not in wargs:  # the demo: no idle-time prefill of a few positions (a request arriving during one
+    wargs = wargs + ["--ahead-min", "64"]   # waited for all of it, 0.5-0.9 s on Flash-Next; the request's prefill adds them for free)
 if a.demo and "--ckpt-min" not in wargs:  # the demo: two in-memory checkpoints whatever their size (Flash-Next's are 118 MB each:
     wargs = wargs + ["--ckpt-min", "2"]   # the other two held memory the expert cache needs; the disk copy keeps the system prefix)
 wargs = [x for i, x in enumerate(_extra) if not (x.startswith("--") and x in wargs) and not (i and _extra[i - 1].startswith("--") and _extra[i - 1] in wargs)] + wargs

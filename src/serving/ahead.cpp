@@ -43,6 +43,16 @@ std::string AheadRunner::run() {
     marks = marks_;
     id = id_;
     has_.store(false);  // one attempt per submit; the front end submits again when it is still wanted
+    const std::vector<int>& live = pc_.live();
+    size_t k = 0;
+    while (k < live.size() && k < ids.size() && live[k] == ids[k]) k++;
+    if (min_new_ > 0 && k == live.size() && ids.size() - live.size() < (size_t)min_new_) {  // a short extension: left to the request
+      n_skipped_++;
+      std::ostringstream s;
+      s << "A " << id << " {\"predicted\":" << ids.size() << ",\"live_len\":" << live.size() << ",\"skipped\":true,\"min_new\":" << min_new_
+        << ",\"skips\":" << n_skipped_ << "}";
+      return s.str();
+    }
     stop_.store(false);
     running_.store(true);
   }

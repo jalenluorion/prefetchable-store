@@ -113,6 +113,7 @@ struct Args {
   bool keep_scratch = false;  // prefill: keep the scratch between prefills (default: freed after each)
   int ahead_span = 512;       // idle-time prefill: positions per span (a cancel keeps the finished spans); 0 = --span
   bool ahead_park = true;     // idle-time prefill parks the live conversation it replaces
+  int ahead_min = 0;          // idle-time prefill: predictions extending the live sequence by fewer positions are not run
   std::string check_ahead_a, check_ahead_b;
   std::string hotset;         // saved hot set: written at quit, refilled in the background at start ("" = off)
   int check_ahead_len = 0;
@@ -178,7 +179,8 @@ prompt path
   --run-ahead-budget X --run-ahead-max N --run-ahead-sat-skip 0|1   its limits (the profile's; built-in: none)
   prefix cache: --ckpt-gb G --ckpt-min N (4) --park-gb G --ckpt-every N --disk DIR|none (default DIR/.dmeng/prefix) --disk-gb G
                 --disk-every N (Inkling: 1024) --preload | --no-preload
-  --ahead-span N (512) --ahead-park 0|1   idle-time prefill (the front end sends the predicted prefix)
+  --ahead-span N (512) --ahead-park 0|1 --ahead-min N (0)   idle-time prefill (the front end sends the predicted prefix;
+                         a prediction extending the live sequence by fewer than --ahead-min positions is left to the request)
   --hotset F|none        saved hot set (default DIR/.dmeng/hotset.bin)
 draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed)
   --draft none|lookup|fixed --draft-max N (7) --early N (0) --probe-every N (48) --verify-names 0|1 (default 1)
@@ -435,6 +437,7 @@ int main(int argc, char** argv) {
     else if (k == "--probe-every") a.probe_every = std::stoi(v());
     else if (k == "--ahead-span") a.ahead_span = std::stoi(v());
     else if (k == "--ahead-park") a.ahead_park = std::stoi(v()) != 0;
+    else if (k == "--ahead-min") a.ahead_min = std::stoi(v());
     else if (k == "--check-ahead") {
       a.check_ahead_a = v();
       a.check_ahead_b = v();
@@ -709,7 +712,7 @@ int main(int argc, char** argv) {
     const float* logits_at(int i) const override { return pc.logits_at(i); }
     void commit(int a2) override { pc.commit(a2); }
   } tgt(pc, lm);
-  AheadRunner ahead(lm, pc, a.ahead_span > 0 ? a.ahead_span : a.span, a.span, a.ahead_park);
+  AheadRunner ahead(lm, pc, a.ahead_span > 0 ? a.ahead_span : a.span, a.span, a.ahead_park, a.ahead_min);
   std::unique_ptr<HotSet> hot;
   if (!a.hotset.empty()) hot.reset(new HotSet(lm, a.hotset));
   const bool hot_loaded = hot && hot->load();

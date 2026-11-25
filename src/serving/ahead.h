@@ -21,8 +21,12 @@ namespace dm {
 class AheadRunner {
  public:
   // span: positions per prefill span while running ahead; normal_span: the request path's span (restored after)
-  AheadRunner(ModelLM& lm, PrefixCache& pc, int span, int normal_span, bool park_old)
-      : lm_(lm), pc_(pc), span_(span), normal_span_(normal_span), park_old_(park_old) {}
+  // min_new: a prediction that only extends the live sequence by fewer positions is not run (0: every prediction). The
+  // next request's own batched prefill computes a few more positions at almost no cost, while an idle-time pass of one
+  // sub-chunk cannot be stopped inside it, so a request arriving during it waited for all of it (Flash-Next: 2 positions,
+  // 0.5-0.9 s)
+  AheadRunner(ModelLM& lm, PrefixCache& pc, int span, int normal_span, bool park_old, int min_new = 0)
+      : lm_(lm), pc_(pc), span_(span), normal_span_(normal_span), park_old_(park_old), min_new_(min_new) {}
   // reader thread: a predicted prompt (replaces any pending one)
   void submit(long id, std::vector<int> ids, std::vector<int> marks);
   // reader thread: a request arrived. Drops the pending prediction and stops a running one.
@@ -36,12 +40,13 @@ class AheadRunner {
   PrefixCache& pc_;
   int span_, normal_span_;
   bool park_old_;
+  int min_new_;
   std::mutex mu_;
   long id_ = 0;
   std::vector<int> ids_, marks_;
   std::atomic<bool> has_{false}, stop_{false}, running_{false};
   std::chrono::steady_clock::time_point t_stop_;
-  uint64_t n_runs_ = 0;
+  uint64_t n_runs_ = 0, n_skipped_ = 0;
   double ms_total_ = 0;
 };
 

@@ -946,7 +946,20 @@ void Core::span_name_router(int step, int n, const float* const* x) {
       idx[e] = e;
     }
     std::partial_sort(idx.begin(), idx.begin() + K, idx.end(), [&](int a, int b) { return key[a] > key[b] || (key[a] == key[b] && a < b); });
-    for (int j = 0; j < K; j++) __atomic_store_n(&want[idx[j]], 1, __ATOMIC_RELAXED);
+    int nk = K;
+    if (ns.on && ns.drop) {  // fast mode's short prompt (PrefillOpts::drop_upto): only the picks its leave-out rule would read,
+                             // heaviest first until what is left weighs at most read_mass of the top K (weights in the top K)
+      double w[MAXK], tot = 0;
+      for (int j = 0; j < K; j++) {
+        const float lj = l[idx[j]];
+        w[j] = v->rule == MoeView::SOFTMAX_TOPK_RENORM ? std::exp((double)lj - l[idx[0]]) : 1.0 / (1.0 + std::exp(-(double)lj));
+        tot += w[j];
+      }
+      double left = 1;
+      for (nk = 0; nk < K && left > ns.read_mass; nk++) left -= w[nk] / tot;
+      while (nk < K && w[nk] / tot > ns.read_w) nk++;
+    }
+    for (int j = 0; j < nk; j++) __atomic_store_n(&want[idx[j]], 1, __ATOMIC_RELAXED);
   });
   auto& nm = span_names[step];
   for (int e = 0; e < NE; e++)

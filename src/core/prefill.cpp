@@ -60,6 +60,7 @@ bool prefill_option(const std::string& name, const std::string& value, PrefillOp
   if (name == "prefill_release") return (o.release = i() != 0), true;
   if (name == "prefill_moe_block") return (o.moe_block = std::max(0, i())), true;
   if (name == "prefill_scratch_mb") return (o.scratch_mb = std::max(0.0, std::stod(value))), true;
+  if (name == "prefill_drop_upto") return (o.drop_upto = std::max(0, i())), true;
   if (name == "prefill_fast") {
     o.fast = i() != 0;
     if (!o.fast || !res_base || !core) return true;  // (a manifest's declaration: set up when the model is bound)
@@ -120,12 +121,13 @@ bool prefill_declared(const std::vector<std::pair<std::string, std::string>>& kv
 
 bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std::atomic<bool>* cancel, const PrefillOpts& o,
                    const std::function<bool(int, int, bool, const std::vector<int>&)>& span, PrefillStats* st, int* spans_out) {
-  struct NsOff {  // fast mode's rule off for the prompt (the batched pass is lossless; its state is exact mode's)
+  struct NsOff {  // fast mode's rule off for the prompt (the batched pass is lossless; its state is exact mode's), except a
+                  // short prompt under fast mode's leave-out rule (PrefillOpts::drop_upto)
     Approx& a;
     bool on;
-    explicit NsOff(Approx& x) : a(x), on(x.on) { a.on = false; }
+    NsOff(Approx& x, bool keep) : a(x), on(x.on) { a.on = keep && x.on && x.drop; }
     ~NsOff() { a.on = on; }
-  } ns_off(core.ns);
+  } ns_off(core.ns, n <= o.drop_upto);
   struct InPrefill {  // the hooks' previous-token state follows the prompt (Core::chunk_prefill)
     Core& c;
     explicit InPrefill(Core& x) : c(x) { c.chunk_prefill = true; }
