@@ -608,13 +608,17 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     private var isCancelled: Bool { lock.withLock { cancelled } }
 
     #if SELFCHECK
-    struct Greedy: Sendable { var ids: [Int]; var source: String; var seconds: Double }
-    /// SelfCheck: greedy decoding of raw prompt ids on the open model (sync, then argmax / step, as a reply does).
+    struct Greedy: Sendable { var ids: [Int]; var source: String; var seconds: Double; var prefillSeconds: Double = 0; var decodeStats: String = "" }
+    /// SelfCheck: greedy decoding of raw prompt ids on the open model (sync, then argmax / step, as a reply does). The
+    /// engine's counters are restarted after the sync, so `decodeStats` (dm_stats_json) covers the decode steps only.
     func selfCheckGreedy(_ prompt: [Int], n: Int) async throws -> Greedy {
         guard let m = lock.withLock({ model }) else { throw EngineError.notLoaded }
         return try await m.run {
             var logits = [Float](repeating: 0, count: m.vocab)
+            let tp = Date()
             let sr = try m.sync(prompt.map { Int32($0) }, logits: &logits)
+            let prefillSeconds = Date().timeIntervalSince(tp)
+            _ = m.statsJSON()
             var out: [Int] = []
             let t0 = Date()
             while out.count < n {
@@ -623,7 +627,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                 if out.count == n { break }
                 guard try m.step(tk, logits: &logits) else { break }
             }
-            return Greedy(ids: out, source: sr.source, seconds: Date().timeIntervalSince(t0))
+            let secs = Date().timeIntervalSince(t0)
+            return Greedy(ids: out, source: sr.source, seconds: secs, prefillSeconds: prefillSeconds, decodeStats: m.statsJSON())
         }
     }
     var selfCheckStats: String { lock.withLock { model }?.statsJSON() ?? "" }
