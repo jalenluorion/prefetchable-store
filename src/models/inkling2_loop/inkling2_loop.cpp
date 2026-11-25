@@ -21,6 +21,7 @@
 
 #include "dmeng/screen_head.h"
 #include "dmeng/model.h"
+#include "dmeng/prefill.h"
 #include "dmeng/sampler.h"
 #include "ink_draft.h"
 #include "../../core/gpu_split.h"
@@ -267,20 +268,11 @@ struct Inkling : Model {
   float* spblk(int i) { return sp_blk.data() + (size_t)i * NBMAX * c.H; }
   float* spmsrc(int i) { return sp_msrc.data() + (size_t)i * NMS * c.H; }
   XQB xqb_a, xqb_b, xqb_c, xqb_e, xqb_h;  // the sub-chunk's inputs packed for the batch kernels (>= 6 positions)
-  int po_chunk = 256;                    // prefill sub-chunk (1: single steps)
-  int po_span = 8192;                    // positions per application-major span
-  bool po_names = true;                  // name the next application's experts while one runs (spans of several sub-chunks)
-  // the batched projections' exact CPU + GPU split (src/core/gpu_split.h): the GPU's share of each packed 8-bit
-  // projection's rows in sub-chunks of at least po_gpu_min positions; 0 = CPU only. The experts (NVFP4 / MXFP8) stay
-  // on the CPU (no exact GPU kernel for them).
-  std::unique_ptr<GpuGemm> gpu;
-  double po_gpu = 0;
-  double po_gpu_exp = 0;    // the experts' GPU share (NVFP4 experts in moe_chunk; MXFP8 layers stay on the CPU)
-  bool slab_wrapped = false;
-  int po_gpu_min = 256, po_gpu_kernel = 1;
-  bool po_release = false;
+  // the batched prompt path's options (dmeng/prefill.h; this model's values: its manifest's "prefill"): the projections'
+  // GPU share through run_rows_n_split, the experts' (the NVFP4 layers; MXFP8 stays on the CPU) through moe_chunk
+  PrefillOpts po;
+  GpuShare gpu;
   GpuSplitAcct gacct;
-  bool set_gpu_frac(double f, std::string& err, bool experts = false);
   long n_chunks = 0;
   std::vector<uint8_t> span_snap, ring_tmp;  // the fixed state at a span's start (a cancel inside it); a ring slice
   struct SpanRun {                            // what a prefill span reports and watches
@@ -575,7 +567,7 @@ bool Inkling::load(const LoadOpts& op, std::string& err) {
     v.up_cap = c.ucap;
     v.shared = false;
   }
-  return true;
+  return prefill_declared(op.prefill, po, err);  // the prompt path's values the manifest declares
 }
 
 bool Inkling::bind(Core& cr, std::string& err) {
@@ -1283,14 +1275,7 @@ void Inkling::layer(int v, const float* m4) {
   stage_mark(ST_ATTN_CORE);
   core->pool->run_any(grouped ? phase_attn_kv : phase_attn, &X);
   auto t4 = clk::now();
-  if (fuse_o) {  // the output projection ran in the heads' fork-join: its share (after the last head) is attn_out's
-    const auto th = clk::time_point(std::chrono::duration_cast<clk::duration>(std::chrono::nanoseconds(X.heads_done_ns.load())));
-    const double core_ms = std::min(ms_between(t3, t4), std::max(0.0, ms_between(t3, th)));
-    T->attn_core += core_ms;
-    T->attn_out += ms_between(t3, t4) - core_ms;
-  } else {
-    T->attn_core += ms_between(t3, t4);
-  }
+  T->split_heads_out(t3, t4, fuse_o ? X.heads_done_ns.load() : 0);  // the fused output projection's share: attn_out
   if (!fuse_o) {
     if (!ref && c.HD % XB != 0) xe.prep(o, QD);
     Job jo = {&W.o, &xe.q, o, att};
@@ -1988,8 +1973,8 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
     jb[nj++] = {&W.kwp, n, nullptr, ki.data(), odk.data(), nullptr};
     jb[nj++] = {&W.vwp, n, nullptr, vi.data(), odv.data(), nullptr};
   }
-  GpuGemm* const G = gpu && po_gpu > 0 && n >= po_gpu_min ? gpu.get() : nullptr;
-  run_rows_n_split(pool, G, po_gpu, jb, nj, 32, ref, &T->bytes_res, &gacct);
+  GpuGemm* const G = gpu && po.gpu_frac > 0 && n >= po.gpu_min ? gpu.get() : nullptr;
+  run_rows_n_split(pool, G, po.gpu_frac, jb, nj, 32, ref, &T->bytes_res, &gacct);
   auto t3 = clk::now();
   T->attn_proj += ms_between(t2, t3);
   // the KV preparation of every position (the convolutions in position order per channel block; clips and norms per
@@ -2110,7 +2095,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
       pe = &xqb_e;
     }
     JobN jo = {&W.o, n, xo.data(), fo.data(), oa.data(), pe};
-    run_rows_n_split(pool, gpu && po_gpu > 0 && n >= po_gpu_min ? gpu.get() : nullptr, po_gpu, &jo, 1, 32, ref, &T->bytes_res, &gacct);
+    run_rows_n_split(pool, gpu && po.gpu_frac > 0 && n >= po.gpu_min ? gpu.get() : nullptr, po.gpu_frac, &jo, 1, 32, ref, &T->bytes_res, &gacct);
   }
   stage_mark(ST_CONV);
   if (rb)
@@ -2157,8 +2142,8 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   }
   parallel_for(pool, n, [&](int i) { rmsnorm(P_[i].mlp, W.mlnorm, H, c.eps, P_[i].xm); });
   T->msg += ms_since(t6);
-  core->moe_gpu = gpu && po_gpu_exp > 0 && n >= po_gpu_min ? gpu.get() : nullptr;  // the experts' share (prefill sub-chunks)
-  core->moe_gpu_frac = po_gpu_exp;
+  core->moe_gpu = gpu && po.gpu_experts > 0 && n >= po.gpu_min ? gpu.get() : nullptr;  // the experts' share (prefill sub-chunks)
+  core->moe_gpu_frac = po.gpu_experts;
   core->moe_chunk(v, n, xm.data(), ym.data(), views[L], nullptr, nullptr, i0);
   core->moe_gpu = nullptr;
   auto t8 = clk::now();
@@ -2255,7 +2240,8 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
   }
   core->span_mode = multi;
   Cache::ChunkClock span_clock(core->cache, core->tok_clock + n - 1);  // the whole span is one token to the policy
-  const bool names = multi && po_names;  // the next application's experts named while this one runs
+  const int names = po.names_for(n, multi);  // the next application's experts named while this one runs (prefill.h)
+  MoePass moe_pass(*core, po);
   const bool tapping = dh != nullptr;
   if (tapping) ctaps.resize((size_t)n * 4 * H);
   auto ctap = [&](int a) {  // the hidden state entering applications 5, 23, 41, per position
@@ -2284,11 +2270,14 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
     ctap(v);
     const bool msgs = c.core(L) && pass > 0;
     for (size_t b = 0, s0 = 0; b < bnd.size(); s0 = bnd[b++]) {
+      if (b == 0 && names && v + 1 < c.NV) {  // named inside moe_chunk, behind this application's own reads
+        core->span_next = v + 1;
+        core->span_next_router = names == 2;
+      }
       layer_chunk(v, (int)s0, bnd[b] - (int)s0, msgs);
-      if (b == 0 && names && v + 1 < c.NV) core->span_name(v + 1);  // behind this application's own reads
       if (captured(bnd[b])) sink_app(v, S->pos + bnd[b], *run->sink);
     }
-    if (multi) core->span_unname(v);  // its union pins and its names
+    core->span_unname(v);  // its union pins and its names
     if (L % c.BLOCK == 0) sp_nblk++;
     if (v + 1 < c.NV && c.visits[v + 1].first == c.CS && c.visits[v + 1].second == 0) {  // the loop's input
       nblk_pre = sp_nblk;
@@ -2299,7 +2288,7 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
       if (run->progress && *run->progress) (*run->progress)(run->prog_base + (int)((long)n * (v + 1) / c.NV), run->prog_total, 0.0);
       if (cancel && cancel->load() && v + 1 < c.NV) {  // stop: the fixed state back at the span's start, nothing else moved
         load_fixed(*S, span_snap.data(), S->pos);
-        if (multi) core->span_unname(v + 1);
+        core->span_unname(v + 1);
         core->span_mode = false;
         return false;
       }
@@ -2474,38 +2463,22 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
   S = (IState*)&s0;
   // with the exact greedy head on, the next token is greedy(): the prompt's last logits are the full head's, so their
   // argmax (lowest index on a tie) is it (it was left at the previous step's value: -1 after a cold prefill)
-  if (po_chunk <= 1 || core->ns.on || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n)) {
+  if (po.chunk <= 1 || core->ns.on || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n)) {
     const bool r = Model::prefill(s0, ids, n, want_logits, capture, sink, st, cancel);  // single steps
     if (r && fast_head && want_logits) greedy_ = argmax(lgts.data(), c.VU);
     return r;
   }
-  std::vector<int> caps(capture);
-  std::sort(caps.begin(), caps.end());
-  caps.erase(std::unique(caps.begin(), caps.end()), caps.end());
-  auto t0 = clk::now();
-  const uint64_t b0 = core->cache.st.bytes_urgent + core->cache.st.bytes_pf;
-  const double w0 = core->cache.st.wait_ms, be0 = T->bytes_exp, br0 = T->bytes_res;
+  const double be0 = T->bytes_exp, br0 = T->bytes_res;
   const long c0 = n_chunks;
-  if (gpu) gpu->set_kernel(po_gpu_kernel);
+  if (gpu) gpu->set_kernel(po.gpu_kernel);
   const GpuSplitAcct ga0 = gacct;
   const double me_w0 = core->moe_gpu_wait_ms, me_s0 = core->moe_gpu_stage_ms, me_m0 = core->moe_gpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
-  int done = 0, spans = 0;
-  const int sub = std::min(po_chunk, CHUNK_MAX), span = std::max(sub, po_span);
-  bool ok = true;
-  while (done < n) {
-    if (cancel && cancel->load()) {
-      ok = false;
-      break;
-    }
-    int m = std::min(span, n - done);
-    // no short last span (it would read every application's experts again for a few positions): a rest under a quarter
-    // span joins this one
-    if (n - done - m > 0 && n - done - m < std::max(64, span / 4)) m = n - done;
-    const bool last = done + m == n;
-    std::vector<int> cap_rel;
-    for (int p : caps)
-      if (p > done && p <= done + m) cap_rel.push_back(p - done);
+  const int sub = std::min(po.chunk, CHUNK_MAX), span = std::max(sub, po.span);
+  PrefillOpts o = po;
+  o.span = span;
+  int spans = 0;
+  const bool ok = prefill_spans(*core, n, capture, cancel, o, [&](int done, int m, bool last, const std::vector<int>& cap_rel) {
     if (m == 1) {
       step(s0, ids[done], last && want_logits ? Want::LAST : Want::NONE);
       n_chunks++;
@@ -2514,28 +2487,20 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
         save_fixed(s0, blob.data());
         sink(s0.pos, 0, blob.data(), blob.size());
       }
-    } else {
-      SpanRun r;
-      r.capture = &cap_rel;
-      r.sink = &sink;
-      r.cancel = cancel;
-      r.progress = st ? &st->progress : nullptr;
-      r.prog_base = done;
-      r.prog_total = n;
-      if (!forward_chunk(ids + done, m, last && want_logits, false, false, sub, &r)) {
-        ok = false;
-        break;
-      }
+      return true;
     }
-    done += m;
-    spans++;
-  }
+    SpanRun r;
+    r.capture = &cap_rel;
+    r.sink = &sink;
+    r.cancel = cancel;
+    r.progress = st ? &st->progress : nullptr;
+    r.prog_base = done;
+    r.prog_total = n;
+    return forward_chunk(ids + done, m, last && want_logits, false, false, sub, &r);
+  }, st, &spans);
   if (st) {
-    st->positions = done;
+    const int done = st->positions;
     st->chunks = (int)(n_chunks - c0);
-    st->ms = ms_since(t0);
-    st->ms_wait = core->cache.st.wait_ms - w0;
-    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     std::ostringstream o;
     // bytes per prompt position: expert records read from the store, expert records and resident matrices the kernels
     // went through (once per sub-chunk each)
@@ -2545,18 +2510,18 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
       << ",\"resident_mb_touched\":" << (T->bytes_res - br0) / MB << ",\"read_mb_per_pos\":" << st->mb_read / np_
       << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / MB / np_
       << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / MB / np_ << ",\"wait_ms\":" << st->ms_wait;
-    if (gpu && (po_gpu > 0 || po_gpu_exp > 0))  // the GPU shares (the 35B's "gpu" account; experts: the NVFP4 layers)
-      o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po_gpu
+    if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))  // the GPU shares (the 35B's "gpu" account; experts: the NVFP4 layers)
+      o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac
         << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9
         << ",\"wait_ms\":" << gacct.ms_wait - ga0.ms_wait << ",\"stage_ms\":" << gacct.ms_stage - ga0.ms_stage << ",\"sets\":" << gacct.sets - ga0.sets
-        << ",\"failed\":" << gacct.failed - ga0.failed << "},\"experts\":{\"frac\":" << po_gpu_exp << ",\"gmac_gpu\":" << (core->moe_gpu_macs - me_m0) / 1e9
+        << ",\"failed\":" << gacct.failed - ga0.failed << "},\"experts\":{\"frac\":" << po.gpu_experts << ",\"gmac_gpu\":" << (core->moe_gpu_macs - me_m0) / 1e9
         << ",\"wait_ms\":" << core->moe_gpu_wait_ms - me_w0 << ",\"stage_ms\":" << core->moe_gpu_stage_ms - me_s0 << ",\"sets\":" << core->moe_gpu_sets - me_n0
         << ",\"failed\":" << core->moe_gpu_failed - me_f0 << "}}";
     o << "}";
     st->json = o.str();
   }
-  if (gpu && po_release) gpu->trim();
-  if (po_release) release_scratch();
+  if (gpu && po.release) gpu->trim();
+  if (po.release) release_scratch();
   if (ok && fast_head && want_logits) greedy_ = argmax(lgts.data(), c.VU);
   return ok;
 }
@@ -2634,7 +2599,6 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
     core->run_ahead = [this](int step, const float* yp, int32_t* pk, int maxk) { return run_ahead_step(step, yp, pk, maxk); };
     return true;
   }
-  if (name == "prefill_chunk") return (po_chunk = std::max(1, std::stoi(value))), true;  // 1: single steps
   if (name == "fast_head") {  // 1: the screened head (greedy, and top-k with head_topk)
     if (std::stoi(value) <= 0 || fast_head) return true;
     if (prec != Prec::I16 || ref) return (err = "fast_head: needs I16 activations"), false;
@@ -2645,19 +2609,12 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
   }
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
   if (name == "verify_old") return (verify_old = std::stoi(value) != 0), true;  // the previous verify pass (A/B measurements)
-  if (name == "prefill_span") return (po_span = std::max(1, std::stoi(value))), true;  // positions per application-major span
-  if (name == "prefill_stream") return (po_names = std::stoi(value) != 0), true;  // 0: no early names in a span
   if (name == "prefill_batched_always" && std::stoi(value) == 0) return true;      // off
-  if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), err);       // 0: CPU only
-  if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), err, true);  // NVFP4 experts (MXFP8 on the CPU)
-  if (name == "prefill_gpu_min") return (po_gpu_min = std::max(1, std::stoi(value))), true;
-  if (name == "prefill_batched_always" || name == "prefill_gpu_min_wave")  // refused, not ignored
+  if (name == "prefill_batched_always")  // refused, not ignored
     return (err = name + ": not implemented for inkling2_loop's prefill"), false;
-  if (name == "prefill_gpu_kernel") return (po_gpu_kernel = std::stoi(value) != 0), true;  // 1 matrix units, 0 integer
-  if (name == "prefill_release") {  // 1: give the GPU split's buffers back after each prefill
-    po_release = std::stoi(value) != 0;
-    return true;
-  }
+  bool handled = false;  // the shared prefill_* options (dmeng/prefill.h)
+  const bool ok = prefill_option(name, value, po, gpu, R.base, R.size, core, handled, err);
+  if (handled) return ok;
   if (name == "draft_ctx") return (dh_ctx = std::max(16, std::stoi(value))), true;
   if (name == "draft_exact") return (dh_exact = std::stoi(value) != 0), true;
   if (name == "draft_q8") return (dh_q8 = std::stoi(value) != 0), true;  // the head in AFF8 (default) or bf16 as released  // the port check's output layer (ink_draft.h)
@@ -2672,32 +2629,6 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
   }
   if (!core) return (err = "unknown option " + name + " (or bind the model first)"), false;
   return core->set_option(name, value, err);  // the engine's own options (Core::set_option)
-}
-
-bool Inkling::set_gpu_frac(double f, std::string& err, bool experts) {
-  if (!(f >= 0 && f < 1)) return (err = experts ? "prefill_gpu_experts must be in [0, 1)" : "prefill_gpu_frac must be in [0, 1)"), false;
-  if (f > 0 && !gpu) {
-#if defined(DM_METAL)
-    if (!R.base || !core) return (err = "prefill GPU split: load and bind the model first"), false;
-    std::unique_ptr<GpuGemm> g(new GpuGemm());
-    if (!g->init()) return (err = "prefill GPU split: GPU (Metal) init failed"), false;
-    if (!g->wrap(R.base, R.size)) return (err = "prefill GPU split: the resident weights could not be wrapped"), false;
-    fprintf(stderr, "dmeng: prefill GPU split on (Inkling: resident projections wrapped, %.2f GB; experts on the CPU)\n", g->wrapped_bytes() / 1e9);
-    gpu = std::move(g);
-#else
-    return (err = "prefill GPU split: this build has no Metal (DM_METAL off)"), false;
-#endif
-  }
-  if (experts && f > 0 && !slab_wrapped) {  // the expert slab(s) where they are (locked or plain; FILE records stay on the CPU)
-    bool any = false;
-    for (int p = 0; p < core->cache.npools; p++)
-      if (core->cache.P[p].slab) any = gpu->wrap(core->cache.P[p].slab, core->cache.P[p].slab_bytes) || any;
-    if (!any) return (err = "prefill GPU split: the expert slab could not be wrapped"), false;
-    slab_wrapped = true;
-    fprintf(stderr, "dmeng: prefill GPU split: Inkling's NVFP4 experts too (%.2f GB wrapped)\n", gpu->wrapped_bytes() / 1e9);
-  }
-  (experts ? po_gpu_exp : po_gpu) = f;
-  return true;
 }
 
 bool Inkling::load_draft_head(std::string& err) {

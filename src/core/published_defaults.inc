@@ -47,6 +47,13 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "engine": "approx:drop"
    }
   },
+  "prefill": {
+   "chunk": 256,
+   "gpu_min": 256,
+   "join": 0.25,
+   "span": 8192,
+   "whole_from": 0
+  },
   "profiles": {
    "mac": {
     "cache": "auto",
@@ -146,6 +153,18 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "engine": "approx:drop"
    }
   },
+  "prefill": {
+   "chunk": 512,
+   "dn_rows": 64,
+   "gpu_min": 256,
+   "gpu_min_wave": 128,
+   "join": 0,
+   "pack_min": 1,
+   "short_names": "router",
+   "span": 8192,
+   "waves": true,
+   "whole_from": 1000
+  },
   "profiles": {
    "mac": {
     "cache": "auto",
@@ -230,6 +249,13 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "fast": {
     "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
    }
+  },
+  "prefill": {
+   "chunk": 256,
+   "gpu_min": 64,
+   "join": 0.25,
+   "span": 2048,
+   "whole_from": 256
   },
   "profiles": {
    "mac": {

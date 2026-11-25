@@ -175,7 +175,8 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
   }
   core->span_mode = multi;
   Cache::ChunkClock span_clock(core->cache, core->tok_clock + n - 1);  // the whole span is one token to the policy
-  const bool names = multi && po.names && n >= po.whole_from;
+  const int names = po.names_for(n, multi);  // the next layer's early names in this span (prefill.h)
+  MoePass moe_pass(*core, po);
   const bool packed_ok = !ref && prec == Prec::I16;
   GpuGemm* const G0 = gpu && po.gpu_frac > 0 ? gpu.get() : nullptr;
   if (gpu) gpu->set_kernel(po.gpu_kernel);
@@ -384,18 +385,21 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
       for (int i = 0; i < m; i++) xm[i] = P.mix.data() + (size_t)i * H, ym[i] = P.y.data() + (size_t)i * H;
       core->moe_gpu = gpu && po.gpu_experts > 0 && m >= po.gpu_min ? gpu.get() : nullptr;  // the experts' share
       core->moe_gpu_frac = po.gpu_experts;
+      if (bi == 0 && names && L + 1 < NL) {  // named inside moe_chunk, behind this layer's own reads
+        core->span_next = L + 1;
+        core->span_next_router = names == 2;
+      }
       core->moe_chunk(L, m, xm.data(), ym.data(), views[L], nullptr, nullptr, i0);
       core->moe_gpu = nullptr;
       inject(P.y.data(), P.inj2.data());
       if (ver && L + 1 == NL) hc_chunk(fin, ver->fx.data(), nullptr);  // every position's final mixer (step()'s hc_step, batched)
-      if (bi == 0 && names && L + 1 < NL) core->span_name(L + 1);  // behind this layer's own reads
       if (L == 0 && captured(bnd[bi])) sink_ng(bnd[bi]);
     }
-    if (multi) core->span_unname(L);  // its union pins and its names
+    core->span_unname(L);  // its union pins and its names
     if (multi && progress && *progress) (*progress)(prog_base + (int)((long)n * (L + 1) / NL), prog_total, 0.0);
     if (cancel && multi && cancel->load() && L + 1 < NL) {  // stop: the fixed state back at the span's start, nothing else moved
       load_fixed(*S, P.snap.data(), S->pos);
-      if (names) core->span_unname(L + 1);
+      core->span_unname(L + 1);
       core->span_mode = false;
       return false;
     }
@@ -458,53 +462,31 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     if (r && fast_head && want_logits) greedy_ = argmax();
     return r;
   }
-  // fast mode (approx:drop): the prompt runs the batched pass losslessly, as the 35B's prefill does: a span reads the union
-  // of its positions' experts once whatever the rule, so leaving picks out saves no reads there, and the prompt's state is
-  // exact mode's. (Before, fast mode sent the prompt through single steps: one token's time per prompt position.)
-  struct NsOff {
-    Approx& a;
-    bool on;
-    explicit NsOff(Approx& x) : a(x), on(x.on) { a.on = false; }
-    ~NsOff() { a.on = on; }
-  } ns_off(core->ns);
-  std::vector<int> caps(capture);
-  std::sort(caps.begin(), caps.end());
-  caps.erase(std::unique(caps.begin(), caps.end()), caps.end());
-  auto t0 = clk::now();
-  const uint64_t b0 = core->cache.st.bytes_urgent + core->cache.st.bytes_pf;
-  const double w0 = core->cache.st.wait_ms, be0 = T->bytes_exp, br0 = T->bytes_res;
+  // fast mode (approx:drop): the prompt runs the batched pass losslessly (prefill_spans turns the rule off), as the 35B's
+  // prefill does: a span reads the union of its positions' experts once whatever the rule, so leaving picks out saves no
+  // reads there, and the prompt's state is exact mode's
+  const double be0 = T->bytes_exp, br0 = T->bytes_res;
   const Times tt0 = *T;  // the stages of this prefill (ms in all, under the decode's names)
   const long c0 = n_chunks;
   const GpuSplitAcct ga0 = gacct;
   const double me_w0 = core->moe_gpu_wait_ms, me_m0 = core->moe_gpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
-  int done = 0, spans = 0;
+  int spans = 0;
   // The scratch is bounded by memory, not only by the front end's chunk and span: this model's per-position scratch is
   // large (four streams of the hidden state, 40 KB per position for the streams alone, and about 0.6 MB per position of a
   // sub-chunk), and on the 16 GB Mac the prompt path's peak decides whether it swaps. Sub-chunks of at most
   // scratch_mb / 2 (each layer's resident matrices are read once per sub-chunk: 4 GB / 256 positions = 16 MB per position,
   // under 1% of the position's compute) and spans of at most scratch_mb / 2 of streams (a span reads every expert of
   // every layer once, 68 GB: at 3,000 positions that is 20 s of drive under 75+ s of compute).
-  const int sub_cap = std::max(64, (int)(po.scratch_mb * 1e6 / 2 / sub_bytes_per_pos()) / 64 * 64);
+  const int sub_cap = std::max(64, (int)(px.scratch_mb * 1e6 / 2 / sub_bytes_per_pos()) / 64 * 64);
   const int chunk_eff = std::min(po.chunk, sub_cap);
-  const int span_cap = std::max(chunk_eff, (int)(po.scratch_mb * 1e6 / 2 / (4.0 * c.N())) / chunk_eff * chunk_eff);
+  const int span_cap = std::max(chunk_eff, (int)(px.scratch_mb * 1e6 / 2 / (4.0 * c.N())) / chunk_eff * chunk_eff);
   const int span = std::min(std::max(chunk_eff, po.span), span_cap);
   const int chunk_keep = po.chunk;
   po.chunk = chunk_eff;  // (span_run's sub-chunks)
-  bool ok = true;
-  while (done < n) {
-    if (cancel && cancel->load()) {
-      ok = false;
-      break;
-    }
-    int m = std::min(span, n - done);
-    // no short last span (it would read every layer's experts again for a few positions): a rest under a quarter span
-    // joins this one
-    if (n - done - m > 0 && n - done - m < std::max(64, span / 4)) m = n - done;
-    const bool last = done + m == n;
-    std::vector<int> cap_rel;
-    for (int p : caps)
-      if (p > done && p <= done + m) cap_rel.push_back(p - done);
+  PrefillOpts o = po;
+  o.span = span;
+  const bool ok = prefill_spans(*core, n, capture, cancel, o, [&](int done, int m, bool last, const std::vector<int>& cap_rel) {
     if (m == 1) {
       step(s0, ids[done], last && want_logits ? Want::LAST : Want::NONE);
       n_chunks++;
@@ -513,19 +495,13 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
         save_fixed(s0, blob.data());
         sink(s0.pos, 0, blob.data(), blob.size());
       }
-    } else if (!span_run(ids + done, m, last && want_logits, &cap_rel, &sink, cancel, st ? &st->progress : nullptr, done, n)) {
-      ok = false;
-      break;
+      return true;
     }
-    done += m;
-    spans++;
-  }
+    return span_run(ids + done, m, last && want_logits, &cap_rel, &sink, cancel, st ? &st->progress : nullptr, done, n);
+  }, st, &spans);
   if (st) {
-    st->positions = done;
+    const int done = st->positions;
     st->chunks = (int)(n_chunks - c0);
-    st->ms = ms_since(t0);
-    st->ms_wait = core->cache.st.wait_ms - w0;
-    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     const double np_ = std::max(1, done);
     std::ostringstream o;
     o << "{\"chunk\":" << po.chunk << ",\"chunk_asked\":" << chunk_keep << ",\"span\":" << span << ",\"span_asked\":" << po.span << ",\"spans\":" << spans << ",\"union_batches\":" << core->n_union_batches
@@ -667,29 +643,6 @@ std::string Flash::verify_json() const {
   return o.str();
 }
 
-bool Flash::set_gpu_frac(double f, bool experts, std::string& err) {
-  if (!(f >= 0 && f < 1)) return (err = experts ? "prefill_gpu_experts must be in [0, 1)" : "prefill_gpu_frac must be in [0, 1)"), false;
-  if (f > 0 && !gpu) {
-#if defined(DM_METAL)
-    if (!R.base || !core) return (err = "prefill GPU split: load and bind the model first"), false;
-    std::unique_ptr<GpuGemm> g(new GpuGemm());
-    if (!g->init()) return (err = "prefill GPU split: GPU (Metal) init failed"), false;
-    if (!g->wrap(R.base, R.size)) return (err = "prefill GPU split: the resident weights could not be wrapped"), false;
-    gpu = std::move(g);
-#else
-    return (err = "prefill GPU split: this build has no Metal (DM_METAL off)"), false;
-#endif
-  }
-  if (experts && f > 0 && !slab_wrapped) {  // the expert slab where it is (locked or plain; mapped records stay on the CPU)
-    bool any = false;
-    for (int p = 0; p < core->cache.npools; p++)
-      if (core->cache.P[p].slab) any = gpu->wrap(core->cache.P[p].slab, core->cache.P[p].slab_bytes) || any;
-    if (!any) return (err = "prefill GPU split: the expert slab could not be wrapped"), false;
-    slab_wrapped = true;
-  }
-  (experts ? po.gpu_experts : po.gpu_frac) = f;
-  return true;
-}
 
 }  // namespace qwen4
 }  // namespace dm

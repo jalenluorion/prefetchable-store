@@ -16,6 +16,7 @@
 #include "../../core/gpu_split.h"
 #include "dmeng/kernels_batch.h"
 #include "qwen3_5_moe.h"
+#include "../common/gated_attn.h"
 
 namespace dm {
 namespace qwen35 {
@@ -186,7 +187,8 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   const int half = c.ROT / 2;
   static const int split_min = getenv("DMENG_SPLIT_MIN") ? atoi(getenv("DMENG_SPLIT_MIN")) : 2 * 256;
   constexpr int CHK = 256;
-  GpuGemm* const gpu = (o.gpu_frac > 0 || o.gpu_frac_experts > 0) ? Mo.gpu.get() : nullptr;  // the GPU's share, if on
+  GpuGemm* const gpu = (o.gpu_frac > 0 || o.gpu_experts > 0) ? Mo.gpu.get() : nullptr;  // the GPU's share, if on
+  const int names = o.names_for(n_all, n_all > SUB || !capture.empty());  // the next layer's early names in this span
 
   // Layer-major: each layer runs over the whole span (sub-chunks of SUB positions bound the scratch), so a layer's
   // experts are read once per span, not once per chunk.
@@ -204,6 +206,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   // positions from core.pos, the union of a layer's experts pinned across its sub-chunks while the span runs
   Co.pos = base;
   Co.span_mode = bnd.size() > 1;
+  MoePass moe_pass(Co, o);  // the span's MoE settings (waves, packed kernels, down rows: this model's declared values)
   const Times t0c = Co.t;
   const auto st0 = Co.cache.st;
   const double gw0 = Co.moe_gpu_wait_ms, gs0 = Co.moe_gpu_stage_ms, gm0 = Co.moe_gpu_macs;
@@ -250,7 +253,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       }
     const Lw& W = Mo.lw[L];
     GpuGemm* const Ga = n >= o.gpu_min && o.gpu_frac > 0 ? gpu : nullptr;           // attention projections
-    GpuGemm* const Ge = n >= o.gpu_min && o.gpu_frac_experts > 0 ? gpu : nullptr;   // shared + routed experts
+    GpuGemm* const Ge = n >= o.gpu_min && o.gpu_experts > 0 ? gpu : nullptr;   // shared + routed experts
     // ---- attention input
     auto ta = clk::now();
     stage_mark(ST_ATTN_PROJ);
@@ -368,50 +371,15 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       // short contexts (T <= split_min): one head per job, phase_full_heads
       int n_short = 0;
       while (n_short < n && pos0 + n_short + 1 <= split_min) n_short++;
-      pfor(pool, n_short * c.NQ, [&](int jh) {
+      pfor(pool, n_short * c.NQ, [&](int jh) {  // the decode path's head (src/models/common/gated_attn.h)
         const int i = jh / c.NQ, h = jh % c.NQ, T = pos0 + i + 1;
         static thread_local std::vector<float> sc;
-        if ((int)sc.size() < T) sc.resize(T + 1024);
         _Float16 q16[1024];
         const float* q = Qn.data() + (size_t)i * QD + (size_t)h * HD;
         for (int t = 0; t < HD; t++) q16[t] = (_Float16)q[t];
-        int kvh = h / rep;
-        const _Float16* Kc = S.K + (size_t)kvh * Sst.ctx * HD;
-        const _Float16* Vc = S.V + (size_t)kvh * Sst.ctx * HD;
-        float mx = -INFINITY;
-        for (int t = 0; t < T; t++) {
-          const _Float16* kr = Kc + (size_t)t * HD;
-          float32x4_t s0 = vdupq_n_f32(0), s1 = s0;
-          for (int u = 0; u < HD; u += 8) {
-            float16x8_t kv = vld1q_f16((const float16_t*)kr + u), qv = vld1q_f16((const float16_t*)q16 + u);
-            s0 = vfmlalq_low_f16(s0, kv, qv);
-            s1 = vfmlalq_high_f16(s1, kv, qv);
-          }
-          sc[t] = vaddvq_f32(vaddq_f32(s0, s1)) * scale;
-          mx = std::max(mx, sc[t]);
-        }
-        double zs = 0;
-        for (int t = 0; t < T; t++) {
-          sc[t] = std::exp(sc[t] - mx);
-          zs += sc[t];
-        }
-        float iz = (float)(1.0 / zs);
-        float32x4_t acc[256];
-        const int NA = HD / 4;
-        for (int u = 0; u < NA; u++) acc[u] = vdupq_n_f32(0);
-        for (int t = 0; t < T; t++) {
-          const _Float16* vr = Vc + (size_t)t * HD;
-          float32x4_t pv = vdupq_n_f32(sc[t] * iz);
-          for (int u = 0; u < HD; u += 8) {
-            float16x8_t vv = vld1q_f16((const float16_t*)vr + u);
-            acc[u / 4] = vfmaq_f32(acc[u / 4], vcvt_f32_f16(vget_low_f16(vv)), pv);
-            acc[u / 4 + 1] = vfmaq_f32(acc[u / 4 + 1], vcvt_high_f32_f16(vv), pv);
-          }
-        }
-        float* o = O.data() + (size_t)i * QD + (size_t)h * HD;
-        const float* gate = A.data() + (size_t)i * 2 * QD + (size_t)h * 2 * HD + HD;
-        for (int u = 0; u < HD; u += 4) vst1q_f32(o + u, acc[u / 4]);
-        for (int u = 0; u < HD; u++) o[u] *= sigm(gate[u]);
+        const int kvh = h / rep;
+        gated_attn::head_f16(q16, S.K + (size_t)kvh * Sst.ctx * HD, S.V + (size_t)kvh * Sst.ctx * HD, HD, T, [](int t) { return t; },
+                             A.data() + (size_t)i * 2 * QD + (size_t)h * 2 * HD + HD, O.data() + (size_t)i * QD + (size_t)h * HD, sc);
       });
       // long contexts: split-K per query (phase_split + the combination), queries in blocks to bound the partials
       const int QB = 32;
@@ -573,22 +541,14 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     std::vector<const float*> xm(n);
     std::vector<float*> ym(n);
     for (int i = 0; i < n; i++) xm[i] = Hn.data() + (size_t)i * H, ym[i] = Y.data() + (size_t)i * H;
-    if (bi == 0 && o.stream && L + 1 < NL) {
+    if (bi == 0 && names && L + 1 < NL) {
       Co.span_next = L + 1;
-      Co.span_next_router = o.stream == 2;
+      Co.span_next_router = names == 2;
     }
     Co.moe_gpu = Ge;
-    Co.moe_gpu_frac = o.gpu_frac_experts;
-    Co.chunk_waves = true;
-    Co.chunk_wave_gpu_min = o.gpu_min_wave;
-    Co.chunk_pack_affine = Co.chunk_pack_shared = o.pack_min;
-    Co.chunk_dn_rows = o.dn_rows;
-    Co.moe_chunk(L, n, xm.data(), ym.data(), Mo.views[L], o.record ? Pk.data() : nullptr, nullptr, (int)s0);
+    Co.moe_gpu_frac = o.gpu_experts;
+    Co.moe_chunk(L, n, xm.data(), ym.data(), Mo.views[L], Mo.px.record ? Pk.data() : nullptr, nullptr, (int)s0);
     Co.moe_gpu = nullptr;
-    Co.chunk_waves = false;
-    Co.chunk_pack_affine = -1;
-    Co.chunk_pack_shared = 0;
-    Co.chunk_dn_rows = 32;
     auto tcmb = clk::now();
     stage_mark(ST_MOE_COMBINE);
     pfor(pool, n, [&](int i) {
@@ -597,7 +557,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       for (int r = 0; r < H; r++) x[r] += y[r];
     });
     k.ms_experts += msd(tcmb);
-    if (o.record) {
+    if (Mo.px.record) {
       if (Rec.size() < (size_t)n_all * NL * K) Rec.resize((size_t)n_all * NL * K);
       for (int i = 0; i < n; i++)
         for (int j = 0; j < K; j++) Rec[((size_t)((int)s0 + i) * NL + L) * K + j] = (int16_t)Pk[(size_t)i * K + j];
@@ -607,7 +567,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   }
   Co.span_mode = false;
   moe_counts();
-  if (o.record) fwrite(Rec.data(), 2, (size_t)n_all * NL * K, o.record);
+  if (Mo.px.record) fwrite(Rec.data(), 2, (size_t)n_all * NL * K, Mo.px.record);
   // ---- head on the last position
   if (want_logits) {
     auto th = clk::now();
@@ -636,44 +596,6 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
 Qwen35::Qwen35() = default;
 Qwen35::~Qwen35() = default;
 
-bool Qwen35::set_gpu_frac(double f, bool experts, std::string& err) {
-  if (!(f >= 0 && f < 1)) {
-    err = experts ? "prefill_gpu_experts must be in [0, 1)" : "prefill_gpu_frac must be in [0, 1)";
-    return false;
-  }
-  if (f > 0 && !gpu) {
-#if defined(DM_METAL)
-    if (!R.base || !core) {
-      err = "prefill GPU split: load and bind the model first";
-      return false;
-    }
-    std::unique_ptr<GpuGemm> g(new GpuGemm());
-    if (!g->init()) {
-      err = "prefill GPU split: GPU (Metal) init failed";
-      return false;
-    }
-    // the weights where they are, no copies: the resident file's region and the expert slab(s) (locked or plain
-    // memory; FILE and purgeable records are not wrapped, so those experts stay on the CPU)
-    const bool res = g->wrap(R.base, R.size);
-    bool slab = false;
-    for (int p = 0; p < core->cache.npools; p++)
-      if (core->cache.P[p].slab) slab = g->wrap(core->cache.P[p].slab, core->cache.P[p].slab_bytes) || slab;
-    if (!res && !slab) {
-      err = "prefill GPU split: neither the resident weights nor the expert slab could be wrapped";
-      return false;
-    }
-    fprintf(stderr, "dmeng: prefill GPU split on (resident %s, expert slab %s; %.2f GB wrapped)\n", res ? "wrapped" : "not wrapped",
-            slab ? "wrapped" : "not wrapped", g->wrapped_bytes() / 1e9);
-    gpu = std::move(g);
-#else
-    err = "prefill GPU split: this build has no Metal (DM_METAL off)";
-    return false;
-#endif
-  }
-  (experts ? po.gpu_frac_experts : po.gpu_frac) = f;
-  return true;
-}
-
 ModelMem Qwen35::mem(const State& s0) const {
   const QState& s = (const QState&)s0;
   ModelMem m;
@@ -699,55 +621,35 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
   // one position per pass: the decode path (the batched kernels are I16, and take inputs in multiples of 256)
   const bool dims_ok = c.H % 256 == 0 && c.I % 256 == 0 && c.SI % 256 == 0 && (c.NVH * c.DV) % 256 == 0 && (c.NQ * c.HD) % 256 == 0;
   const bool tbt = po.chunk <= 1 || prec != Prec::I16 || !dims_ok;
-  if (tbt && !po.batched_always) return Model::prefill(s0, ids, n, want_logits, caps, sink, st, cancel);
+  if (tbt && !px.batched_always) return Model::prefill(s0, ids, n, want_logits, caps, sink, st, cancel);
   if (!P) {
     P.reset(new Prefill());
     P->M = this;
   }
   P->k.reset();
-  P->k.gpu = (po.gpu_frac > 0 || po.gpu_frac_experts > 0) && gpu;
+  P->k.gpu = (po.gpu_frac > 0 || po.gpu_experts > 0) && gpu;
   P->k.gpu_frac = po.gpu_frac;
   if (gpu) gpu->set_kernel(po.gpu_kernel);
   P->k.gpu_kernel = gpu ? gpu->kernel() : -1;
-  P->k.gpu_frac_experts = po.gpu_frac_experts;
+  P->k.gpu_frac_experts = po.gpu_experts;
   // per-layer caps would refuse the next layer's early names (names never borrow past a cap): off for the pass
   Cache::CapsOff caps_off(core->cache);
-  const uint64_t b0 = core->cache.st.bytes_urgent + core->cache.st.bytes_pf;
-  int done = 0;
-  bool ok = true;
-  while (done < n) {
-    int m = tbt ? 1 : std::min(std::max(1, po.span), n - done);
-    if (!tbt && n - done - m > 0 && n - done - m < 64) m = n - done;  // no tiny last span
-    P->capture.clear();
-    for (int c : caps)
-      if (c > done && c <= done + m) P->capture.push_back(c - done);
+  PrefillOpts o = po;
+  if (tbt) o.span = 1;  // batched_always with the decode path's conditions: the batched code one position per pass
+  const bool ok = prefill_spans(*core, n, caps, cancel, o, [&](int done, int m, bool last, const std::vector<int>& cap_rel) {
+    P->capture = cap_rel;
     P->sink = sink;
-    const int mode = po.stream;
-    if (mode == 3) po.stream = m >= po.whole_from ? 1 : 2;
     P->cancel = cancel;
     P->progress = st ? &st->progress : nullptr;
     P->prog_base = done;
     P->prog_total = n;
-    const bool whole = P->forward_chunk((const int*)ids + done, m, done + m == n && want_logits);
-    po.stream = mode;
+    const bool whole = P->forward_chunk((const int*)ids + done, m, last && want_logits);
     P->capture.clear();
     P->sink = nullptr;
-    if (!whole) {
-      ok = false;
-      break;
-    }
-    done += m;
-    if (cancel && cancel->load() && done < n) {
-      ok = false;
-      break;
-    }
-  }
+    return whole;
+  }, st, nullptr);
   if (st) {
-    st->positions = done;
     st->chunks = (int)P->k.chunks;
-    st->ms = P->k.ms_total;
-    st->ms_wait = P->k.ms_wait;
-    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     st->json = P->k.json();
   }
   if (po.release) {  // the scratch back to the system (re-created by the next prefill)

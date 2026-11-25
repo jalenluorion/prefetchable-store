@@ -13,6 +13,7 @@
 #include <sstream>
 
 #include "qwen3_5_moe.h"
+#include "../common/gated_attn.h"
 #include "attn_split.h"
 
 namespace dm {
@@ -106,7 +107,7 @@ bool Qwen35::load(const LoadOpts& op, std::string& err) {
     v.sh_down = &lw[L].sd;
     v.sh_scalar_gate = &lw[L].shgate;
   }
-  return true;
+  return prefill_declared(op.prefill, po, err);  // the prompt path's values the manifest declares
 }
 
 bool Qwen35::bind(Core& cr, std::string& err) {
@@ -292,24 +293,10 @@ void Qwen35::attn_linear(int L, const float* hin, float* rout) {
   }
   for (int j = 0; j < c.NKH; j++) X.qk_done[j].store(0, std::memory_order_relaxed);
   xatt.reset(ZD);
-  if (X.quant_heads) {  // the output projection in the heads' fork-join
-    X.wo = &W.o;
-    X.rout = rout;
-    const int U = (W.o.rows + 7) / 8, tail = 4 * core->pool->size();
-    X.o_nb = U > tail ? (U - tail) / 4 : 0;
-    X.o_chunks = X.o_nb + (U - 4 * X.o_nb);
-    X.heads_left.store(c.NVH, std::memory_order_relaxed);
-  }
+  if (X.quant_heads) gdn::fuse_out(X, &W.o, rout, core->pool->size());  // the output projection in the heads' fork-join
   core->pool->run(gdn::phase_conv_heads, &X);
   auto t2 = clk::now();
-  if (X.o_chunks) {  // the output projection ran in the heads' fork-join: its share (after the last head) is attn_out's
-    const auto th = clk::time_point(std::chrono::duration_cast<clk::duration>(std::chrono::nanoseconds(X.heads_done_ns.load())));
-    const double core_ms = std::min(ms_between(t1, t2), std::max(0.0, ms_between(t1, th)));
-    T->attn_core += core_ms;
-    T->attn_out += ms_between(t1, t2) - core_ms;
-  } else {
-    T->attn_core += ms_between(t1, t2);
-  }
+  T->split_heads_out(t1, t2, X.o_chunks ? X.heads_done_ns.load() : 0);  // the fused output projection's share: attn_out
   if (!X.quant_heads) {
     xatt.prep(o.data(), ZD);
     Job jo = {&W.o, &xatt.q, nullptr, rout};
@@ -343,8 +330,6 @@ void phase_full_heads(void* p, int, int) {
   const Lw& W = M.lw[X.L];
   const int HD = c.HD, Tn = X.T, rep = c.NQ / c.NKV, ctx = M.S->ctx;
   static thread_local std::vector<float> sc;
-  if ((int)sc.size() < Tn) sc.resize(Tn + 1024);
-  const float scale = 1.f / std::sqrt((float)HD);
   for (int h; (h = X.next.fetch_add(1, std::memory_order_relaxed)) < c.NQ;) {
     float q[1024];
     _Float16 q16[1024];
@@ -358,40 +343,8 @@ void phase_full_heads(void* p, int, int) {
     const int kvh = h / rep;
     const _Float16* K = M.S->ls[X.L].K + (size_t)kvh * ctx * HD;
     const _Float16* V = M.S->ls[X.L].V + (size_t)kvh * ctx * HD;
-    float mx = -INFINITY;
-    for (int t = 0; t < Tn; t++) {
-      const _Float16* kr = K + (size_t)t * HD;
-      float32x4_t s0 = vdupq_n_f32(0), s1 = s0;
-      for (int i = 0; i < HD; i += 8) {
-        float16x8_t kv = vld1q_f16((const float16_t*)kr + i), qv = vld1q_f16((const float16_t*)q16 + i);
-        s0 = vfmlalq_low_f16(s0, kv, qv);
-        s1 = vfmlalq_high_f16(s1, kv, qv);
-      }
-      sc[t] = vaddvq_f32(vaddq_f32(s0, s1)) * scale;
-      mx = std::max(mx, sc[t]);
-    }
-    double zs = 0;
-    for (int t = 0; t < Tn; t++) {
-      sc[t] = std::exp(sc[t] - mx);
-      zs += sc[t];
-    }
-    const float iz = (float)(1.0 / zs);
-    float32x4_t acc[256];
-    const int NA = HD / 4;
-    for (int i = 0; i < NA; i++) acc[i] = vdupq_n_f32(0);
-    for (int t = 0; t < Tn; t++) {
-      const _Float16* vr = V + (size_t)t * HD;
-      float32x4_t pv = vdupq_n_f32(sc[t] * iz);
-      for (int i = 0; i < HD; i += 8) {
-        float16x8_t vv = vld1q_f16((const float16_t*)vr + i);
-        acc[i / 4] = vfmaq_f32(acc[i / 4], vcvt_f32_f16(vget_low_f16(vv)), pv);
-        acc[i / 4 + 1] = vfmaq_f32(acc[i / 4 + 1], vcvt_high_f32_f16(vv), pv);
-      }
-    }
     float* o = X.o + (size_t)h * HD;
-    const float* gate = qs + HD;
-    for (int i = 0; i < HD; i += 4) vst1q_f32(o + i, acc[i / 4]);
-    for (int i = 0; i < HD; i++) o[i] *= sigm(gate[i]);
+    gated_attn::head_f16(q16, K, V, HD, Tn, [](int t) { return t; }, qs + HD, o, sc);  // (src/models/common/gated_attn.h)
     for (int j = 0; j < HD / XB; j++) xq_block(*X.xq, (h * HD) / XB + j, o + j * XB);
   }
 }
@@ -871,24 +824,15 @@ bool Qwen35::set_option(const std::string& name, const std::string& value, std::
   }
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
   if (name == "verify_old") return (verify_old = std::stoi(value) != 0), true;  // the previous verify pass (A/B measurements)
-  if (name == "prefill_chunk") return (po.chunk = std::stoi(value)), true;  // 1: the decode path, one position at a time
-  if (name == "prefill_span") return (po.span = std::stoi(value)), true;
-  if (name == "prefill_stream") return (po.stream = std::stoi(value)), true;
-  if (name == "prefill_whole_from") return (po.whole_from = std::stoi(value)), true;
   if (name == "prefill_record") {  // every position's picks of the batched prefill, int16 [pos][NL][K]
-    if (po.record) fclose(po.record);
-    po.record = value.empty() ? nullptr : fopen(value.c_str(), "wb");
-    return value.empty() || po.record;
+    if (px.record) fclose(px.record);
+    px.record = value.empty() ? nullptr : fopen(value.c_str(), "wb");
+    return value.empty() || px.record;
   }
-  if (name == "prefill_batched_always") return (po.batched_always = std::stoi(value) != 0), true;
-  if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), false, err);  // 0: CPU only (the default)
-  if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), true, err);  // 0: CPU only (the default)
-  if (name == "prefill_gpu_min") return (po.gpu_min = std::stoi(value)), true;
-  if (name == "prefill_gpu_min_wave") return (po.gpu_min_wave = std::stoi(value)), true;
-  if (name == "prefill_gpu_kernel") return (po.gpu_kernel = std::stoi(value) != 0), true;  // 1 matrix units, 0 integer
-  if (name == "prefill_release") return (po.release = std::stoi(value) != 0), true;  // 1: free the scratch after each prefill
-  if (name == "prefill_pack_min") return (po.pack_min = std::max(0, std::stoi(value))), true;  // 0: the multi-vector kernels
-  if (name == "prefill_dn_rows") return (po.dn_rows = std::max(4, std::stoi(value) / 4 * 4)), true;
+  if (name == "prefill_batched_always") return (px.batched_always = std::stoi(value) != 0), true;
+  bool handled = false;  // the shared prefill_* options (dmeng/prefill.h)
+  const bool ok = prefill_option(name, value, po, gpu, R.base, R.size, core, handled, err);
+  if (handled) return ok;
   if (!core) return (err = "unknown option " + name + " (or bind the model first)"), false;
   return core->set_option(name, value, err);  // the engine's own options (Core::set_option)
 }

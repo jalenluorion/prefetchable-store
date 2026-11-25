@@ -1,5 +1,6 @@
 // The model families of this build.
 #include "dmeng/model.h"
+#include "dmeng/presets.h"
 
 #include <sys/mount.h>
 #include <sys/stat.h>
@@ -46,6 +47,7 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   if (!exists(dir + "/moved-store.json")) {  // no manifest: the resident file says everything
     lo.resident = resident.empty() ? dir + "/dmeng_resident.bin" : resident;
     family = detect_family(lo.resident, err);
+    lo.prefill = declared_prefill(dir, family);  // the family's published values
     return !family.empty();
   }
   ms::Manifest m;
@@ -65,6 +67,7 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   }
   family = m.family;
   if (!m.engine_cfg(lo.cfg, err)) return false;
+  lo.prefill = declared_prefill(dir, family);  // the manifest's "prefill", else the family's published values
   if (!resident.empty()) {
     lo.resident = resident;
     return true;

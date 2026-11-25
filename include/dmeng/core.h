@@ -77,6 +77,19 @@ struct Times {
   double ra = 0;  // run-ahead (Core::ra_predict) inside the MoE steps' expert sections: out of `experts`, which it used to inflate
   double bytes_res = 0, bytes_exp = 0;
   void zero() { *this = Times(); }
+  // a fork-join that ran the attention's heads and then the output projection fused after them (t0 -> t1; heads_done_ns:
+  // steady-clock ns when the last head finished, 0 if not fused): attn_core up to the last head, attn_out after it
+  void split_heads_out(clk::time_point t0, clk::time_point t1, int64_t heads_done_ns) {
+    const double all = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    if (!heads_done_ns) {
+      attn_core += all;
+      return;
+    }
+    const auto th = clk::time_point(std::chrono::duration_cast<clk::duration>(std::chrono::nanoseconds(heads_done_ns)));
+    const double core_ms = std::min(all, std::max(0.0, std::chrono::duration<double, std::milli>(th - t0).count()));
+    attn_core += core_ms;
+    attn_out += all - core_ms;
+  }
   // the stages, ms per token (divided by n), under the one set of names every front end prints (dmeng's
   // by_stage_ms_per_token, the server's and the C API's decode statistics); the same work has the same name in every
   // family (the output projection is attn_out also where it runs fused with the attention's heads)

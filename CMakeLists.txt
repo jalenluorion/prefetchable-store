@@ -36,7 +36,7 @@ endif()
 
 add_library(dmengcore STATIC
   src/core/kernels.cpp src/core/pool.cpp src/core/weights.cpp src/core/store.cpp src/core/moe.cpp src/core/moe_chunk.cpp src/core/greedy_head.cpp src/core/screen_head.cpp
-  src/core/address.cpp src/core/planner.cpp src/core/presets.cpp src/core/sampler.cpp src/core/draft.cpp src/core/model_lm.cpp src/core/kernels_batch.cpp src/core/kernels_sme.cpp
+  src/core/address.cpp src/core/planner.cpp src/core/prefill.cpp src/core/presets.cpp src/core/sampler.cpp src/core/draft.cpp src/core/model_lm.cpp src/core/kernels_batch.cpp src/core/kernels_sme.cpp
   src/core/gpu_check.cpp src/core/gpu_split.cpp src/core/rowstore.cpp
   src/models/registry.cpp src/models/common/gdn.cpp src/models/qwen3_5_moe/qwen3_5_moe.cpp src/models/qwen3_5_moe/prefill.cpp src/models/qwen3_5_moe/verify.cpp
   src/models/inkling2_loop/inkling2_loop.cpp src/models/inkling2_loop/ink_draft.cpp

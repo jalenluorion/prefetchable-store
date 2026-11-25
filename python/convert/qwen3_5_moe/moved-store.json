@@ -1902,6 +1902,19 @@
   "rule": "engine-ready files are in derived/ under the engine's own names (<id>.<engine_format>.<first 12 hex of the source part's sha256>.bin); the engine looks for them in DIR/derived/ as well as DIR/.dmeng/ and derives what is missing into DIR/.dmeng/",
   "profile_rule": "the engine picks the profile from the device; --profile NAME overrides it, --mode exact|fast overrides the profile's mode"
  },
+ "prefill": {
+  "chunk": 512,
+  "span": 8192,
+  "whole_from": 1000,
+  "short_names": "router",
+  "join": 0,
+  "gpu_min": 256,
+  "waves": true,
+  "gpu_min_wave": 128,
+  "pack_min": 1,
+  "dn_rows": 64,
+  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunk, span, names of the next layer (whole from 1000 positions, else its released router's picks), the last span joined under 64 positions, the GPU's share from sub-chunks of 256, the experts in waves as they land (a wave on the GPU from 128 rows), every expert and the shared expert through the packed kernels, down projections in 64-row jobs: the values this model's prefill was written and measured with (results/ios/p3-gpu/GPU-PREFILL.md)"
+ },
  "drafting": {
   "cost_prior": {
    "pass_ms_over_step_ms": [

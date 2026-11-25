@@ -178,6 +178,8 @@ m = {
                "draft_head": None, "vision": None},
     "derived": derived,
     "legacy": [p["path"] for p in parts if p["role"] == "legacy"],
+    "prefill": {"chunk": 256, "span": 2048, "whole_from": 256, "join": 0.25, "gpu_min": 64,
+                "notes": "the batched prompt path (dmeng/prefill.h): layer-major spans of 2048 in sub-chunks of 256, the next layer named whole in spans of 256 or more, the last span joined under a quarter span, the GPU's share from sub-chunks of 64; the experts all at once once landed (no waves)"},
     "drafting": {"cost_prior": None, "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it"},
     "modes": {"exact": {"definition": f"Generated tokens never depend on the cache, the routers or timing: the model's own router picks {K} experts per layer and the engine waits for every one.",
                         "engine": "lossless"},

@@ -776,6 +776,14 @@
   "check.py",
   "ref_released.json"
  ],
+ "prefill": {
+  "chunk": 256,
+  "span": 2048,
+  "whole_from": 256,
+  "join": 0.25,
+  "gpu_min": 64,
+  "notes": "the batched prompt path (dmeng/prefill.h): layer-major spans of 2048 in sub-chunks of 256, the next layer named whole in spans of 256 or more, the last span joined under a quarter span, the GPU's share from sub-chunks of 64; the experts all at once once landed (no waves)"
+ },
  "drafting": {
   "cost_prior": null,
   "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it"

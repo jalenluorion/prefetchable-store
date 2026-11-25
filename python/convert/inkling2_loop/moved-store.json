@@ -1883,6 +1883,14 @@
   "rule": "engine-ready files are in derived/ under the engine's own names (<id>.<engine_format>.<first 12 hex of the source part's sha256>.bin); the engine looks for them in DIR/derived/ as well as DIR/.dmeng/ and derives what is missing into DIR/.dmeng/",
   "profile_rule": "the engine picks the profile from the device; --profile NAME overrides it, --mode exact|fast overrides the profile's mode"
  },
+ "prefill": {
+  "chunk": 256,
+  "span": 8192,
+  "whole_from": 0,
+  "join": 0.25,
+  "gpu_min": 256,
+  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, the last span joined under a quarter span, the GPU's share from sub-chunks of 256; the experts all at once once landed (no waves)"
+ },
  "drafting": {
   "cost_prior": {
    "pass_ms_over_step_ms": [

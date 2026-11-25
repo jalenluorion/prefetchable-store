@@ -1,0 +1,141 @@
+// The batched prompt path's shared parts (include/dmeng/prefill.h).
+#include "dmeng/prefill.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+
+#include "dmeng/core.h"
+#include "gpu_gemm.h"
+
+namespace dm {
+
+GpuShare::GpuShare() = default;
+GpuShare::~GpuShare() = default;
+
+static bool gpu_share(GpuShare& gs, double f, bool experts, const void* res_base, size_t res_size, Core* core, std::string& err) {
+  if (!(f >= 0 && f < 1)) return (err = experts ? "prefill_gpu_experts must be in [0, 1)" : "prefill_gpu_frac must be in [0, 1)"), false;
+  if (f <= 0) return true;
+#if defined(DM_METAL)
+  if (!res_base || !core) return (err = "prefill GPU split: load and bind the model first"), false;
+  if (!gs.g) {
+    std::unique_ptr<GpuGemm> g(new GpuGemm());
+    if (!g->init()) return (err = "prefill GPU split: GPU (Metal) init failed"), false;
+    if (!g->wrap(res_base, res_size)) return (err = "prefill GPU split: the resident weights could not be wrapped"), false;
+    gs.g = std::move(g);
+    fprintf(stderr, "dmeng: prefill GPU split on (resident weights wrapped, %.2f GB)\n", gs.g->wrapped_bytes() / 1e9);
+  }
+  if (experts && !gs.slab_wrapped) {  // the expert slab(s) where they are (locked or plain; mapped records stay on the CPU)
+    bool any = false;
+    for (int p = 0; p < core->cache.npools; p++)
+      if (core->cache.P[p].slab) any = gs.g->wrap(core->cache.P[p].slab, core->cache.P[p].slab_bytes) || any;
+    if (!any) return (err = "prefill GPU split: the expert slab could not be wrapped"), false;
+    gs.slab_wrapped = true;
+    fprintf(stderr, "dmeng: prefill GPU split: the experts too (%.2f GB wrapped)\n", gs.g->wrapped_bytes() / 1e9);
+  }
+  return true;
+#else
+  (void)experts, (void)res_base, (void)res_size, (void)core, (void)gs;
+  return (err = "prefill GPU split: this build has no Metal (DM_METAL off)"), false;
+#endif
+}
+
+bool prefill_option(const std::string& name, const std::string& value, PrefillOpts& o, GpuShare& gpu, const void* res_base, size_t res_size,
+                    Core* core, bool& handled, std::string& err) {
+  handled = true;
+  auto i = [&]() { return std::stoi(value); };
+  if (name == "prefill_chunk") return (o.chunk = std::max(1, i())), true;  // 1: single steps
+  if (name == "prefill_span") return (o.span = std::max(1, i())), true;
+  if (name == "prefill_whole_from") return (o.whole_from = std::max(0, i())), true;
+  if (name == "prefill_stream") return (o.stream = std::max(0, std::min(3, i()))), true;
+  if (name == "prefill_short_names") return (value == "router" || value == "none") && ((o.short_router = value == "router"), true);
+  if (name == "prefill_join") return (o.join = std::stod(value)), true;
+  if (name == "prefill_waves") return (o.waves = i() != 0), true;
+  if (name == "prefill_gpu_min") return (o.gpu_min = std::max(1, i())), true;
+  if (name == "prefill_gpu_min_wave") return (o.gpu_min_wave = std::max(0, i())), true;
+  if (name == "prefill_pack_min") return (o.pack_min = std::max(-1, i())), true;
+  if (name == "prefill_dn_rows") return (o.dn_rows = std::max(4, i() / 4 * 4)), true;
+  if (name == "prefill_gpu_kernel") return (o.gpu_kernel = i() != 0), true;  // 1 matrix units, 0 integer
+  if (name == "prefill_release") return (o.release = i() != 0), true;
+  if (name == "prefill_gpu_frac" || name == "prefill_gpu_experts") {
+    const bool ex = name == "prefill_gpu_experts";
+    const double f = std::stod(value);
+    if (!gpu_share(gpu, f, ex, res_base, res_size, core, err)) return false;
+    (ex ? o.gpu_experts : o.gpu_frac) = f;
+    return true;
+  }
+  handled = false;
+  return false;
+}
+
+MoePass::MoePass(Core& core, const PrefillOpts& o) : c(core) {
+  c.chunk_waves = o.waves;
+  c.chunk_wave_gpu_min = o.gpu_min_wave;
+  c.chunk_pack_affine = o.pack_min;
+  c.chunk_pack_shared = o.pack_min;
+  c.chunk_dn_rows = o.dn_rows;
+}
+MoePass::~MoePass() {
+  c.chunk_waves = false;
+  c.chunk_wave_gpu_min = 0;
+  c.chunk_pack_affine = -1;
+  c.chunk_pack_shared = 0;
+  c.chunk_dn_rows = 32;
+}
+
+bool prefill_declared(const std::vector<std::pair<std::string, std::string>>& kv, PrefillOpts& o, std::string& err) {
+  GpuShare none;
+  for (auto& x : kv) {
+    bool handled = false;
+    std::string e;
+    if (x.first == "gpu_frac" || x.first == "gpu_experts" || !prefill_option("prefill_" + x.first, x.second, o, none, nullptr, 0, nullptr, handled, e) || !handled)
+      return (err = "manifest prefill." + x.first + ": " + (e.empty() ? "not a declared prefill value" : e)), false;
+  }
+  return true;
+}
+
+bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std::atomic<bool>* cancel, const PrefillOpts& o,
+                   const std::function<bool(int, int, bool, const std::vector<int>&)>& span, PrefillStats* st, int* spans_out) {
+  struct NsOff {  // fast mode's rule off for the prompt (the batched pass is lossless; its state is exact mode's)
+    Approx& a;
+    bool on;
+    explicit NsOff(Approx& x) : a(x), on(x.on) { a.on = false; }
+    ~NsOff() { a.on = on; }
+  } ns_off(core.ns);
+  std::vector<int> caps(capture);
+  std::sort(caps.begin(), caps.end());
+  caps.erase(std::unique(caps.begin(), caps.end()), caps.end());
+  const auto t0 = std::chrono::steady_clock::now();
+  const uint64_t b0 = core.cache.st.bytes_urgent + core.cache.st.bytes_pf;
+  const double w0 = core.cache.st.wait_ms;
+  const int sp = std::max(1, o.span);
+  int done = 0, spans = 0;
+  bool ok = true;
+  while (done < n) {
+    if (cancel && cancel->load()) {
+      ok = false;
+      break;
+    }
+    int m = std::min(sp, n - done);
+    if (sp > 1 && n - done - m > 0 && n - done - m < std::max(64, (int)(o.join * sp))) m = n - done;  // no short last span
+    std::vector<int> cap_rel;
+    for (int p : caps)
+      if (p > done && p <= done + m) cap_rel.push_back(p - done);
+    if (!span(done, m, done + m == n, cap_rel)) {
+      ok = false;
+      break;
+    }
+    done += m;
+    spans++;
+  }
+  if (st) {
+    st->positions = done;
+    st->ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    st->ms_wait = core.cache.st.wait_ms - w0;
+    st->mb_read = (core.cache.st.bytes_urgent + core.cache.st.bytes_pf - b0) / MB;
+  }
+  if (spans_out) *spans_out = spans;
+  return ok;
+}
+
+}  // namespace dm

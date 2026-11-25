@@ -132,6 +132,16 @@ struct Ctx {
   std::atomic<int64_t> heads_done_ns{0};  // steady-clock ns when the last head finished (with o_chunks: the stage split)
   alignas(128) std::atomic<int> next{0};
 };
+// the output projection wo into rout after the heads, in phase_conv_heads' fork-join (claims of 32 rows, a tail of 8-row
+// claims for `threads` workers), when the heads quantise their own outputs (X.quant_heads)
+inline void fuse_out(Ctx& X, const Weight* wo, float* rout, int threads) {
+  X.wo = wo;
+  X.rout = rout;
+  const int U = (wo->rows + 7) / 8, tail = 4 * threads;
+  X.o_nb = U > tail ? (U - tail) / 4 : 0;
+  X.o_chunks = X.o_nb + (U - 4 * X.o_nb);
+  X.heads_left.store(X.d->NVH, std::memory_order_relaxed);
+}
 void phase_conv(void* p, int tid, int nt);
 void phase_heads(void* p, int, int);
 void phase_conv_heads(void* p, int, int);  // the decode path: both in one fork-join

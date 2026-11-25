@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "dmeng/model.h"
+#include "dmeng/prefill.h"
 #include "dmeng/screen_head.h"
 #include "../common/gdn.h"
 
@@ -16,34 +17,10 @@ namespace dm {
 struct GpuGemm;  // src/core/gpu_gemm.h
 namespace qwen35 {
 
-struct PrefillOpts {
-  int chunk = 512;   // positions per sub-chunk (bounds the scratch memory); 1 = the decode path, one position at a time
-  int span = 8192;   // positions per layer-major pass: every layer runs over the whole span, so its experts are read once
-  // how a layer's experts reach memory: 0 on demand (read once the layer's router has run, hits computed meanwhile);
-  // 1 whole next layer streamed (at layer L, every expert of L+1 not held is named); 2 named early: layer L+1's released
-  // router run on layer L's MoE input names L+1's experts at layer L; 3 automatic: spans of at least whole_from
-  // positions stream whole layers, shorter ones name early
-  int stream = 3;
-  int whole_from = 1000;
+// the 35B's own prefill switches (the shared ones: dmeng/prefill.h PrefillOpts)
+struct PrefillExtra {
   bool batched_always = false;  // chunk 1 through the batched code (one position per pass): a debugging reference
   FILE* record = nullptr;       // if set: every position's picks, int16 [pos][NL][K], appended per span
-  // share of each attention projection's rows (qkv, z, o; q, k, v, o; 8- or 4-bit) computed on the GPU
-  // (src/core/gpu_gemm.h: the same bits) beside the CPU, for sub-chunks of at least gpu_min positions; 0 = CPU only.
-  // gpu_frac_experts: the same for the experts' products (routed experts held in the slab, and the shared expert).
-  // Needs a build with DM_METAL.
-  double gpu_frac = 0, gpu_frac_experts = 0;
-  int gpu_min = 256;
-  int gpu_kernel = 1;  // 1: the matrix-unit kernel, 0: the integer kernel (gpu_gemm.h; the same bits)
-  // experts arrive in waves (whatever has landed): a wave uses the GPU only with at least this many (position, expert)
-  // assignments (the shared expert's positions counted), so a trickle of reads does not pay a GPU round trip per expert
-  int gpu_min_wave = 128;
-  // the experts' packed kernels (gemm_aff4_i16, the shared expert's gemm_aff8_i16) from this many users of an expert in a
-  // sub-chunk (Core::chunk_pack_affine / chunk_pack_shared): 1 = every expert, as this prefill always ran
-  int pack_min = 1;
-  int dn_rows = 64;  // rows per down-projection job (Core::chunk_dn_rows), as this prefill always ran
-  // free the prefill's scratch (activations, expert inputs, packed activations: ~0.5 GB at 512-position sub-chunks) at
-  // the end of every prefill; the next one allocates it again. Placement of memory only: no computed bit changes
-  bool release = false;
 };
 struct Prefill;
 
@@ -176,10 +153,10 @@ struct Qwen35 : Model {
   // batched prefill (prefill.cpp): layer-major over a span, bit-identical to single steps
   bool prefill(State& s, const int32_t* ids, int n, bool want_logits, const std::vector<int>& capture, const LM::StateSink& sink,
                PrefillStats* st, const std::atomic<bool>* cancel) override;
-  PrefillOpts po;
+  PrefillOpts po;   // the batched prompt path's options (dmeng/prefill.h; this model's values: its manifest's "prefill")
+  PrefillExtra px;
   std::unique_ptr<Prefill> P;
-  std::unique_ptr<GpuGemm> gpu;  // the Metal share of the prefill's products (po.gpu_frac(_experts) > 0), kept across prefills
-  bool set_gpu_frac(double f, bool experts, std::string& err);  // prefill.cpp
+  GpuShare gpu;     // the Metal share of the prefill's products (po.gpu_frac / gpu_experts > 0), kept across prefills
   std::vector<size_t> fixed_off;  // [NL] byte offset of a DeltaNet layer's conv state in the fixed blob
   gdn::Dims gd;                   // the Gated DeltaNet's shape (silu gate)
   // a DeltaNet layer's fork-join context for one position (gdn.h): the state of S, the layer's weights, the buffers

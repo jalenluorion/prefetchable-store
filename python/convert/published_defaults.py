@@ -35,6 +35,8 @@ for f in FAMILIES:
     e = {"modes": {k: {"engine": v["engine"]} for k, v in (m.get("modes") or {}).items() if "engine" in v},
          "profiles": {p: strip_notes({k: v for k, v in pv.items() if k not in DROP}) for p, pv in (m.get("profiles") or {}).items()},
          "defaults": strip_notes({k: v for k, v in (m.get("defaults") or {}).items() if k not in ("experts",)})}
+    if "prefill" in m:
+        e["prefill"] = {k: v for k, v in m["prefill"].items() if k not in ("notes", "note", "measured")}
     if "drafting" in m:
         e["drafting"] = {"cost_prior": m["drafting"].get("cost_prior")}
     out[f] = e

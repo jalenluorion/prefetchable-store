@@ -386,6 +386,27 @@ std::string Resolved::json() const {
   return o.str();
 }
 
+std::vector<std::pair<std::string, std::string>> declared_prefill(const std::string& dir, const std::string& family) {
+  std::vector<std::pair<std::string, std::string>> out;
+  ms::Manifest m;
+  std::string err;
+  const bool has = exists(dir + "/moved-store.json") && m.load(dir, err);
+  const Json* pf = has ? member(&m.raw, "prefill") : nullptr;
+  if (!pf) pf = member(published(has ? m.family : family), "prefill");
+  if (!pf || pf->kind != Json::OBJ) return out;
+  for (auto& kv : pf->obj) {
+    const Json& v = kv.second;
+    if (kv.first == "notes" || kv.first == "note") continue;
+    char b[64];
+    if (v.kind == Json::NUM) snprintf(b, sizeof b, "%.17g", v.f(0));
+    else if (v.kind == Json::BOOL) snprintf(b, sizeof b, "%d", v.b ? 1 : 0);
+    else if (v.kind == Json::STR) snprintf(b, sizeof b, "%s", v.s().c_str());
+    else continue;  // notes and the like
+    out.push_back({kv.first, b});
+  }
+  return out;
+}
+
 std::vector<double> draft_cost_prior(const std::string& dir) {
   std::vector<double> v;
   ms::Manifest m;

@@ -29,6 +29,7 @@
 
 #include "../common/gdn.h"
 #include "dmeng/model.h"
+#include "dmeng/prefill.h"
 #include "dmeng/rowstore.h"
 #include "dmeng/screen_head.h"
 #include "../../core/gpu_split.h"
@@ -114,16 +115,8 @@ struct NGramHash {
   void rows(const int32_t* ctx, int32_t cur, int64_t* out) const;
 };
 
-// prefill options (set_option prefill_*)
-struct PrefillOpts {
-  int chunk = 256;        // positions per sub-chunk of a layer (bounds the scratch); 1 = single steps
-  int span = 2048;        // positions per layer-major pass (each layer's experts read once per span)
-  int whole_from = 256;   // spans of at least this many positions name every expert of the next layer while a layer runs
-  bool names = true;      // prefill_stream 0: no early names in a span
-  double gpu_frac = 0, gpu_experts = 0;  // the GPU's share of the projections' rows / the experts' (prefill_gpu_*)
-  int gpu_min = 64;       // sub-chunks of at least this many positions use the GPU
-  int gpu_kernel = 1;
-  bool release = false;   // give the span's scratch and the GPU split's buffers back after each prefill
+// the prompt path's bound of this model (the shared options: dmeng/prefill.h PrefillOpts, its values from the manifest)
+struct PrefillExtra {
   double scratch_mb = 320;  // the prefill's scratch bound: sub-chunk buffers and the span's streams, half each (prefill.cpp)
 };
 
@@ -163,8 +156,8 @@ struct Flash : Model {
   int run_ahead_step(int L, const float* ypart, int32_t* picks, int maxk);
   // prefill
   PrefillOpts po;
-  std::unique_ptr<GpuGemm> gpu;
-  bool slab_wrapped = false;
+  PrefillExtra px;
+  GpuShare gpu;  // the GPU's share of the prompt path (dmeng/prefill.h)
   GpuSplitAcct gacct;
   long n_chunks = 0;
   std::vector<size_t> fixed_off;  // [NL] offset of a Gated DeltaNet layer's states in the fixed blob
@@ -242,7 +235,6 @@ struct Flash : Model {
   bool span_run(const int32_t* ids, int n, bool want_last, const std::vector<int>* capture, const LM::StateSink* sink,
                 const std::atomic<bool>* cancel, const PrefillProgress* progress, int prog_base, int prog_total, Ver* ver = nullptr);
   std::string verify_json() const;
-  bool set_gpu_frac(double f, bool experts, std::string& err);
   size_t span_bytes() const;
   double sub_bytes_per_pos() const;
 };

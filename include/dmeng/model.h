@@ -30,6 +30,8 @@ struct LoadOpts {
   Mem res_mem = Mem::MLOCK;
   // from the manifest (moved-store.json): the configuration the model reads, in place of the resident file's cfg lines
   std::vector<std::pair<std::string, std::string>> cfg;
+  // the batched prompt path's declared values (the manifest's "prefill", else the family's published ones): key -> value
+  std::vector<std::pair<std::string, std::string>> prefill;
 };
 
 // Where a model folder's configuration and engine files come from. With a moved-store.json: the family and the

@@ -1,6 +1,7 @@
 // Qwen3.8-Flash-Next (qwen4_exp), batch 1, on the CPU: load, state, the decode step and run-ahead (qwen4_exp.h for the
 // architecture and the precision). The batched prefill is prefill.cpp; both call the per-position functions here.
 #include "qwen4_exp.h"
+#include "../common/gated_attn.h"
 
 #include <arm_neon.h>
 
@@ -281,7 +282,7 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
     v.sh_down = &lw[L].sd;
     v.sh_scalar_gate = &lw[L].shgate;
   }
-  return true;
+  return prefill_declared(op.prefill, po, err);  // the prompt path's values the manifest declares
 }
 
 bool Flash::bind(Core& cr, std::string& err) {
@@ -648,21 +649,11 @@ void Flash::qsa_head(int L, int h, const float* q, const float* gate, const std:
       sc[t] = vaddvq_f32(a) * scale;
       mx = std::max(mx, sc[t]);
     }
-  } else {
+  } else {  // fp16 keys and values: the 35B's head over the selected positions (src/models/common/gated_attn.h)
     _Float16 q16[512];
     for (int i = 0; i < HD; i++) q16[i] = (_Float16)q[i];
-    const _Float16* K = st.K + (size_t)kvh * ctx * HD;
-    for (int t = 0; t < n; t++) {
-      const float16_t* kr = (const float16_t*)(K + (size_t)sel[t] * HD);
-      float32x4_t s0 = vdupq_n_f32(0), s1 = s0;
-      for (int i = 0; i < HD; i += 8) {
-        float16x8_t kv = vld1q_f16(kr + i), qv = vld1q_f16((const float16_t*)q16 + i);
-        s0 = vfmlalq_low_f16(s0, kv, qv);
-        s1 = vfmlalq_high_f16(s1, kv, qv);
-      }
-      sc[t] = vaddvq_f32(vaddq_f32(s0, s1)) * scale;
-      mx = std::max(mx, sc[t]);
-    }
+    gated_attn::head_f16(q16, st.K + (size_t)kvh * ctx * HD, st.V + (size_t)kvh * ctx * HD, HD, n, [&](int t) { return sel[t]; }, gate, o, sc);
+    return;
   }
   double zs = 0;
   for (int t = 0; t < n; t++) {
@@ -761,24 +752,10 @@ void Flash::gdn_step(int L, const float* xh, float* y) {
   X.quant_heads = !ref && c.DV % XB == 0;
   for (int j = 0; j < c.NKH; j++) X.qk_done[j].store(0, std::memory_order_relaxed);
   xatt.reset(ZD);
-  if (X.quant_heads) {  // the output projection in the heads' fork-join
-    X.wo = &W.o;
-    X.rout = y;
-    const int U = (W.o.rows + 7) / 8, tail = 4 * core->pool->size();
-    X.o_nb = U > tail ? (U - tail) / 4 : 0;
-    X.o_chunks = X.o_nb + (U - 4 * X.o_nb);
-    X.heads_left.store(c.NVH, std::memory_order_relaxed);
-  }
+  if (X.quant_heads) gdn::fuse_out(X, &W.o, y, core->pool->size());  // the output projection in the heads' fork-join
   core->pool->run(gdn::phase_conv_heads, &X);
   auto t2 = clk::now();
-  if (X.o_chunks) {  // the output projection ran in the heads' fork-join: its share (after the last head) is attn_out's
-    const auto th = clk::time_point(std::chrono::duration_cast<clk::duration>(std::chrono::nanoseconds(X.heads_done_ns.load())));
-    const double core_ms = std::min(ms_between(t1, t2), std::max(0.0, ms_between(t1, th)));
-    T->attn_core += core_ms;
-    T->attn_out += ms_between(t1, t2) - core_ms;
-  } else {
-    T->attn_core += ms_between(t1, t2);
-  }
+  T->split_heads_out(t1, t2, X.o_chunks ? X.heads_done_ns.load() : 0);  // the fused output projection's share: attn_out
   if (!X.quant_heads) {
     if (!ref) xatt.prep(att.data(), ZD);
     Job jo = {&W.o, &xatt.q, att.data(), y};
@@ -1016,19 +993,13 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
   }
   if (name == "verify_old") return true;  // (the 35B's previous verify pass, for A/B: this family has one pass)
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;
-  if (name == "prefill_chunk") return (po.chunk = std::max(1, std::stoi(value))), true;  // 1: single steps
-  if (name == "prefill_span") return (po.span = std::max(1, std::stoi(value))), true;
-  if (name == "prefill_stream") return (po.names = std::stoi(value) != 0), true;
-  if (name == "prefill_whole_from") return (po.whole_from = std::stoi(value)), true;
   if ((name == "prefill_batched_always" && std::stoi(value) == 0) || (name == "prefill_record" && value.empty())) return true;  // off
-  if (name == "prefill_batched_always" || name == "prefill_gpu_min_wave" || name == "prefill_record")  // refused, not ignored
+  if (name == "prefill_batched_always" || name == "prefill_record")  // refused, not ignored
     return (err = name + ": not implemented for qwen4_exp's prefill"), false;
-  if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), false, err);
-  if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), true, err);
-  if (name == "prefill_gpu_min") return (po.gpu_min = std::max(1, std::stoi(value))), true;
-  if (name == "prefill_gpu_kernel") return (po.gpu_kernel = std::stoi(value) != 0), true;
-  if (name == "prefill_scratch_mb") return (po.scratch_mb = std::max(16.0, std::stod(value))), true;
-  if (name == "prefill_release") return (po.release = std::stoi(value) != 0), true;
+  if (name == "prefill_scratch_mb") return (px.scratch_mb = std::max(16.0, std::stod(value))), true;
+  bool handled = false;  // the shared prefill_* options (dmeng/prefill.h)
+  const bool ok = prefill_option(name, value, po, gpu, R.base, R.size, core, handled, err);
+  if (handled) return ok;
   if (!core) return (err = "unknown option " + name + " (or bind the model first)"), false;
   return core->set_option(name, value, err);  // the engine's own options (Core::set_option)
 }
