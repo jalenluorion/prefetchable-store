@@ -205,7 +205,21 @@ enum SelfCheck {
             out["volume_free_gb"] = Double(v.volumeAvailableCapacity ?? -1) / 1e9
             out["volume_free_important_gb"] = Double(v.volumeAvailableCapacityForImportantUsage ?? -1) / 1e9
         }
-        if let d = try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys]) {
+        // only JSON values (a non-finite number or another type would make the whole write fail)
+        func clean(_ v: Any) -> Any {
+            switch v {
+            case let d as [String: Any]: return d.mapValues(clean)
+            case let a as [Any]: return a.map(clean)
+            case let x as Double: return x.isFinite ? x : String(describing: x)
+            case let x as Float: return x.isFinite ? Double(x) : String(describing: x)
+            case is String, is Int, is Int64, is Bool, is NSNull, is NSNumber: return v
+            default: return String(describing: v)
+            }
+        }
+        let outClean = clean(out)
+        var data: Data?
+        do { data = try JSONSerialization.data(withJSONObject: outClean, options: [.sortedKeys]) } catch { log("SELFCHECK JSON error: \(error)") }
+        if let d = data {
             do { try d.write(to: url) } catch { log("SELFCHECK could not write \(url.lastPathComponent): \(error)") }
             // also on the console (a full drive cannot take the file): base64 in chunks, "SELFCHECK JSON i/n <chunk>"
             let b = d.base64EncodedString(), n = (b.count + 799) / 800
