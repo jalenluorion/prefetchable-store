@@ -1,0 +1,12 @@
+You are a coding agent working in a Python repository. The file `utils/cache.py` contains this function:
+
+```python
+def get_user(db, user_id, cache={}):
+    if user_id in cache:
+        return cache[user_id]
+    row = db.execute("SELECT * FROM users WHERE id = " + str(user_id)).fetchone()
+    cache[user_id] = row
+    return row
+```
+
+The tests in `tests/test_cache.py` fail intermittently and a reviewer flagged a security problem. Explain the bugs briefly, then rewrite the function with a parameterised query, an explicit LRU cache with a size limit and expiry, and type hints. Finish with a pytest test file that covers a cache hit, a miss, expiry and eviction.
