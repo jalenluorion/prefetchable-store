@@ -61,7 +61,8 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          what the command line leaves unset; any of --prefetch, --routers, --xtok, --oracle,
                          --plan-routers makes the early address entirely the command line's
   --mode exact|fast|lossless|approx[:PRESET]   exact = lossless, fast = approx:drop (default: the profile's)
-  --drafts 0|1           1 = --draft lookup --early 4 (Inkling with mtp.safetensors: --draft both); default: the profile's (off)
+  --drafts 0|1           1 = --draft lookup --early 4, as in dmserve (a model's draft head: --draft head|both); default:
+                         the profile's (off)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --chat --reasoning-effort E   with --prompt: the chat template (python/run.py)
@@ -587,14 +588,10 @@ int main(int argc, char** argv) {
   if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings, profiled ? P.profile : ""))
     return die("model", err);
   if (!a.family.empty()) family = a.family;
-  // --drafts 1: the lookup and the tool-call fragments, plus Inkling's draft head when its files are there (held in the
-  // engine's 8-bit format: 0.44 GB with its fold); early names from the copied spans
-  if (a.drafts > 0 && !has("--draft")) {
-    struct stat sb1, sb2;
-    const bool ink_head = family == "inkling2_loop" && stat((a.model + "/mtp.safetensors").c_str(), &sb1) == 0 &&
-                          stat((a.model + "/resident.safetensors").c_str(), &sb2) == 0;
-    a.draft = ink_head ? "both" : "lookup";
-  }
+  // --drafts 1: the lookup and the tool-call fragments, the same in every front end and for every model (dmserve's
+  // meaning; the manifests' notes: "lookup and tool-call skeleton drafts"); a model's draft head is asked for explicitly
+  // (--draft head|both); early names from the copied spans
+  if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
   if (a.drafts > 0 && !has("--early")) a.early = 4;
   CoreOpts co;
   co.threads = a.threads;

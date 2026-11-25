@@ -154,7 +154,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          built-in values). A default fills only what the command line leaves unset; --routers or --xtok
                          makes the early address entirely the command line's (--routers none: no names)
   --mode exact|fast|lossless|approx[:PRESET]   default: the profile's
-  --drafts 0|1           1 = --draft lookup; default: the profile's (off)
+  --drafts 0|1           1 = --draft lookup --early 4 (as in dmeng); default: the profile's (off)
   --print-defaults       print the resolved profile defaults as JSON and exit
 model and memory
   --resident F --family F --ctx N (33792) --threads N (8) --readers N (4) --mem plain|mlock --res-mem plain|mlock

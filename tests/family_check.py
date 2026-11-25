@@ -264,6 +264,21 @@ if wanted("drafting"):
                         out, js = greedy("dd", "--cache-gb", f"{FEW_GB:.6f}", *S, "--draft", d, "--draft-max", dm, "--skeleton", frag, n=100, prompt=40)
                         nv = js.get("draft", {}).get("verifies", 0)
                         (okd if out == plain and (nv > 0 or d == "lookup") else bad).append(f"{sm} --draft {d} --draft-max {dm} ({nv} passes)")
+            # --drafts 1 means the same in every front end (dmserve: --draft lookup --early 4), also in a folder holding a
+            # model's draft head file (dmeng used to switch to --draft both there, by the model's name)
+            F = os.path.join(T, "drafts1")
+            shutil.rmtree(F, ignore_errors=True)
+            os.makedirs(F)
+            for e in os.listdir(M):
+                os.symlink(os.path.join(M, e), os.path.join(F, e))
+            if not os.path.exists(os.path.join(F, "mtp.safetensors")):
+                os.symlink(os.path.join(M, "moved-store.json"), os.path.join(F, "mtp.safetensors"))
+            plain, _ = greedy("d1p", "--cache-gb", f"{FEW_GB:.6f}", n=60, prompt=40)
+            r1 = run([DMENG, "--model", F, *BASE, "--prompt-file", os.path.join(T, "ids40.txt"), "--n", "60", "--cache-gb", f"{FEW_GB:.6f}",
+                      "--drafts", "1", "--out-ids", os.path.join(T, "d1.ids")])
+            d1 = last_json(r1).get("draft", {}) if r1.returncode == 0 else {}
+            ok1 = r1.returncode == 0 and d1.get("mode") == "lookup" and open(os.path.join(T, "d1.ids")).read().strip() == plain
+            (okd if ok1 else bad).append(f"--drafts 1 = lookup beside a draft head file (mode {d1.get('mode')}, rc {r1.returncode})")
             r5 = random.Random(5)
             q = [r5.randrange(LO, V) for _ in range(50)]
             reqs = [{"ids": q, "max_new": 60}, {"ids": [LO, LO + 1, LO + 2] + q[:20], "max_new": 40, "continue": True},
