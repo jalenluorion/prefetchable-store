@@ -190,8 +190,8 @@ static void footprint_mb(double& now, double& peak) {
   mach_msg_type_number_t n = TASK_VM_INFO_COUNT;
   now = peak = 0;
   if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&v, &n) != KERN_SUCCESS) return;
-  now = v.phys_footprint / 1048576.0;
-  peak = v.ledger_phys_footprint_peak / 1048576.0;
+  now = v.phys_footprint / MB;
+  peak = v.ledger_phys_footprint_peak / MB;
 }
 
 static std::mutex out_mu;

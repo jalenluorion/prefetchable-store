@@ -65,7 +65,7 @@ bool ModelLM::prefill(const int* ids, int n, float* logits, const std::vector<in
   if (st) {
     if (st->ms == 0) st->ms = ms_since(t0);
     if (st->ms_wait == 0) st->ms_wait = c_.t.wait - w0;
-    if (st->mb_read == 0) st->mb_read = (c_.cache.st.bytes_urgent + c_.cache.st.bytes_pf - b0) / 1048576.0;
+    if (st->mb_read == 0) st->mb_read = (c_.cache.st.bytes_urgent + c_.cache.st.bytes_pf - b0) / MB;
   }
   return ok;
 }
@@ -152,17 +152,15 @@ std::string ModelLM::stats_json() {
   std::ostringstream o;
   o.setf(std::ios::fixed);
   o.precision(2);
-  o << "{\"steps\":" << dec_steps_ << ",\"ms_per_step\":{\"embed\":" << T.embed / n << ",\"attn_proj\":" << T.attn_proj / n << ",\"attn_core\":"
-    << T.attn_core / n << ",\"attn_out\":" << T.attn_out / n << ",\"depth\":" << T.depth / n << ",\"msg\":" << T.msg / n << ",\"router\":" << T.router / n
-    << ",\"experts\":" << T.experts / n << ",\"wait\":" << T.wait / n << ",\"cache\":" << T.cache / n << ",\"prefetch\":" << T.pf / n << ",\"head\":" << T.head / n
+  o << "{\"steps\":" << dec_steps_ << ",\"ms_per_step\":{" << T.stages_json(n)
     << "},\"hit\":" << (double)S.n_hit / std::max<uint64_t>(1, picks) << ",\"late\":" << (double)S.n_late / std::max<uint64_t>(1, picks)
-    << ",\"mb_read_per_step\":" << (S.bytes_urgent + S.bytes_pf) / 1048576.0 / n << ",\"routers\":" << (c_.hook ? "true" : "false")
+    << ",\"mb_read_per_step\":" << (S.bytes_urgent + S.bytes_pf) / MB / n << ",\"routers\":" << (c_.hook ? "true" : "false")
     << ",\"pf_issued_per_step\":" << S.n_pf_issued / n << ",\"model\":" << m_.stats_json((int)dec_steps_) << "}";
   return o.str();
 }
 
 std::string ModelLM::mem_json() const {
-  auto mb = [](size_t b) { return b / 1048576.0; };
+  auto mb = [](size_t b) { return b / MB; };  // MB = 10^6 bytes, as every counter
   const ModelMem mm = m_.mem(s_);
   const Cache& C = c_.cache;
   size_t slab = C.core_slab_bytes;  // Mem::FILE: no slab (the records are the layer files' pages), only the locked core
@@ -170,7 +168,7 @@ std::string ModelLM::mem_json() const {
     for (int p = 0; p < C.npools; p++) slab += C.P[p].slab_bytes;
   task_vm_info_data_t vi;
   mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
-  const double foot = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS ? vi.phys_footprint / 1048576.0 : -1;
+  const double foot = task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS ? vi.phys_footprint / MB : -1;
   char b[768];
   snprintf(b, sizeof b,
            "{\"footprint_mb\":%.0f,\"resident_mb\":%.0f,\"expert_slab_mb\":%.0f,\"kv_reserved_mb\":%.0f,\"kv_touched_mb_at_pos\":%.0f,\"recurrent_mb\":%.0f,"

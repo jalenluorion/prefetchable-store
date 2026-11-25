@@ -416,12 +416,12 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     st->chunks = (int)(n_chunks - c0);
     st->ms = ms_since(t0);
     st->ms_wait = core->cache.st.wait_ms - w0;
-    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / 1048576.0;
+    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     const double np_ = std::max(1, done);
     std::ostringstream o;
     o << "{\"chunk\":" << po.chunk << ",\"span\":" << span << ",\"spans\":" << spans << ",\"union_batches\":" << core->n_union_batches
-      << ",\"mb_read\":" << st->mb_read << ",\"read_mb_per_pos\":" << st->mb_read / np_ << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / 1048576.0 / np_
-      << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / 1048576.0 / np_ << ",\"wait_ms\":" << st->ms_wait
+      << ",\"mb_read\":" << st->mb_read << ",\"read_mb_per_pos\":" << st->mb_read / np_ << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / MB / np_
+      << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / MB / np_ << ",\"wait_ms\":" << st->ms_wait
       << ",\"ngram_mb\":" << ngs.n_bytes.load() / 1e6;
     if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac

@@ -920,11 +920,12 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
   if (core && o.early > 0) early(L > 0 ? d : pre ? (dl.src >= 1 ? dl : d) : Draft(), L, p);
   int n = 1, acc = 0;
   uint64_t r0[4] = {0, 0, 0, 0};
-  double w0 = 0;
+  double w0 = 0, ra0 = 0;
   if (reads) {
     const auto& S = reads->cache.st;
     r0[0] = S.n_miss, r0[1] = S.n_late, r0[2] = S.bytes_urgent, r0[3] = S.bytes_pf;
     w0 = S.wait_ms;
+    ra0 = reads->t.ra;
   }
   if (L == 0) {
     T.step(last);
@@ -976,10 +977,11 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
     srcs_[s]->outcome(ctl, (int)x[1], x[2], chosen, chosen ? acc : 0, ms);
   }
   if (on()) {
-    double wt = 0, ur = 0, tt = 0;
+    double wt = 0, ur = 0, tt = 0, rat = 0;
     if (reads) {
       const auto& S = reads->cache.st;
       wt = S.wait_ms - w0;
+      rat = reads->t.ra - ra0;
       ur = (double)(S.bytes_urgent - r0[2]) / 1e6;
       tt = ur + (double)(S.bytes_pf - r0[3]) / 1e6;
     }
@@ -999,7 +1001,7 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
       }
     }
     gamble_ = false;
-    measure(n, 1 + acc, std::max(0.0, ms - t_timed - wt), wt, ur, tt);
+    measure(n, 1 + acc, std::max(0.0, ms - t_timed - wt - rat), wt, ur, tt);  // compute = time - wait - run-ahead
   }
   if (reads) {
     const auto& S = reads->cache.st;

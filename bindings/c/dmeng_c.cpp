@@ -518,7 +518,7 @@ int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int n
     lp << "{\"source\":\"" << r.source << "\",\"reused\":" << r.reused << ",\"computed\":" << r.computed << ",\"ms_restore\":" << r.ms_restore
        << ",\"ms_preload\":" << r.ms_preload << ",\"preloaded\":" << r.preloaded
        << ",\"ms_prefill\":" << r.ms_prefill << ",\"positions\":" << r.pf.positions << ",\"chunks\":" << r.pf.chunks << ",\"ms\":" << r.pf.ms
-       << ",\"ms_wait\":" << r.pf.ms_wait << ",\"mb_read\":" << r.pf.mb_read * 1048576.0 / 1e6 << ",\"detail\":" << (r.pf.json.empty() ? "{}" : r.pf.json) << "}";
+       << ",\"ms_wait\":" << r.pf.ms_wait << ",\"mb_read\":" << r.pf.mb_read << ",\"detail\":" << (r.pf.json.empty() ? "{}" : r.pf.json) << "}";
     e->last_prefill = lp.str();
   }
   if (res) {
@@ -529,7 +529,7 @@ int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int n
     res->ms_restore = r.ms_restore;
     res->ms_prefill = r.ms_prefill;
     res->ms_wait_reads = r.pf.ms_wait;
-    res->mb_read = r.pf.mb_read * 1048576.0 / 1e6;
+    res->mb_read = r.pf.mb_read;
     res->cancelled = r.cancelled;
   }
   return r.cancelled ? DM_ECANCELLED : DM_OK;

@@ -19,6 +19,8 @@ checked):
               decoding (greedy and sampled), the server worker the same; without a verify pass: every front end refuses
   presets     the precedence (explicit > profile > manifest > built-in) in dmeng, the C API (dm_gate) and dmserve, each
               read back from its "resolved" JSON, and the three front ends printing the same resolved settings
+  counters    the stages (one set of names, Times::stages_json, in dmeng and the server) sum to the token's time within 1%,
+              compute = time - wait - run-ahead, and the server's MB per token equals dmeng's (MB = 10^6 bytes in both)
 Writes OUT_DIR/family_check.json and prints one line per check; exit 1 if any check fails.
 """
 import argparse, json, os, random, shutil, subprocess, sys
@@ -75,6 +77,7 @@ def last_json(r):
 
 rnd = random.Random(11)
 ids = {n: [rnd.randrange(LO, V) for _ in range(n)] for n in (40, 300, 1100)}
+ids[120] = ids[300][:120]
 for n, p in ids.items():
     open(os.path.join(T, f"ids{n}.txt"), "w").write(",".join(map(str, p)))
 BASE = ["--profile", "none", "--threads", "4", "--readers", "2", "--mem", "plain", "--res-mem", "plain", "--ctx", "2048"]
@@ -212,8 +215,7 @@ def worker(name, reqs, *flags):
 
 if wanted("server"):
     try:
-        p = ids[300][:120]
-        open(os.path.join(T, "ids120.txt"), "w").write(",".join(map(str, p)))
+        p = ids[120]
         w = worker("srv", [{"ids": p, "max_new": 40}, {"ids": p, "max_new": 40, "temp": 1, "top_p": 0.95, "top_k": 20, "seed": 3}])
         g, _ = greedy("sg", "--cache-gb", f"{FEW_GB:.6f}", n=40, prompt=120)
         s, _ = greedy("ss", "--cache-gb", f"{FEW_GB:.6f}", "--temp", "1", "--top-p", "0.95", "--top-k", "20", "--seed", "3", n=40, prompt=120)
@@ -360,6 +362,41 @@ if wanted("presets"):
                 + ("" if not cross else " | front ends differ: " + " || ".join(cross[:6])))
     except Exception as e:
         verdict("presets", "FAIL", str(e)[-400:])
+
+# ---------------------------------------------------------------------------------------------- counters
+STAGES = ["embed", "depth_attn", "message_gates_norms", "attn_proj", "attn_core", "attn_out", "moe_router", "experts", "run_ahead", "wait",
+          "cache_mgmt", "prefetch_hooks", "post_mlp", "head"]
+if wanted("counters"):
+    try:
+        bad, rows = [], []
+        # (one compute thread: a tiny model's token is a fraction of a millisecond, and the clock reads between stages,
+        # about 20 ns each, would otherwise be a visible share of it; on a real model they are 1e-4 of the token)
+        for nm, fl in (("every expert held", ["--cache-gb", f"{ALL_GB:.6f}"]), ("few slots, names, run-ahead", ["--cache-gb", f"{FEW_GB:.6f}", *RT, "--run-ahead", str(K)])):
+            js = dmeng("--prompt-file", os.path.join(T, "ids300.txt"), "--n", "200", "--threads", "1", *fl)
+            st = js["by_stage_ms_per_token"]
+            if list(st) != STAGES + ["sample"]:
+                bad.append(f"{nm}: stage names {list(st)}")
+            tot, ms = sum(st.values()), js["ms_per_token"]
+            ident = js["compute_ms_per_token"] + js["wait_ms_per_token"] + st["run_ahead"] - ms
+            rows.append(f"{nm}: stages {tot / ms:.4f} of the token, compute + wait + run-ahead - time {ident:+.1e} ms")
+            if abs(tot - ms) > 0.01 * ms:
+                bad.append(f"{nm}: stages sum to {tot:.4f} of {ms:.4f} ms")
+            if abs(ident) > 1e-3 * ms:
+                bad.append(f"{nm}: compute + wait + run-ahead != time")
+        # the server's decode statistics: the same stage names, and MB per token equal to dmeng's on the same request
+        p = ids[300][:120]
+        w = worker("cnt", [{"ids": p, "max_new": 60}])
+        dec = w[0]["E"]["json"].get("decode") or {}
+        if list((dec.get("ms_per_step") or {}).keys()) != STAGES:
+            bad.append(f"server stage names {list((dec.get('ms_per_step') or {}).keys())}")
+        js = dmeng("--prompt-file", os.path.join(T, "ids120.txt"), "--n", "60", "--cache-gb", f"{FEW_GB:.6f}", "--prefill-chunk", "512")
+        mb_d, mb_s = js["mb_read_per_token"], dec.get("mb_read_per_step", -1)
+        rows.append(f"MB per token dmeng {mb_d:.4f}, server {mb_s:.4f}")
+        if not (abs(mb_d - mb_s) <= 0.02 * max(mb_d, 1e-9)):
+            bad.append(f"MB per token: dmeng {mb_d} vs server {mb_s}")
+        verdict("counters", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") + "; ".join(rows))
+    except Exception as e:
+        verdict("counters", "FAIL", str(e)[-400:])
 
 json.dump({"family": FAM, "capabilities": caps, "checks": results}, open(os.path.join(OUT, "family_check.json"), "w"), indent=1)
 open(os.path.join(OUT, "family_check.txt"), "w").write("\n".join(lines) + "\n")

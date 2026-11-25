@@ -158,6 +158,7 @@ struct Inkling : Model {
   IState* S = nullptr;
   XBuf xa, xb, xc, xe;
   std::vector<float> h, blk, bank, msg, tmp, lgts, emb, embn, full;
+  std::vector<float> h_pre;  // step(): the hidden state entering the loop, restored at each pass (kept, not allocated per token)
   std::vector<float> taps_;  // [4, H] the draft head's features of the last step (empty: not kept)
   std::vector<float> att_sc;  // [NH, n] the grouped decode attention's scores
   ScreenHead sh;             // the screened head (core): Want::GREEDY / Want::TOPK with the fast_head option
@@ -767,6 +768,7 @@ struct AttnCtx {
   float* att = nullptr;
   int o_chunks = 0;
   std::atomic<int> heads_left{0};
+  std::atomic<int64_t> heads_done_ns{0};  // steady-clock ns when the last head finished (the fused output projection's start)
   // the grouped form (phase_attn_kv): the 3 heads' scores and 1 / z of each KV head, written by its score job
   float* scv = nullptr;  // [NH, n]
   float iz[64];
@@ -894,7 +896,9 @@ void phase_attn(void* p, int, int) {
     for (int k = 0; k < HD; k++) o[k] = acc[k] * sigm(g[k]);
     if (!M.ref && HD % XB == 0)
       for (int j = 0; j < HD / XB; j++) xq_block(M.xe.q, (hh * HD) / XB + j, o + j * XB);
-    if (X.o_chunks) X.heads_left.fetch_sub(1, std::memory_order_release);
+    if (X.o_chunks && X.heads_left.fetch_sub(1, std::memory_order_release) == 1)
+      X.heads_done_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(),
+                            std::memory_order_relaxed);
   }
 }
 
@@ -1054,7 +1058,9 @@ void phase_attn_kv(void* p, int, int) {
       for (int k = 0; k < 64; k++) o[k] = accs[g][k] * sigm(gt[k]);
       if (!M.ref && 64 % XB == 0) xq_block(M.xe.q, (hh * HD + k0) / XB, o);
     }
-    if (X.o_chunks) X.heads_left.fetch_sub(1, std::memory_order_release);
+    if (X.o_chunks && X.heads_left.fetch_sub(1, std::memory_order_release) == 1)
+      X.heads_done_ns.store(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(),
+                            std::memory_order_relaxed);
   }
 }
 
@@ -1277,7 +1283,14 @@ void Inkling::layer(int v, const float* m4) {
   stage_mark(ST_ATTN_CORE);
   core->pool->run_any(grouped ? phase_attn_kv : phase_attn, &X);
   auto t4 = clk::now();
-  T->attn_core += ms_between(t3, t4);  // (with the output projection fused: attention and output projection together)
+  if (fuse_o) {  // the output projection ran in the heads' fork-join: its share (after the last head) is attn_out's
+    const auto th = clk::time_point(std::chrono::duration_cast<clk::duration>(std::chrono::nanoseconds(X.heads_done_ns.load())));
+    const double core_ms = std::min(ms_between(t3, t4), std::max(0.0, ms_between(t3, th)));
+    T->attn_core += core_ms;
+    T->attn_out += ms_between(t3, t4) - core_ms;
+  } else {
+    T->attn_core += ms_between(t3, t4);
+  }
   if (!fuse_o) {
     if (!ref && c.HD % XB != 0) xe.prep(o, QD);
     Job jo = {&W.o, &xe.q, o, att};
@@ -1409,7 +1422,11 @@ void Inkling::step(State& s0, int32_t tok, Want want) {
     layer(v++, nullptr);
   }
   const int nblk_pre = nblk;
-  std::vector<float> h_pre(h);
+  {
+    auto tm = clk::now();  // (the loop's bookkeeping: depth-attention's stage, as the restore at each pass)
+    h_pre.assign(h.begin(), h.end());
+    T->depth += ms_since(tm);
+  }
   const int NC = c.CE - c.CS;
   for (int p = 0; p < c.NP; p++) {
     if (p > 0) {
@@ -2518,16 +2535,16 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
     st->chunks = (int)(n_chunks - c0);
     st->ms = ms_since(t0);
     st->ms_wait = core->cache.st.wait_ms - w0;
-    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / 1048576.0;
+    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     std::ostringstream o;
     // bytes per prompt position: expert records read from the store, expert records and resident matrices the kernels
     // went through (once per sub-chunk each)
     const double np_ = std::max(1, done);
     o << "{\"chunk\":" << sub << ",\"span\":" << span << ",\"spans\":" << spans << ",\"hold_releases\":" << core->n_hold_release << ",\"union_batches\":" << core->n_union_batches
-      << ",\"mb_read\":" << st->mb_read << ",\"expert_mb_touched\":" << (T->bytes_exp - be0) / 1048576.0
-      << ",\"resident_mb_touched\":" << (T->bytes_res - br0) / 1048576.0 << ",\"read_mb_per_pos\":" << st->mb_read / np_
-      << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / 1048576.0 / np_
-      << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / 1048576.0 / np_ << ",\"wait_ms\":" << st->ms_wait;
+      << ",\"mb_read\":" << st->mb_read << ",\"expert_mb_touched\":" << (T->bytes_exp - be0) / MB
+      << ",\"resident_mb_touched\":" << (T->bytes_res - br0) / MB << ",\"read_mb_per_pos\":" << st->mb_read / np_
+      << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / MB / np_
+      << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / MB / np_ << ",\"wait_ms\":" << st->ms_wait;
     if (gpu && (po_gpu > 0 || po_gpu_exp > 0))  // the GPU shares (the 35B's "gpu" account; experts: the NVFP4 layers)
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po_gpu
         << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9

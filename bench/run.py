@@ -288,7 +288,7 @@ def row_of(a, runs_dir, base_meta, refs):
                hit_rate_looped=t.get("hit_rate_looped"), hit_rate_other=t.get("hit_rate_other"),
                misses_per_token=rq.get("misses_per_token"), late_per_token=rq.get("late_per_token"),
                wait_miss_ms_per_token=rq.get("wait_miss_ms_per_token"), wait_late_ms_per_token=rq.get("wait_late_ms_per_token"),
-               drive_gb_s_while_busy=rq.get("drive_gb_s_while_busy"),
+               drive_gb_s_while_busy=(t.get("drive") or {}).get("gb_s_while_busy", rq.get("drive_gb_s_while_busy")),
                top_k_in_named8=named.get("top_k_in_named8"), top_k_in_named12=named.get("top_k_in_named12"),
                top_k_in_named16=named.get("top_k_in_named16"), router_ms_per_token=rt.get("router_ms_per_token", rt.get("ms_per_token")),
                weight_replaced=ap.get("weight_replaced") if ap.get("on") else None,

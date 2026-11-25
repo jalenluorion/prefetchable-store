@@ -302,7 +302,14 @@ void Qwen35::attn_linear(int L, const float* hin, float* rout) {
   }
   core->pool->run(gdn::phase_conv_heads, &X);
   auto t2 = clk::now();
-  T->attn_core += ms_between(t1, t2);  // (fused: the heads and the output projection together)
+  if (X.o_chunks) {  // the output projection ran in the heads' fork-join: its share (after the last head) is attn_out's
+    const auto th = clk::time_point(std::chrono::duration_cast<clk::duration>(std::chrono::nanoseconds(X.heads_done_ns.load())));
+    const double core_ms = std::min(ms_between(t1, t2), std::max(0.0, ms_between(t1, th)));
+    T->attn_core += core_ms;
+    T->attn_out += ms_between(t1, t2) - core_ms;
+  } else {
+    T->attn_core += ms_between(t1, t2);
+  }
   if (!X.quant_heads) {
     xatt.prep(o.data(), ZD);
     Job jo = {&W.o, &xatt.q, nullptr, rout};

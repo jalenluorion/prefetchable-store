@@ -849,7 +849,9 @@ int main(int argc, char** argv) {
   auto& RD = C.cache.rd;
   uint64_t dt0[7] = {0};
   uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0;
+  double fe_ms = 0;  // the front end's per-token work outside the model's step (sampling, records): stage "sample"
   auto reset_stats = [&]() {
+    fe_ms = 0;
     C.reset_stats();
     M->reset_stats();
     rd_busy0 = RD.busy_ns.load();
@@ -877,19 +879,14 @@ int main(int argc, char** argv) {
     auto per = [&](double v) { return v / std::max(1, steps); };
     const Times& T = C.t;
     const uint64_t picks = CS.n_hit + CS.n_late + CS.n_miss;
-    const double comp = tot_ms - T.wait;
+    const double comp = tot_ms - T.wait - T.ra;  // compute: the token's wall time less the wait on reads and the run-ahead
     js << ",\"decode_steps\":" << steps << ",\"decode_s\":" << dec_s << ",\"tok_s\":" << steps / std::max(1e-9, dec_s)
        << ",\"ms_per_token\":" << per(tot_ms) << ",\"ms_per_token_median\":" << med << ",\"compute_ms_per_token\":" << per(comp)
        << ",\"wait_ms_per_token\":" << per(T.wait) << ",\"policy_ms_per_token\":" << per(CS.policy_ms)
-       << ",\"by_stage_ms_per_token\":{\"embed\":" << per(T.embed)
-       << ",\"depth_attn\":" << per(T.depth) << ",\"message_gates_norms\":" << per(T.msg) << ",\"attn_proj\":" << per(T.attn_proj)
-       << ",\"attn_core\":" << per(T.attn_core) << ",\"attn_out\":" << per(T.attn_out) << ",\"moe_router\":" << per(T.router)
-       << ",\"experts\":" << per(T.experts) << ",\"run_ahead\":" << per(T.ra) << ",\"wait\":" << per(T.wait) << ",\"cache_mgmt\":" << per(T.cache)
-       << ",\"prefetch_hooks\":" << per(T.pf) << ",\"post_mlp\":" << per(T.misc) << ",\"head\":" << per(T.head) << "}"
+       << ",\"by_stage_ms_per_token\":{" << T.stages_json(std::max(1, steps)) << ",\"sample\":" << per(fe_ms) << "}"
        << ",\"weight_mb_touched_per_token\":{\"resident\":" << per(T.bytes_res / 1e6) << ",\"experts\":" << per(T.bytes_exp / 1e6) << "}"
        << ",\"mb_read_per_token\":" << per((CS.bytes_urgent + CS.bytes_pf) / 1e6) << ",\"mb_read_urgent_per_token\":" << per(CS.bytes_urgent / 1e6)
        << ",\"mb_read_prefetch_per_token\":" << per(CS.bytes_pf / 1e6)
-       << ",\"read_gb_s_while_busy\":" << (RD.bytes.load() - rd_bytes0) / 1e9 / std::max(1e-9, (RD.busy_wall() - rd_wall0) / 1e9)
        << [&] {  // the drive per token: wall time with no read in flight / exactly one; bytes over the loop's wall time
             uint64_t d1[7];
             RD.depth_times(d1);
@@ -973,7 +970,6 @@ int main(int argc, char** argv) {
          << ",\"spec_inflight_at_urgent_start\":" << (double)(RD.spec_inflight_at_urgent.load() - sau0) / dj(0)
          << ",\"spec_jobs\":" << RD.njobs[1].load() - j0[1] << ",\"spec_queue_ms\":" << (RD.q_ns[1].load() - q0[1]) / 1e6 / dj(1)
          << ",\"spec_service_ms\":" << (RD.svc_ns[1].load() - s0[1]) / 1e6 / dj(1) << ",\"drive_busy_ms_per_token\":" << per(wall)
-         << ",\"drive_gb_s_while_busy\":" << (RD.bytes.load() - rd_bytes0) / 1e9 / std::max(1e-9, wall / 1e3)
          << ",\"drive_depth\":" << (RD.busy_ns.load() - rd_busy0) / 1e6 / std::max(1e-9, wall);
       uint64_t dt1[7];
       RD.depth_times(dt1);
@@ -1086,6 +1082,7 @@ int main(int argc, char** argv) {
       const bool want = (int)p >= a.dump_from || qf || tf || !a.nll_out.empty() || !a.ref_nll.empty();
       auto ts = clk::now();
       M->step(*S, ids[p], want ? Want::LAST : Want::NONE);
+      const double model_ms = ms_since(ts);
       record();
       dump_names();
       if (want) {
@@ -1118,6 +1115,7 @@ int main(int argc, char** argv) {
         }
       }
       step_ms.push_back(ms_since(ts));
+      fe_ms += step_ms.back() - model_ms;
     }
     const double dt = ms_since(t0) / 1000;
     if (df) fclose(df);
@@ -1367,8 +1365,10 @@ int main(int argc, char** argv) {
       }
       auto ts = clk::now();
       int n = 1, acc = 0;
+      double model_ms = -1;
       if (!drafting) {
         M->step(*S, out.back(), want);
+        model_ms = ms_since(ts);
         record();
         dump_names();
         out.push_back(next_tok());
@@ -1382,6 +1382,7 @@ int main(int argc, char** argv) {
         }
       }
       step_ms.push_back(ms_since(ts));
+      if (model_ms >= 0) fe_ms += step_ms.back() - model_ms;  // (drafting: the controller's work is inside the model's passes' time)
       if (ra_ab) ra_ab_n[!C.ra_off] += 1, ra_ab_ms[!C.ra_off] += step_ms.back(), ra_ab_wait[!C.ra_off] += C.t.wait - w0;
       if (bg_arm >= 0) {
         uint64_t d1[7];

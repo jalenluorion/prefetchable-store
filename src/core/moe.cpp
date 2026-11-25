@@ -16,6 +16,18 @@
 
 namespace dm {
 
+std::string Times::stages_json(double n) const {
+  n = n > 0 ? n : 1;
+  char b[640];
+  snprintf(b, sizeof b,
+           "\"embed\":%.4f,\"depth_attn\":%.4f,\"message_gates_norms\":%.4f,\"attn_proj\":%.4f,\"attn_core\":%.4f,\"attn_out\":%.4f,"
+           "\"moe_router\":%.4f,\"experts\":%.4f,\"run_ahead\":%.4f,\"wait\":%.4f,\"cache_mgmt\":%.4f,\"prefetch_hooks\":%.4f,\"post_mlp\":%.4f,"
+           "\"head\":%.4f",
+           embed / n, depth / n, msg / n, attn_proj / n, attn_core / n, attn_out / n, router / n, experts / n, ra / n, wait / n, cache / n, pf / n,
+           misc / n, head / n);
+  return b;
+}
+
 constexpr int MAXK = 16;
 
 // ------------------------------------------------------------------------------------------------ approximate presets

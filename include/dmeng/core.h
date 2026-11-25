@@ -69,12 +69,19 @@ struct MoeView {
 };
 
 // Stage times (ms) and weight bytes traversed, accumulated; the models add theirs to the same counters.
+// One megabyte in every counter the engine prints (MB = 10^6 bytes; GB = 10^9), every front end and family alike
+constexpr double MB = 1e6;
+
 struct Times {
   double embed = 0, attn_proj = 0, attn_core = 0, attn_out = 0, depth = 0, msg = 0, router = 0, experts = 0, wait = 0,
          cache = 0, pf = 0, head = 0, misc = 0;
   double ra = 0;  // run-ahead (Core::ra_predict) inside the MoE steps' expert sections: out of `experts`, which it used to inflate
   double bytes_res = 0, bytes_exp = 0;
   void zero() { *this = Times(); }
+  // the stages, ms per token (divided by n), under the one set of names every front end prints (dmeng's
+  // by_stage_ms_per_token, the server's and the C API's decode statistics); the same work has the same name in every
+  // family (the output projection is attn_out also where it runs fused with the attention's heads)
+  std::string stages_json(double n) const;
 };
 
 // Approximate mode (opt-in): a released pick that is not in memory may be replaced by the released router's next-ranked

@@ -227,7 +227,7 @@ std::string PrefillCounters::json() const {
   s
     << ",\"mean_union_per_layer\":" << (double)union_sum / std::max<uint64_t>(1, layer_units) << ",\"hits\":" << hits << ",\"late\":" << late << ",\"misses\":" << misses
     << ",\"named\":" << named << ",\"named_used\":" << named_used << ",\"named_unused\":" << named_unused << ",\"used_not_named\":" << used_not_named
-    << ",\"mb_read\":" << bytes_read / 1048576.0 << "}";
+    << ",\"mb_read\":" << bytes_read / MB << "}";
   return s.str();
 }
 
@@ -1070,7 +1070,7 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
     st->chunks = (int)P->k.chunks;
     st->ms = P->k.ms_total;
     st->ms_wait = P->k.ms_wait;
-    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / 1048576.0;
+    st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     st->json = P->k.json();
   }
   if (po.release) {  // the scratch back to the system (re-created by the next prefill)

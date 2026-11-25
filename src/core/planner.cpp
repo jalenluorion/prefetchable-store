@@ -414,8 +414,8 @@ std::string Planner::stats_json(Core&, int ntk) {
   const double nt = std::max(1, ntk), tk = std::max(1.0, ntok);
   o << "{\"router_ms_per_token\":" << t_ms / nt << ",\"u\":" << u << ",\"budget\":" << (budget_on ? "true" : "false")
     << ",\"tau_long\":" << tau_long << ",\"tau_fixed\":" << tau_fixed << ",\"pin_p\":" << pin_p << ",\"revoke\":" << (revoke_on ? "true" : "false")
-    << ",\"revoke_p\":" << revoke_p << ",\"allow_mb_per_token\":" << sum_allow / tk / 1048576.0 << ",\"bw_gb_s\":" << sum_bw / tk / 1e9
-    << ",\"comp_ms_est\":" << sum_comp / tk << ",\"urgent_mb_est\":" << sum_urg / tk / 1048576.0 << ",\"budget_mode\":" << budget_mode
+    << ",\"revoke_p\":" << revoke_p << ",\"allow_mb_per_token\":" << sum_allow / tk / MB << ",\"bw_gb_s\":" << sum_bw / tk / 1e9
+    << ",\"comp_ms_est\":" << sum_comp / tk << ",\"urgent_mb_est\":" << sum_urg / tk / MB << ",\"budget_mode\":" << budget_mode
     << ",\"thr_law_mean\":" << sum_thr / tk << ",\"drive_load_mean\":" << sum_rho / tk << ",\"t_miss_ms_mean\":" << sum_tmiss / tk << ",\"nets\":[";
   for (size_t k = 0; k < nets.size(); k++) {
     Net& n = *nets[k];

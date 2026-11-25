@@ -96,7 +96,7 @@ The wall-clock columns follow. A wall-clock figure is marked `!` when the others
 | mem | `P`: page reclaims above 1.5x the least of the runs at the same cache size. This means memory pressure: pages faulted back in on the run's own threads, so kernel work lands inside the counters. Treat those counts as suspect. | counting run, `time -l` |
 | ids | the token ids compared with the prompt's reference. The reference is the first lossless cell at the first cache size, repetition 1, or `--ref-ids PROMPT=FILE`. `same` / `DIFF` / `ref`. `/c!` means the counting run's ids differ. `apx` marks an approximate cell, whose ids are not expected to match. | `.ids` |
 | tok/s | decode tokens per second | timed run JSON `tok_s` |
-| comp ms/tok | `compute_ms_per_token` (time per token minus waiting on reads) | timed run |
+| comp ms/tok | `compute_ms_per_token` (time per token minus waiting on reads and minus the run-ahead) | timed run |
 | wait ms/tok | `wait_ms_per_token` (waiting on expert reads) | timed run |
 | MB/tok | `mb_read_per_token`, in 1e6 bytes | timed run |
 | peak GB | peak memory footprint from `time -l` (the guard's own sample if that is missing), in 1e9 bytes | guard |
@@ -107,7 +107,7 @@ The wall-clock columns follow. A wall-clock figure is marked `!` when the others
 `results.jsonl` and `results.csv` have one row per cell run, with more fields:
 
 - the timed run's `hit_rate`, `late_rate`, `miss_rate` and `hit_rate_looped` / `hit_rate_other`;
-- from `read_queue`: `misses_per_token`, `late_per_token`, `wait_miss_ms_per_token` and `drive_gb_s_while_busy`;
+- from `read_queue`: `misses_per_token`, `late_per_token`, `wait_miss_ms_per_token`; from `drive`: `gb_s_while_busy` (the one drive rate: reader bytes / wall time with a read in flight);
 - the routers' `top_k_in_named8/12/16` and `router_ms_per_token`;
 - the approx cells' `weight_replaced`, `steps_with_a_replacement`, `weight_read_now` and `bg_per_token`;
 - from `draft`, when it is used: `tokens_per_step`, `accepted` and `offered`;
