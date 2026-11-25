@@ -17,6 +17,7 @@
 #include "dmeng/kernels_batch.h"
 #include "qwen3_5_moe.h"
 #include "../common/gated_attn.h"
+#include "../../core/gpu_half.h"
 
 namespace dm {
 namespace qwen35 {
@@ -53,6 +54,7 @@ struct Proj {
   float* Y;
   size_t ldy;
 };
+static GpuHalf* g_fast = nullptr;  // the fast prompt path's half-precision products (PrefillOpts::fast in fast mode; opt-in here)
 void run_proj(Pool& pool, GpuGemm* gpu, double frac, const XQB& x, const float* xf, size_t ldx, int n, std::initializer_list<Proj> ps,
               GpuSplitAcct* acct) {
   static thread_local std::vector<std::vector<float*>> outs;
@@ -69,6 +71,7 @@ void run_proj(Pool& pool, GpuGemm* gpu, double frac, const XQB& x, const float* 
     for (int i = 0; i < n; i++) o[i] = q.Y + (size_t)i * q.ldy;
     J.push_back({q.m, n, nullptr, fx.data(), o.data(), &x});
   }
+  if (g_fast && run_rows_n_half(pool, g_fast, J.data(), (int)J.size(), 64, nullptr)) return;
   run_rows_n_split(pool, gpu, frac, J.data(), (int)J.size(), 64, false, nullptr, acct);
 }
 
@@ -545,10 +548,12 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       Co.span_next = L + 1;
       Co.span_next_router = names == 2;
     }
-    Co.moe_gpu = Ge;
+    Co.moe_gpu = g_fast ? nullptr : Ge;
     Co.moe_gpu_frac = o.gpu_experts;
+    Co.moe_half = g_fast;
     Co.moe_chunk(L, n, xm.data(), ym.data(), Mo.views[L], Mo.px.record ? Pk.data() : nullptr, nullptr, (int)s0);
     Co.moe_gpu = nullptr;
+    Co.moe_half = nullptr;
     auto tcmb = clk::now();
     stage_mark(ST_MOE_COMBINE);
     pfor(pool, n, [&](int i) {
@@ -634,6 +639,17 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
   P->k.gpu_frac_experts = po.gpu_experts;
   // per-layer caps would refuse the next layer's early names (names never borrow past a cap): off for the pass
   Cache::CapsOff caps_off(core->cache);
+  // the fast prompt path (opt-in for this family: prefill_fast=1; fast mode only): the products and the experts in half
+  // precision on the GPU (dmeng/prefill.h); attention and the DeltaNet stay on this pass's own paths
+  if (po.fast && core->ns.on && !gpu.half()) {
+    bool handled = false;
+    std::string e;
+    if (!prefill_option("prefill_fast", "1", po, gpu, R.base, R.size, core, handled, e)) fprintf(stderr, "dmeng: the fast prompt path is off (%s)\n", e.c_str());
+  }
+  struct FastOn {
+    explicit FastOn(GpuHalf* h) { g_fast = h; }
+    ~FastOn() { g_fast = nullptr; }
+  } fast_on(po.fast && core->ns.on && !tbt ? gpu.half() : nullptr);
   PrefillOpts o = po;
   if (tbt) o.span = 1;  // batched_always with the decode path's conditions: the batched code one position per pass
   const bool ok = prefill_spans(*core, n, caps, cancel, o, [&](int done, int m, bool last, const std::vector<int>& cap_rel) {

@@ -202,6 +202,9 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
   for (int L = 0; L < NL; L++) {
     const Lw& W = lw[L];
     if (core->cache.budget_req.load(std::memory_order_relaxed) >= 0) core->cache.apply_budget();
+    // the fast path names this layer whole at its start (its attention runs while the records are read): the names the
+    // layer before gave it were mostly refused, the cache holding that layer's pinned union
+    if (GH && names == 1) core->span_name(L);
     for (size_t bi = 0, s0 = 0; bi < bnd.size(); s0 = bnd[bi++]) {
       const int i0 = (int)s0, m = bnd[bi] - i0, pos0 = S->pos + i0;
       GpuGemm* const G = G0 && m >= po.gpu_min ? G0 : nullptr;
