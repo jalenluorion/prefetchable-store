@@ -794,7 +794,66 @@
    },
    "otherwise": "left out",
    "substitute": false,
-   "renormalise": false
+   "renormalise": false,
+   "calibration": {
+    "measured": "base M4 16 GB, 3.2 GB cache, routers top 4, run-ahead on; exact mode's own 160-token answer to the reference prompt fed back (teacher forcing): per rule and parameter the bytes read per token, the routing weight left out per step (mean) and the top choice's agreement with exact mode over the 160 answer positions (about +-0.02)",
+    "drop_rule_eps": [
+     {
+      "eps": 0.05,
+      "mb_per_token": 628,
+      "left_out": 0.011,
+      "top1_agree": 0.963
+     },
+     {
+      "eps": 0.13,
+      "mb_per_token": 462,
+      "left_out": 0.089,
+      "top1_agree": 0.95
+     },
+     {
+      "eps": 0.25,
+      "mb_per_token": 315,
+      "left_out": 0.184,
+      "top1_agree": 0.919
+     },
+     {
+      "eps": 0.5,
+      "mb_per_token": 214,
+      "left_out": 0.287,
+      "top1_agree": 0.856
+     }
+    ],
+    "replace_rule_read_w": [
+     {
+      "read_w": "never",
+      "mb_per_token": 492,
+      "left_out": 0.111,
+      "top1_agree": 0.938
+     },
+     {
+      "read_w": 0.3,
+      "mb_per_token": 493,
+      "left_out": 0.116,
+      "top1_agree": 0.925
+     },
+     {
+      "read_w": 0.15,
+      "mb_per_token": 497,
+      "left_out": 0.1,
+      "top1_agree": 0.931
+     }
+    ],
+    "old_runner_settings": {
+     "rule": "replace, never read on the spot, names top 10, no run-ahead",
+     "mb_per_token": 707,
+     "left_out": 0.14,
+     "top1_agree": 0.881
+    },
+    "exact": {
+     "mb_per_token": 667
+    },
+    "reading": "the drop rule is at or above the replace rule's agreement at fewer bytes everywhere measured; eps 0.13 is the knee (0.05 -> 0.13: -26% bytes for -1.3 points; 0.13 -> 0.25: -32% bytes for -3.1 points)"
+   }
   }
  },
  "profiles": {

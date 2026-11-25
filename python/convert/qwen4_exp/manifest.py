@@ -144,6 +144,9 @@ FAST_DEF = ("The model's own router still picks. The picked experts that are not
             "those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation). "
             "A light pick whose read is in flight is not waited for. Router names are on.")
 NAMES_M = 4
+# the frontier behind eps = 0.13, measured on the real model (2026-11-25)
+FAST_CAL = {"measured": "base M4 16 GB, 3.2 GB cache, routers top 4, run-ahead on; exact mode's own 160-token answer to the reference prompt fed back (teacher forcing): per rule and parameter the bytes read per token, the routing weight left out per step (mean) and the top choice's agreement with exact mode over the 160 answer positions (about +-0.02)", "drop_rule_eps": [{"eps": 0.05, "mb_per_token": 628, "left_out": 0.011, "top1_agree": 0.963}, {"eps": 0.13, "mb_per_token": 462, "left_out": 0.089, "top1_agree": 0.95}, {"eps": 0.25, "mb_per_token": 315, "left_out": 0.184, "top1_agree": 0.919}, {"eps": 0.5, "mb_per_token": 214, "left_out": 0.287, "top1_agree": 0.856}], "replace_rule_read_w": [{"read_w": "never", "mb_per_token": 492, "left_out": 0.111, "top1_agree": 0.938}, {"read_w": 0.3, "mb_per_token": 493, "left_out": 0.116, "top1_agree": 0.925}, {"read_w": 0.15, "mb_per_token": 497, "left_out": 0.1, "top1_agree": 0.931}], "old_runner_settings": {"rule": "replace, never read on the spot, names top 10, no run-ahead", "mb_per_token": 707, "left_out": 0.14, "top1_agree": 0.881}, "exact": {"mb_per_token": 667}, "reading": "the drop rule is at or above the replace rule's agreement at fewer bytes everywhere measured; eps 0.13 is the knee (0.05 -> 0.13: -26% bytes for -1.3 points; 0.13 -> 0.25: -32% bytes for -3.1 points)"}
+
 m = {
     "format": "moved-store", "format_version": "1.0", "family": "qwen4_exp", "name": a.name,
     "source": {"repo": a.repo, "revision": None, "license": "qwen-community-1.0", "license_file": "LICENSE"},
@@ -181,7 +184,7 @@ m = {
     "drafting": {"cost_prior": None, "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it"},
     "modes": {"exact": {"definition": f"Generated tokens never depend on the cache, the routers or timing: the model's own router picks {K} experts per layer and the engine waits for every one.",
                         "engine": "lossless"},
-              "fast": {"definition": FAST_DEF, "engine": "approx:drop:w=0.13:mass=0.13:late=-1",
+              "fast": {"definition": FAST_DEF, "engine": "approx:drop:w=0.13:mass=0.13:late=-1", "calibration": FAST_CAL,
                        "read_if": {"missing_routing_weight_over": 0.13, "order": "heaviest missing pick first"}, "otherwise": "left out", "substitute": False, "renormalise": False}},
     "profiles": {},
     "defaults": {"routers": [], "names": {"rule": "top", "m": NAMES_M}, "cross_token": None, "eviction": "auto", "layer_caps": "none", "drafts": False},
