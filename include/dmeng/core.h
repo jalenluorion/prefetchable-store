@@ -45,9 +45,6 @@ struct ModelInfo {
   std::string caps_json() const {
     return std::string("{\"verify\":") + (has_verify ? "true" : "false") + ",\"ref_path\":" + (has_ref_path ? "true" : "false") + "}";
   }
-  // Core::moe_chunk runs a union larger than the cache in batches (phone sizes): the pools' run-time floor (min_cap) is
-  // then one step's pins (2K + 2), not a prefill layer's union (Inkling, Flash-Next; the 35B: an option, union_batches)
-  bool union_batches = false;
   // Core::moe_chunk computes this model's affine records (4-bit experts, the 8-bit shared expert) with the packed batched
   // kernels (gemm_aff4_i16 / gemm_aff8_i16, inputs a multiple of 256) from PACK_MIN users and gives the GPU its share of
   // them (moe_gpu): the same bits as the multi-vector path. Off: the multi-vector path
@@ -257,10 +254,9 @@ class Core {
   }
 
   bool init(const ModelInfo& info, const CoreOpts& opts, const std::string& dir, std::string& err);
-  // the engine's own options for every family: union_batches 0|1 (the pools' floor, ModelInfo::union_batches),
-  // chunk_aff4 0|1 (moe_chunk's packed affine kernels, ModelInfo::chunk_aff4); a model passes on the names it does not know
+  // the engine's own options for every family: chunk_aff4 0|1 (moe_chunk's packed affine kernels, ModelInfo::chunk_aff4);
+  // a model passes on the names it does not know
   bool set_option(const std::string& name, const std::string& value, std::string& err);
-  void set_union_batches(bool on);
   // per token: the model calls token_start before its first MoE step and token_end after its last
   void token_start(int position, int tok, const float* router_emb);
   void moe_step(int step, const float* x, float* y, const MoeView& v);

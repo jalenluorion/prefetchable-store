@@ -45,6 +45,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "fast": {
     "engine": "approx:drop"
+   },
+   "fast-eps": {
+    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
    }
   },
   "prefill": {
@@ -151,6 +154,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "fast": {
     "engine": "approx:drop"
+   },
+   "fast-eps": {
+    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
    }
   },
   "prefill": {

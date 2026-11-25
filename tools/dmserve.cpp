@@ -158,7 +158,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
   --mode exact|fast|lossless|approx[:PRESET]   default: the profile's
   --drafts 0|1           1 = --draft lookup --early 4 (as in dmeng); default: the profile's (off)
   --print-defaults       print the resolved profile defaults as JSON and exit
-  --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: union_batches, chunk_aff4, prefill_*)
+  --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)
 model and memory
   --resident F --family F --ctx N (33792) --threads N (8) --readers N (4) --mem plain|mlock --res-mem plain|mlock
   --kv-plan N            positions of per-position state the automatic cache plans for at start (4096); past them the
@@ -440,7 +440,7 @@ int main(int argc, char** argv) {
             "usage: dmserve --model DIR [--resident F] [options]\n"
             "  prefix cache: --ckpt-gb G (checkpoints in memory, default %.2f) --park-gb G (parked sequences, default %.2f)\n"
             "                --disk DIR --disk-gb G (default %.1f)\n"
-            "  draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed): --draft none|lookup|fixed (default none),\n"
+            "  draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed): --draft none|lookup|fixed|head|both (default none; head, both: the model's own draft head),\n"
             "                --draft-max N (7), --early N (name the copied positions' experts N positions ahead; 0 = off),\n"
             "                --probe-every N (48)\n",
             SessionOptions().ckpt_gb, SessionOptions().park_gb, SessionOptions().disk_gb);
@@ -646,12 +646,25 @@ int main(int argc, char** argv) {
   PrefixCache pc(lm, a.s);
   // draft and verify (greedy requests): the shared drafter over the session (prompt + everything generated), plus the
   // request's tool-call fragments; with --early it keeps every position's released picks for early names
-  if (a.draft != "none" && a.draft != "lookup" && a.draft != "fixed") {
-    fprintf(stderr, "--draft none|lookup|fixed\n");
+  if (a.draft != "none" && a.draft != "lookup" && a.draft != "fixed" && a.draft != "head" && a.draft != "both") {
+    fprintf(stderr, "--draft none|lookup|fixed|head|both\n");
     return 2;
   }
+  // a model's own draft head (head: alone, both: beside the lookup drafts), as dmeng --draft head|both; a family without
+  // one refuses it (its set_option does not know draft_head)
+  HeadSource hs;
+  if (a.draft == "head" || a.draft == "both") {
+    std::string e;
+    if (!M->set_option("draft_ctx", std::to_string(a.ctx), e) || !M->set_option("draft_head", "1", e)) {
+      fprintf(stderr, "draft head: %s\n", e.c_str());
+      return 1;
+    }
+    hs.M = M.get();
+  }
   Drafter dr;
-  dr.o.mode = a.draft;
+  dr.o.mode = a.draft == "head" || a.draft == "both" ? "lookup" : a.draft;
+  dr.o.lookup = a.draft != "head";
+  if (hs.M) dr.extra.push_back(&hs);
   dr.o.max = a.draft_max;
   dr.o.early = a.early;
   dr.o.probe_every = a.probe_every;
