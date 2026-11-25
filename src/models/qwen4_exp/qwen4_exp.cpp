@@ -266,6 +266,7 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
   mi.layer_file = c.layer_file;
   mi.has_ref_path = true;
   mi.union_batches = true;  // every multi-position MoE goes through Core::moe_chunk
+  mi.has_verify = true;     // the multi-position verify pass (prefill.cpp: the span's layer-major pass with rollback)
   mi.chunk_aff4 = true;     // ... with the packed 4-bit kernels and the GPU's share of the experts
   views.resize(c.NL);
   for (int L = 0; L < c.NL; L++) {
@@ -1013,6 +1014,7 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
     fast_head = true;
     return true;
   }
+  if (name == "verify_old") return true;  // (the 35B's previous verify pass, for A/B: this family has one pass)
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;
   if (name == "prefill_chunk") return (po.chunk = std::max(1, std::stoi(value))), true;  // 1: single steps
   if (name == "prefill_span") return (po.span = std::max(1, std::stoi(value))), true;
@@ -1025,6 +1027,7 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
   if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), true, err);
   if (name == "prefill_gpu_min") return (po.gpu_min = std::max(1, std::stoi(value))), true;
   if (name == "prefill_gpu_kernel") return (po.gpu_kernel = std::stoi(value) != 0), true;
+  if (name == "prefill_scratch_mb") return (po.scratch_mb = std::max(16.0, std::stod(value))), true;
   if (name == "prefill_release") return (po.release = std::stoi(value) != 0), true;
   if (!core) return (err = "unknown option " + name + " (or bind the model first)"), false;
   return core->set_option(name, value, err);  // the engine's own options (Core::set_option)
@@ -1040,6 +1043,7 @@ std::string Flash::stats_json(int ntok) const {
     const double nc = std::max(1.0, sh.n_calls);
     o << ",\"fast_head\":{\"candidates_per_token\":" << sh.n_cand / nc << ",\"coarse_ms\":" << sh.ms_coarse / nc << ",\"exact_ms\":" << sh.ms_exact / nc << "}";
   }
+  if (V) o << ",\"verify\":" << verify_json();
   o << "}";
   return o.str();
 }

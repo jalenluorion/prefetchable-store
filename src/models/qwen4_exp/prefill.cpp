@@ -38,7 +38,40 @@ struct Flash::Span {
   }
 };
 
+// A verify pass (Flash::verify): the span's own layer-major arithmetic over n <= TMAX positions, with what a rollback needs.
+// The Gated DeltaNet: the committed state (A, the model state) is only read; the pass writes the state after its
+// positions into B (the convolution channel by channel, the heads head by head, each over the positions in order, with the
+// decode path's functions: gdn::conv_channel_io / head_io with the input and output buffers apart). commit(n) swaps A and
+// B (no copy); commit(a < n) rebuilds B from A for positions 0..a-1 (the conv rows are the kept projections, the heads run
+// again on the kept convolved inputs, state only) and swaps. The PLE's convolution state (small) is copied at the pass's
+// start and moved again by the kept positions' inputs. QSA's keys, values and pooled blocks are append-only: a
+// rolled-back position's entries are written again when it runs again. Every kept position's state bits and logits are a
+// single step's.
+struct Flash::Ver {
+  int n = 0, pos0 = 0;
+  bool live = false;
+  Want want = Want::LAST;
+  std::vector<std::vector<float>> altc, alts;  // [NL] Gated DeltaNet layers: B (conv state, recurrent state)
+  std::vector<std::vector<float>> gp, cvp;     // [NL] Gated DeltaNet layers: [TMAX][PW] projections, [TMAX][C] convolved
+  std::vector<float> pconv0, ple_in;           // the PLE's conv state at the pass's start; its inputs [TMAX][N]
+  int32_t hist[TMAX + 2] = {0};                // the n-gram history: the two ids before the pass, then the pass's ids
+  std::vector<float> embs, fx, lg;             // [TMAX][H] embeddings, [TMAX][H] final mixer outputs, [TMAX][V] logits
+  std::vector<XBuf> xh;
+  XQB qh;
+  long steps = 0, positions = 0, rollbacks = 0;
+  double ms_rollback = 0;
+};
+
 size_t Flash::span_bytes() const { return sp ? sp->bytes() : 0; }
+
+// bytes of a sub-chunk's scratch per position (Span's per-position buffers and input buffers, as span_run sizes them)
+double Flash::sub_bytes_per_pos() const {
+  const double N = c.N(), H = c.H, PW = std::max((size_t)c.conv_dim() + c.NVH * c.DV + 2 * c.NVH,
+                                                    (size_t)2 * c.NQ * c.HD + 2 * c.NKV * c.HD + (c.IXH + 1) * c.IXD + 2 * c.NQ * c.HD);
+  const double floats = 6 * N + 3 * H + c.LOW + 3 * 64 + PW + c.conv_dim() + std::max(c.NVH * c.DV, c.NQ * c.HD) + c.ple_dim;
+  const int ka = std::max(c.N(), c.H), kc = std::max({c.ple_dim, c.NVH * c.DV, c.NQ * c.HD});
+  return 4 * floats + xq_bytes(ka) + xq_bytes(c.LOW) + xq_bytes(kc) + 2.0 * 4 * ka;
+}
 
 static size_t proj_width(const FCfg& c) {
   return std::max((size_t)c.conv_dim() + c.NVH * c.DV + 2 * c.NVH,
@@ -46,8 +79,8 @@ static size_t proj_width(const FCfg& c) {
 }
 
 bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vector<int>* capture, const LM::StateSink* sink,
-                     const std::atomic<bool>* cancel, const PrefillProgress* progress, int prog_base, int prog_total) {
-  const int H = c.H, N = c.N(), NL = c.NL, sub = std::max(1, std::min(po.chunk, n));
+                     const std::atomic<bool>* cancel, const PrefillProgress* progress, int prog_base, int prog_total, Ver* ver) {
+  const int H = c.H, N = c.N(), NL = c.NL, sub = ver ? n : std::max(1, std::min(po.chunk, n));
   Pool& pool = *core->pool;
   if (!sp) sp = std::make_shared<Span>();
   Span& P = *sp;
@@ -88,14 +121,16 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
     P.gated.resize(w * N);
     P.normed.resize(w * N);
     P.pout.resize(w * N);
-    const int kmax = std::max({N, H, c.ple_dim, c.LOW, c.NVH * c.DV, c.NQ * c.HD});
+    // each per-position input buffer at the widest input it takes: xa the mixers' norms (N) and the mixers' outputs (H),
+    // xb the mixers' low rank (LOW), xc the PLE rows and the attention outputs
+    const int ka = std::max(N, H), kc = std::max({c.ple_dim, c.NVH * c.DV, c.NQ * c.HD});
     while ((int)P.xa.size() < wmax) {
       P.xa.emplace_back();
-      P.xa.back().init(kmax, prec);
+      P.xa.back().init(ka, prec);
       P.xb.emplace_back();
-      P.xb.back().init(kmax, prec);
+      P.xb.back().init(c.LOW, prec);
       P.xc.emplace_back();
-      P.xc.back().init(kmax, prec);
+      P.xc.back().init(kc, prec);
     }
     P.sel.resize(wmax);
     P.sub_cap = wmax;
@@ -119,7 +154,12 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
       rows.row(ids[i], e.data());
       for (int s = 0; s < c.HC; s++) std::memcpy(P.hyp.data() + (size_t)i * N + (size_t)s * H, e.data(), sizeof(float) * H);
       if (i + 1 == n) std::copy(e.begin(), e.end(), emb.begin());  // the routers' `emb` of the last position (as a step leaves it)
+      if (ver) std::copy(e.begin(), e.end(), ver->embs.begin() + (size_t)i * H);
     }
+  }
+  if (ver) {  // what a rollback needs: the PLE's conv state and the n-gram history at the pass's start
+    ver->pconv0 = S->pconv;
+    for (int i = 0; i < n + 2; i++) ver->hist[i] = P.hist[i];
   }
   T->embed += ms_since(t0);
   if (cancel && multi) {  // a cancel inside the span puts the fixed state back here
@@ -128,6 +168,11 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
   }
   core->pos = S->pos;
   Cache::CapsOff caps_off(core->cache);  // a span names the next layer's union: caps off for the pass
+  if (ver) {  // names inside a verify pass (the routers read the embeddings now, before the layers)
+    const float* es[TMAX];
+    for (int i = 0; i < n; i++) es[i] = ver->embs.data() + (size_t)i * H;
+    core->chunk_start(n, ids, es);
+  }
   core->span_mode = multi;
   Cache::ChunkClock span_clock(core->cache, core->tok_clock + n - 1);  // the whole span is one token to the policy
   const bool names = multi && po.names && n >= po.whole_from;
@@ -143,7 +188,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
     for (size_t bi = 0, s0 = 0; bi < bnd.size(); s0 = bnd[bi++]) {
       const int i0 = (int)s0, m = bnd[bi] - i0, pos0 = S->pos + i0;
       GpuGemm* const G = G0 && m >= po.gpu_min ? G0 : nullptr;
-      const bool packed = packed_ok && m >= 6;
+      const bool packed = packed_ok && m >= (ver ? 2 : 6);  // (the same bits either way; a verify pass packs from 2, as the 35B's)
       auto hp = [&](int i) { return P.hyp.data() + (size_t)(i0 + i) * N; };
       // inputs into per-position XBufs (and the packed batch): x[i] (K values) -> xs[i], qb
       auto quant = [&](std::vector<XBuf>& xs, XQB* qb, const float* base, size_t stride, int K) {
@@ -163,6 +208,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
       };
       // ---- a GatedResidual over the sub-chunk: mixed [m][H] into mixo, inj [m][64] into injo (null: the final mixer)
       auto hc_chunk = [&](const HCw& w, float* mixo, float* injo) {
+        const auto th = clk::now();
         parallel_for(pool, m, [&](int i) { hc_norm(w, hp(i), P.nrm.data() + (size_t)i * N); });
         quant(P.xa, &P.qa, P.nrm.data(), N, N);
         inputs(P.xa, P.nrm.data(), N);
@@ -179,8 +225,10 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
           hc_mix(P.nrm.data() + (size_t)i * N, P.up.data() + (size_t)i * N, injo ? P.r.data() + (size_t)i * 64 : nullptr, mixo + (size_t)i * H,
                  injo ? injo + (size_t)i * 64 : nullptr);
         });
+        T->msg += ms_since(th);  // the hyper-connection mixers: their own stage, as in decode
       };
       auto inject = [&](const float* yv, const float* ij) {  // h_s += inj_s * y, per position
+        const auto tj = clk::now();
         parallel_for(pool, m, [&](int i) {
           float* h = hp(i);
           const float* yy = yv + (size_t)i * H;
@@ -188,6 +236,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
           for (int s = 0; s < c.HC; s++)
             for (int k = 0; k < H; k++) h[(size_t)s * H + k] = __builtin_fmaf(yy[k], jj[s], h[(size_t)s * H + k]);
         });
+        T->misc += ms_since(tj);
       };
       // ---- the PLE
       if (W.ple) {
@@ -218,19 +267,24 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
           const float* po_ = P.pout.data() + (size_t)i * N;
           for (int k = 0; k < N; k++) h[k] = h[k] + po_[k];
         });
+        if (ver) ver->ple_in.assign(P.normed.begin(), P.normed.begin() + (size_t)m * N);  // the conv's inputs (a rollback moves the state by them)
         T->misc += ms_since(tp);
         if (captured(bnd[bi])) (*sink)(S->pos + bnd[bi], fixed_ple, S->pconv.data(), S->pconv.size() * 4);
       }
       // ---- the mixer
+      stage_mark(ST_NORMQ);
+      hc_chunk(W.ahc, P.mix.data(), P.inj1.data());
       auto ta = clk::now();
       stage_mark(ST_ATTN_PROJ);
-      hc_chunk(W.ahc, P.mix.data(), P.inj1.data());
       quant(P.xa, &P.qa, P.mix.data(), H, H);
       inputs(P.xa, P.mix.data(), H);
       if (W.lin) {
         const int C = c.conv_dim(), ZD = c.NVH * c.DV;
+        // a verify pass keeps its projections and convolved inputs per layer (a rollback replays the state from them)
+        float* const PJ = ver ? ver->gp[L].data() : P.proj.data();
+        float* const CV = ver ? ver->cvp[L].data() : P.cv.data();
         for (int i = 0; i < m; i++) {
-          float* pr = P.proj.data() + (size_t)i * PW;
+          float* pr = PJ + (size_t)i * PW;
           o1[i] = pr, o2[i] = pr + C, o3[i] = pr + C + ZD, o4[i] = pr + C + ZD + c.NVH;
         }
         const XQB* pa = packed ? &P.qa : nullptr;
@@ -240,22 +294,28 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
         auto tb = clk::now();
         T->attn_proj += ms_between(ta, tb);
         stage_mark(ST_ATTN_CORE);
+        // the state read from (cin, Sin) for the first position and written to (cout, Sout): the model state itself, or, in a
+        // verify pass, the committed state read only and the second buffers written
         float* cst = S->ls[L].conv.data();
+        const float* cin = cst;
+        float* cout = ver ? ver->altc[L].data() : cst;
         const int CK = c.CK, CB = 256;
         parallel_for(pool, (C + CB - 1) / CB, [&](int b) {  // the convolution: channel blocks, positions in order
           for (int i = 0; i < m; i++) {
-            const float* qkv = P.proj.data() + (size_t)i * PW;
-            float* cv = P.cv.data() + (size_t)i * C;
-            for (int ch = b * CB; ch < std::min(C, b * CB + CB); ch++) cv[ch] = gdn::conv_channel(cst, W.g.conv + (size_t)ch * CK, qkv[ch], C, CK, ch);
+            const float* qkv = PJ + (size_t)i * PW;
+            float* cv = CV + (size_t)i * C;
+            for (int ch = b * CB; ch < std::min(C, b * CB + CB); ch++)
+              cv[ch] = gdn::conv_channel_io(i == 0 ? cin : cout, cout, W.g.conv + (size_t)ch * CK, qkv[ch], C, CK, ch);
           }
         });
-        float* Sst = S->ls[L].S.data();
-        parallel_for(pool, c.NVH, [&](int h) {  // the heads: head by head, positions in order (gdn::head, as decode)
-          float* Sh = Sst + (size_t)h * c.DV * c.DK;
+        const float* Sin = S->ls[L].S.data();
+        float* Sst = ver ? ver->alts[L].data() : S->ls[L].S.data();
+        parallel_for(pool, c.NVH, [&](int h) {  // the heads: head by head, positions in order (gdn::head_io, as decode)
+          const size_t hb = (size_t)h * c.DV * c.DK;
           for (int i = 0; i < m; i++) {
-            const float* pr = P.proj.data() + (size_t)i * PW;
-            gdn::head(gd, W.g, Sh, P.cv.data() + (size_t)i * C, pr + C + h * c.DV, pr[C + ZD + h], pr[C + ZD + c.NVH + h], h,
-                      P.att.data() + (size_t)i * ZD + h * c.DV);
+            const float* pr = PJ + (size_t)i * PW;
+            gdn::head_io(gd, W.g, (i == 0 ? Sin : Sst) + hb, Sst + hb, CV + (size_t)i * C, pr + C + h * c.DV, pr[C + ZD + h], pr[C + ZD + c.NVH + h], h,
+                         P.att.data() + (size_t)i * ZD + h * c.DV);
           }
         });
         auto tc = clk::now();
@@ -327,6 +387,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
       core->moe_chunk(L, m, xm.data(), ym.data(), views[L], nullptr, nullptr, i0);
       core->moe_gpu = nullptr;
       inject(P.y.data(), P.inj2.data());
+      if (ver && L + 1 == NL) hc_chunk(fin, ver->fx.data(), nullptr);  // every position's final mixer (step()'s hc_step, batched)
       if (bi == 0 && names && L + 1 < NL) core->span_name(L + 1);  // behind this layer's own reads
       if (L == 0 && captured(bnd[bi])) sink_ng(bnd[bi]);
     }
@@ -340,7 +401,34 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
     }
   }
   core->span_mode = false;
-  if (want_last) {  // the last position's logits, as step() computes them
+  if (ver) {  // every position's logits, as step() computes them under the pass's Want
+    auto th = clk::now();
+    stage_mark(ST_HEAD);
+    const XQ* xq[TMAX];
+    const float* xf[TMAX];
+    float* lo[TMAX];
+    for (int i = 0; i < n; i++) {
+      xf[i] = ver->fx.data() + (size_t)i * H;
+      ver->xh[i].reset(H);
+      ver->xh[i].prep(xf[i], H);
+      xq[i] = &ver->xh[i].q;
+      lo[i] = ver->lg.data() + (size_t)i * c.V;
+    }
+    if (fast_head && (ver->want == Want::GREEDY || (ver->want == Want::TOPK && head_topk > 0))) {
+      sh.run_n(pool, xq, n, ver->want == Want::GREEDY ? 1 : head_topk, lo, ver_best, nullptr);
+    } else {
+      const bool pk = packed_ok && n >= 2 && H % 256 == 0;
+      if (pk) {
+        ver->qh.reserve(H, n);
+        for (int i = 0; i < n; i++) xqb_set_from(ver->qh, i, *xq[i]);
+        xqb_pad(ver->qh);
+      }
+      JobN jh = {&head, n, xq, xf, lo, pk ? &ver->qh : nullptr};
+      run_rows_n(pool, &jh, 1, 64, ref, &T->bytes_res);
+      for (int i = 0; i < n; i++) ver_best[i] = -1;
+    }
+    T->head += ms_since(th);
+  } else if (want_last) {  // the last position's logits, as step() computes them
     std::vector<float> xl(H);
     hc_step(fin, P.hyp.data() + (size_t)(n - 1) * N, xl.data(), nullptr);
     head_step(xl.data(), Want::LAST);
@@ -365,23 +453,44 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
       if (lgts[r] > lgts[id]) id = r;
     return id;
   };
-  if (po.chunk <= 1 || core->ns.on || (core->force && S->pos < core->force_n)) {
+  if (po.chunk <= 1 || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n)) {
     const bool r = Model::prefill(s0, ids, n, want_logits, capture, sink, st, cancel);  // single steps
     if (r && fast_head && want_logits) greedy_ = argmax();
     return r;
   }
+  // fast mode (approx:drop): the prompt runs the batched pass losslessly, as the 35B's prefill does: a span reads the union
+  // of its positions' experts once whatever the rule, so leaving picks out saves no reads there, and the prompt's state is
+  // exact mode's. (Before, fast mode sent the prompt through single steps: one token's time per prompt position.)
+  struct NsOff {
+    Approx& a;
+    bool on;
+    explicit NsOff(Approx& x) : a(x), on(x.on) { a.on = false; }
+    ~NsOff() { a.on = on; }
+  } ns_off(core->ns);
   std::vector<int> caps(capture);
   std::sort(caps.begin(), caps.end());
   caps.erase(std::unique(caps.begin(), caps.end()), caps.end());
   auto t0 = clk::now();
   const uint64_t b0 = core->cache.st.bytes_urgent + core->cache.st.bytes_pf;
   const double w0 = core->cache.st.wait_ms, be0 = T->bytes_exp, br0 = T->bytes_res;
+  const Times tt0 = *T;  // the stages of this prefill (ms in all, under the decode's names)
   const long c0 = n_chunks;
   const GpuSplitAcct ga0 = gacct;
   const double me_w0 = core->moe_gpu_wait_ms, me_m0 = core->moe_gpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
   int done = 0, spans = 0;
-  const int span = std::max(po.chunk, po.span);
+  // The scratch is bounded by memory, not only by the front end's chunk and span: this model's per-position scratch is
+  // large (four streams of the hidden state, 40 KB per position for the streams alone, and about 0.6 MB per position of a
+  // sub-chunk), and on the 16 GB Mac the prompt path's peak decides whether it swaps. Sub-chunks of at most
+  // scratch_mb / 2 (each layer's resident matrices are read once per sub-chunk: 4 GB / 256 positions = 16 MB per position,
+  // under 1% of the position's compute) and spans of at most scratch_mb / 2 of streams (a span reads every expert of
+  // every layer once, 68 GB: at 3,000 positions that is 20 s of drive under 75+ s of compute).
+  const int sub_cap = std::max(64, (int)(po.scratch_mb * 1e6 / 2 / sub_bytes_per_pos()) / 64 * 64);
+  const int chunk_eff = std::min(po.chunk, sub_cap);
+  const int span_cap = std::max(chunk_eff, (int)(po.scratch_mb * 1e6 / 2 / (4.0 * c.N())) / chunk_eff * chunk_eff);
+  const int span = std::min(std::max(chunk_eff, po.span), span_cap);
+  const int chunk_keep = po.chunk;
+  po.chunk = chunk_eff;  // (span_run's sub-chunks)
   bool ok = true;
   while (done < n) {
     if (cancel && cancel->load()) {
@@ -419,10 +528,17 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     const double np_ = std::max(1, done);
     std::ostringstream o;
-    o << "{\"chunk\":" << po.chunk << ",\"span\":" << span << ",\"spans\":" << spans << ",\"union_batches\":" << core->n_union_batches
+    o << "{\"chunk\":" << po.chunk << ",\"chunk_asked\":" << chunk_keep << ",\"span\":" << span << ",\"span_asked\":" << po.span << ",\"spans\":" << spans << ",\"union_batches\":" << core->n_union_batches
       << ",\"mb_read\":" << st->mb_read << ",\"read_mb_per_pos\":" << st->mb_read / np_ << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / MB / np_
       << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / MB / np_ << ",\"wait_ms\":" << st->ms_wait
       << ",\"ngram_mb\":" << ngs.n_bytes.load() / 1e6;
+    {
+      Times d = *T;
+      d.embed -= tt0.embed, d.attn_proj -= tt0.attn_proj, d.attn_core -= tt0.attn_core, d.attn_out -= tt0.attn_out, d.depth -= tt0.depth;
+      d.msg -= tt0.msg, d.router -= tt0.router, d.experts -= tt0.experts, d.wait -= tt0.wait, d.cache -= tt0.cache, d.pf -= tt0.pf;
+      d.head -= tt0.head, d.misc -= tt0.misc, d.ra -= tt0.ra;
+      o << ",\"stages_ms\":{" << d.stages_json(1) << "}";
+    }
     if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac
         << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9
@@ -432,9 +548,123 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     o << "}";
     st->json = o.str();
   }
-  if (gpu && po.release) gpu->trim();
+  po.chunk = chunk_keep;
+  if (po.release) {  // the span's scratch (40 KB per position for the streams alone) and the GPU's buffers go back
+    sp.reset();
+    if (gpu) gpu->trim();
+  }
   if (ok && fast_head && want_logits) greedy_ = argmax();
   return ok;
+}
+
+const float* Flash::logits_at(int i) const { return V && i >= 0 && i < V->n ? V->lg.data() + (size_t)i * c.V : nullptr; }
+
+bool Flash::verify(State& s0, const int32_t* ids, int n, Want want) {
+  S = (FState*)&s0;
+  if (n < 1 || n > TMAX || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n) || S->pos + n > S->ctx) return false;
+  greedy_ = -1;
+  const int H = c.H, C = c.conv_dim();
+  const size_t PW = proj_width(c);
+  if (!V) {
+    V = std::make_shared<Ver>();
+    Ver& W8 = *V;
+    W8.altc.resize(c.NL);
+    W8.alts.resize(c.NL);
+    W8.gp.resize(c.NL);
+    W8.cvp.resize(c.NL);
+    for (int L = 0; L < c.NL; L++)
+      if (lw[L].lin) {
+        W8.gp[L].resize((size_t)TMAX * PW);
+        W8.cvp[L].resize((size_t)TMAX * C);
+      }
+    W8.embs.resize((size_t)TMAX * H);
+    W8.fx.resize((size_t)TMAX * H);
+    W8.lg.resize((size_t)TMAX * c.V);
+    W8.xh.resize(TMAX);
+    for (auto& x : W8.xh) x.init(H, prec);
+  }
+  Ver& W8 = *V;
+  for (int L = 0; L < c.NL; L++)  // B at the state's sizes
+    if (lw[L].lin) {
+      if (W8.altc[L].size() != S->ls[L].conv.size()) W8.altc[L].resize(S->ls[L].conv.size());
+      if (W8.alts[L].size() != S->ls[L].S.size()) W8.alts[L].resize(S->ls[L].S.size());
+    }
+  W8.want = want;
+  W8.pos0 = S->pos;
+  span_run(ids, n, false, nullptr, nullptr, nullptr, nullptr, 0, n, &W8);
+  W8.n = n;
+  W8.live = true;
+  W8.steps++;
+  W8.positions += n;
+  return true;
+}
+
+void Flash::commit(State& s0, int a) {
+  S = (FState*)&s0;
+  if (!V || !V->live) return;
+  Ver& W8 = *V;
+  W8.live = false;
+  const int n = W8.n, H = c.H, N = c.N(), C = c.conv_dim(), ZD = c.NVH * c.DV, CK = c.CK;
+  const size_t PW = proj_width(c);
+  a = std::max(1, std::min(a, n));
+  Pool& pool = *core->pool;
+  auto t0 = clk::now();
+  for (int L = 0; L < c.NL; L++) {
+    if (!lw[L].lin) continue;
+    LState& St = S->ls[L];
+    if (a < n) {  // B again from A for positions 0..a-1
+      // the conv state after a positions: the last CK - 1 rows of [A's rows, inputs 0 .. a-1]
+      const int R = CK - 1;
+      float* Bc = W8.altc[L].data();
+      for (int r = 0; r < R; r++) {
+        const int idx = a + r;  // index into [A rows 0 .. R-1, inputs 0 ..]
+        if (idx < R) std::memcpy(Bc + (size_t)r * C, St.conv.data() + (size_t)idx * C, sizeof(float) * C);
+        else std::memcpy(Bc + (size_t)r * C, W8.gp[L].data() + (size_t)(idx - R) * PW, sizeof(float) * C);
+      }
+      const Lw& W = lw[L];
+      const float* Asn = St.S.data();
+      float* Bs = W8.alts[L].data();
+      const float* gp = W8.gp[L].data();
+      const float* cvp = W8.cvp[L].data();
+      parallel_for(pool, c.NVH, [&](int h) {  // the heads again on the kept positions' inputs (state only, as decode's)
+        const size_t hb = (size_t)h * c.DV * c.DK;
+        for (int i = 0; i < a; i++) {
+          const float* pr = gp + (size_t)i * PW;
+          gdn::head_io(gd, W.g, (i == 0 ? Asn : Bs) + hb, Bs + hb, cvp + (size_t)i * C, nullptr, pr[C + ZD + h], pr[C + ZD + c.NVH + h], h, nullptr);
+        }
+      });
+    }
+    St.conv.swap(W8.altc[L]);
+    St.S.swap(W8.alts[L]);
+  }
+  if (a < n) {
+    // the PLE's conv state: the pass's start, moved by the kept positions' inputs (ple_conv's commit)
+    S->pconv = W8.pconv0;
+    const int PS = c.pstate();
+    float* st = S->pconv.data();
+    for (int i = 0; i < a; i++) {
+      const float* x = W8.ple_in.data() + (size_t)i * N;
+      for (int j = 0; j + 1 < PS; j++) std::memcpy(st + (size_t)j * N, st + (size_t)(j + 1) * N, sizeof(float) * N);
+      std::memcpy(st + (size_t)(PS - 1) * N, x, sizeof(float) * N);
+    }
+    S->ng_ctx[0] = W8.hist[a];
+    S->ng_ctx[1] = W8.hist[a + 1];
+    S->pos = W8.pos0 + a;
+    core->tok_clock -= n - a;
+    std::copy(W8.embs.begin() + (size_t)(a - 1) * H, W8.embs.begin() + (size_t)a * H, emb.begin());
+    W8.rollbacks++;
+    W8.ms_rollback += ms_since(t0);
+  }
+  std::memcpy(lgts.data(), W8.lg.data() + (size_t)(a - 1) * c.V, sizeof(float) * c.V);
+  greedy_ = fast_head ? ver_best[a - 1] : -1;  // (the screened head's argmax of the last kept position; -1: the full head's logits)
+  core->chunk_commit(a);
+}
+
+std::string Flash::verify_json() const {
+  if (!V) return "{}";
+  std::ostringstream o;
+  o << "{\"steps\":" << V->steps << ",\"positions\":" << V->positions << ",\"rollbacks\":" << V->rollbacks << ",\"ms_rollback\":" << V->ms_rollback << "}";
+  return o.str();
 }
 
 bool Flash::set_gpu_frac(double f, bool experts, std::string& err) {

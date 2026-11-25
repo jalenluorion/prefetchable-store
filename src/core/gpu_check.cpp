@@ -143,12 +143,57 @@ void run_set(GpuGemm& g) {
 }
 }  // namespace
 
+// The CPU's batched kernels (gemm_aff8_i16 / gemm_aff4_i16) against the one-vector kernels (mv_aff8 / mv_aff4, I16) they
+// must equal, bit for bit, on input widths with and without a tail of groups (K not a multiple of 256). Outputs that differ.
+long cpu_gemm_vs_mv(std::ostringstream& tx, long* checked) {
+  std::mt19937 rng(5);
+  std::normal_distribution<float> nd(0.f, 1.f);
+  long bad = 0;
+  struct C { int fmt, R, K, n; };
+  for (const C& p : std::vector<C>{{8, 64, 640, 13}, {4, 64, 640, 13}, {8, 32, 320, 9}, {4, 32, 320, 9}, {8, 16, 128, 5},
+                                   {4, 16, 192, 4}, {8, 16, 2048, 7}, {4, 16, 2560, 3}}) {
+    const int NG = p.K / 64;
+    std::vector<uint8_t> codes((size_t)p.R * (p.fmt == 8 ? p.K : p.K / 2));
+    for (auto& c : codes) c = (uint8_t)rng();
+    std::vector<_Float16> sc((size_t)p.R * NG), bi((size_t)p.R * NG);
+    for (auto& v : sc) v = (_Float16)(0.001f + 0.01f * (rng() % 1000) / 1000.f);
+    for (auto& v : bi) v = (_Float16)(-0.05f + 0.1f * (rng() % 1000) / 1000.f);
+    XQB xb;
+    xb.reserve(p.K, p.n);
+    std::vector<XBuf> xq(p.n);
+    std::vector<float> v(p.K);
+    for (int q = 0; q < p.n; q++) {
+      for (auto& a : v) a = nd(rng) * (q % 3 == 1 ? 30.f : 1.f);
+      xq[q].init(p.K, Prec::I16);
+      xq[q].prep(v.data(), p.K);
+      xqb_set(xb, q, v.data());
+    }
+    xqb_pad(xb);
+    std::vector<float> Y((size_t)p.n * p.R), y1(p.R);
+    if (p.fmt == 8) gemm_aff8_i16(codes.data(), sc.data(), bi.data(), p.K, 0, p.R, xb, 0, p.n, Y.data(), p.R);
+    else gemm_aff4_i16(codes.data(), sc.data(), bi.data(), p.K, 0, p.R, xb, 0, p.n, Y.data(), p.R);
+    long b = 0;
+    for (int q = 0; q < p.n; q++) {
+      if (p.fmt == 8) mv_aff8(codes.data(), sc.data(), bi.data(), p.K, 0, p.R, xq[q].q, y1.data());
+      else mv_aff4(codes.data(), sc.data(), bi.data(), p.K, 0, p.R, xq[q].q, y1.data());
+      for (int r = 0; r < p.R; r++) b += std::memcmp(&y1[r], &Y[(size_t)q * p.R + r], 4) != 0;
+    }
+    if (b) tx << "CPU gemm against mv (fmt " << p.fmt << ", K " << p.K << "): " << b << " differ\n";
+    *checked += (long)p.n * p.R;
+    bad += b;
+  }
+  return bad;
+}
+
 std::string gpu_gemm_selftest(int threads, double secs, std::string* text) {
   std::ostringstream js, tx;
   js.setf(std::ios::fixed);
   js.precision(2);
   tx.setf(std::ios::fixed);
   tx.precision(1);
+  long cpu_checked = 0;
+  const long cpu_bad = cpu_gemm_vs_mv(tx, &cpu_checked);
+  tx << "CPU gemm against the one-vector kernels: " << cpu_checked << " outputs, " << cpu_bad << " differ\n";
   GpuGemm g;
   if (!g.init()) {
     if (text) *text = "GPU CHECK: no GPU (no Metal device, a build without DM_METAL, or the kernel did not compile)\n";
@@ -167,7 +212,11 @@ std::string gpu_gemm_selftest(int threads, double secs, std::string* text) {
   const std::vector<P> cases = {{8, 4096, 2048, 256, 256, false}, {4, 4096, 2048, 256, 256, false}, {8, 2048, 4096, 37, 37, false},
                                 {4, 2048, 4096, 37, 37, false},   {4, 512, 2048, 15, 300, true},     {4, 512, 2048, 1, 300, true},
                                 {8, 1024, 512, 29, 29, false},    {4, 1024, 512, 3, 3, false},       {4, 256, 2048, 300, 300, false},
-                                {8, 64, 256, 17, 40, true}};
+                                {8, 64, 256, 17, 40, true},
+                                // inputs not a multiple of 256 (whole fours of groups, then the scalar tail): Flash-Next's
+                                // 640-wide expert / shared down projections and its 320-wide mixer, and tails without fours
+                                {4, 2560, 640, 29, 29, false},    {8, 2560, 640, 37, 37, false},     {8, 4096, 320, 40, 40, false},
+                                {4, 512, 640, 15, 300, true},     {8, 256, 128, 9, 9, false},        {4, 512, 192, 6, 6, false}};
   long checked = 0, bad = 0;
   bool complete = true;
   for (int rep = 0; rep < 4; rep++) {
@@ -268,7 +317,7 @@ std::string gpu_gemm_selftest(int threads, double secs, std::string* text) {
       bad += b;
     }
   }
-  const bool exact = complete && bad == 0 && checked > 0;
+  const bool exact = complete && bad == 0 && checked > 0 && cpu_bad == 0;
   js << "{\"gpu\":true,\"exact\":" << (exact ? "true" : "false") << ",\"outputs_compared\":" << checked << ",\"outputs_differ\":" << bad
      << ",\"complete\":" << (complete ? "true" : "false");
   tx << "GPU CHECK " << (exact ? "PASSED" : "FAILED") << " (" << checked << " outputs of both kernels compared with the CPU kernels, " << bad

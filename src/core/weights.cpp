@@ -612,7 +612,7 @@ void phase_rows_n(void* p, int, int) {
     const Weight& w = *J.w;
     const int r0 = J.r0 + (ch - C.start[i]) * C.chunk, r1 = std::min(J.r1 < 0 ? w.rows : J.r1, r0 + C.chunk);
     if (!C.ref && J.xb && (w.kind == Weight::AFF8 || w.kind == Weight::AFF8S || w.kind == Weight::AFF4) && !(r0 & 3) && !(r1 & 3) &&
-        w.cols % 256 == 0) {
+        w.cols % XB == 0) {
       tmp.resize((size_t)J.n * C.chunk);
       if (w.kind == Weight::AFF8S) {  // the rows' AFF8 bytes rebuilt, then the same gemm
         static thread_local std::vector<uint8_t> buf;

@@ -85,7 +85,7 @@ static void gu_act(const ChCtx& X, Core::Chunk& C, int row, int j0, const float*
 }
 
 // the packed batched kernel of an affine record (4-bit routed experts, the 8-bit shared expert): gemm_aff4_i16's /
-// gemm_aff8_i16's bits = the one-vector kernels' for inputs a multiple of 256
+// gemm_aff8_i16's bits = the one-vector kernels' for inputs a multiple of 64
 static bool affine(Weight::Kind k) { return k == Weight::AFF4 || k == Weight::AFF8; }
 static void gemm_affine(const Weight& m, int r0, int r1, const XQB& x, int nu, float* y, size_t ldy) {
   if (m.kind == Weight::AFF8) gemm_aff8_i16(m.c, (const _Float16*)m.s, (const _Float16*)m.b, m.cols, r0, r1, x, 0, nu, y, ldy);
@@ -124,7 +124,7 @@ static void chunk_gu(void* p, int, int) {
       gemm_nvfp4_i16(E.gu.c, (const uint8_t*)E.gu.s, E.gu.gmul, E.gu.cols, fused ? 2 * j0 : j0, fused ? 2 * j0 + 2 * XB : j0 + XB, E.xg, 0, nu,
                      g.data(), gw);
       if (!fused) gemm_nvfp4_i16(E.up.c, (const uint8_t*)E.up.s, E.up.gmul, E.up.cols, j0, j0 + XB, E.xg, 0, nu, u.data(), XB);
-    } else if (E.packed && affine(E.gu.kind) && !fused && E.gu.cols % 256 == 0) {  // ModelInfo::chunk_aff4
+    } else if (E.packed && affine(E.gu.kind) && !fused && E.gu.cols % XB == 0) {  // ModelInfo::chunk_aff4
       gemm_affine(E.gu, j0, j0 + XB, E.xg, nu, g.data(), gw);
       gemm_affine(E.up, j0, j0 + XB, E.xg, nu, u.data(), XB);
     } else if (fused) {
@@ -151,7 +151,7 @@ static void chunk_dn(void* p, int, int) {
     const int a = (ch % nch) * CH, b = std::min(X.H, a + CH), nu = (int)E.users.size();
     if (!X.dlo.empty() && (a < X.dlo[ch / nch] || a >= X.dhi[ch / nch])) continue;  // the GPU's rows
     const bool aff = E.packed && affine(E.dn.kind);  // ModelInfo::chunk_aff4
-    if (E.packed && !(a & 3) && !(b & 3) && (!aff || E.dn.cols % 256 == 0)) {
+    if (E.packed && !(a & 3) && !(b & 3) && (!aff || E.dn.cols % XB == 0)) {
       tmp.resize((size_t)nu * CH);
       if (aff) gemm_affine(E.dn, a, b, E.xd, nu, tmp.data(), CH);
       else gemm_nvfp4_i16(E.dn.c, (const uint8_t*)E.dn.s, E.dn.gmul, E.dn.cols, a, b, E.xd, 0, nu, tmp.data(), CH);
@@ -487,8 +487,8 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
         Chunk::Ent& E = C.ent[run[k]];
         const bool nv = E.gu.kind == Weight::NVFP4 && E.dn.kind == Weight::NVFP4;
         // ModelInfo::chunk_aff4: the GPU's affine bits are gemm_aff4_i16's / gemm_aff8_i16's, the one-vector kernel's only for
-        // inputs a multiple of 256 (gate / up here; the down rows below likewise)
-        const bool af = affine(E.gu.kind) && E.dn.kind == E.gu.kind && E.up.kind == E.gu.kind && E.gu.cols % 256 == 0;
+        // inputs a multiple of 64 (gate / up here; the down rows below likewise)
+        const bool af = affine(E.gu.kind) && E.dn.kind == E.gu.kind && E.up.kind == E.gu.kind && E.gu.cols % XB == 0;
         if (!E.packed || !(nv || af)) continue;
         const int nch = E.inter / XB, cg = (int)(nch * moe_gpu_frac), nu = (int)E.users.size();
         if (cg <= 0) continue;
@@ -592,7 +592,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (GT r : gt) {
         Chunk::Ent& E = C.ent[run[r.k]];
         r.rd = ((int)(H * moe_gpu_frac) / 64) * 64;
-        if (r.rd <= 0 || (affine(E.dn.kind) && E.dn.cols % 256 != 0)) continue;
+        if (r.rd <= 0 || (affine(E.dn.kind) && E.dn.cols % XB != 0)) continue;
         r.td = affine(E.dn.kind)
                    ? G->add(E.dn.kind == Weight::AFF8 ? 8 : 4, E.dn.c, (const _Float16*)E.dn.s, (const _Float16*)E.dn.b, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd))
                    : G->add_nvfp4(E.dn.c, (const uint8_t*)E.dn.s, E.dn.gmul, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd));
