@@ -201,7 +201,19 @@ enum SelfCheck {
 
     private static func finish() {
         let url = docsURL.appendingPathComponent("selfcheck.json")
-        if let d = try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys]) { try? d.write(to: url) }
+        if let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]) {
+            out["volume_free_gb"] = Double(v.volumeAvailableCapacity ?? -1) / 1e9
+            out["volume_free_important_gb"] = Double(v.volumeAvailableCapacityForImportantUsage ?? -1) / 1e9
+        }
+        if let d = try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys]) {
+            do { try d.write(to: url) } catch { log("SELFCHECK could not write \(url.lastPathComponent): \(error)") }
+            // also on the console (a full drive cannot take the file): base64 in chunks, "SELFCHECK JSON i/n <chunk>"
+            let b = d.base64EncodedString(), n = (b.count + 799) / 800
+            for i in 0..<n {
+                let lo = b.index(b.startIndex, offsetBy: i * 800), hi = b.index(lo, offsetBy: min(800, b.count - i * 800))
+                log("SELFCHECK JSON \(i + 1)/\(n) " + String(b[lo..<hi]))
+            }
+        }
         let v = out["verify"] as? [String: Any], e = out["exact"] as? [String: Any], c = out["chat"] as? [String: Any]
         log("SELFCHECK DONE screen=\(out["first_screen"] ?? "?") profile=\(out["profile"] ?? "?") mode=\(out["mode_default"] ?? "?") "
             + "verify=\(v?["parts_ok"] ?? "?")/\(v?["parts"] ?? "?") exact_tokens=\(e?["tokens"] ?? "?") "
