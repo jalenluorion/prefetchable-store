@@ -170,6 +170,12 @@ struct Flash : Model {
   size_t fixed_ple = 0, fixed_ng = 0;
   struct Span;                    // prefill.cpp
   std::shared_ptr<Span> sp;
+  // multi-position verify of drafted tokens (prefill.cpp): the batched pass over n <= TMAX positions, every position's
+  // logits kept, the Gated DeltaNet's states written to second buffers so commit(a) keeps a positions without a copy
+  static constexpr int TMAX = 8;
+  struct Ver;
+  std::shared_ptr<Ver> V;
+  int ver_best[TMAX] = {-1, -1, -1, -1, -1, -1, -1, -1};  // the screened head's argmax per position of the last verify
 
   Flash();
   ~Flash() override;
@@ -187,6 +193,9 @@ struct Flash : Model {
   void step(State& s, int32_t id, Want want) override;
   bool prefill(State& s, const int32_t* ids, int n, bool want_logits, const std::vector<int>& capture, const LM::StateSink& sink,
                PrefillStats* st, const std::atomic<bool>* cancel) override;
+  bool verify(State& s, const int32_t* ids, int n, Want want) override;
+  void commit(State& s, int a) override;
+  const float* logits_at(int i) const override;
   const std::vector<float>& logits() const override { return lgts; }
   int greedy() const override { return fast_head ? greedy_ : -1; }
   const float* router_emb() const override { return emb.data(); }
@@ -228,8 +237,10 @@ struct Flash : Model {
   void ple_step(int L, const float* hyper, float* out, bool commit);
   void head_step(const float* x, Want want);
   // the batched prefill (prefill.cpp)
+  // ver (a verify pass): every position's logits into it, the Gated DeltaNet states into its second buffers
   bool span_run(const int32_t* ids, int n, bool want_last, const std::vector<int>* capture, const LM::StateSink* sink,
-                const std::atomic<bool>* cancel, const PrefillProgress* progress, int prog_base, int prog_total);
+                const std::atomic<bool>* cancel, const PrefillProgress* progress, int prog_base, int prog_total, Ver* ver = nullptr);
+  std::string verify_json() const;
   bool set_gpu_frac(double f, bool experts, std::string& err);
   size_t span_bytes() const;
 };

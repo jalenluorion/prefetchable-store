@@ -778,7 +778,7 @@
  ],
  "drafting": {
   "cost_prior": null,
-  "note": "the engine has no multi-position verify pass for this family: drafting is refused"
+  "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it"
  },
  "modes": {
   "exact": {

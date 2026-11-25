@@ -266,6 +266,7 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
   mi.layer_file = c.layer_file;
   mi.has_ref_path = true;
   mi.union_batches = true;  // every multi-position MoE goes through Core::moe_chunk
+  mi.has_verify = true;     // the multi-position verify pass (prefill.cpp: the span's layer-major pass with rollback)
   mi.chunk_aff4 = true;     // ... with the packed 4-bit kernels and the GPU's share of the experts
   views.resize(c.NL);
   for (int L = 0; L < c.NL; L++) {
@@ -1010,6 +1011,7 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
     fast_head = true;
     return true;
   }
+  if (name == "verify_old") return true;  // (the 35B's previous verify pass, for A/B: this family has one pass)
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;
   if (name == "prefill_chunk") return (po.chunk = std::max(1, std::stoi(value))), true;  // 1: single steps
   if (name == "prefill_span") return (po.span = std::max(1, std::stoi(value))), true;
@@ -1035,6 +1037,7 @@ std::string Flash::stats_json(int ntok) const {
     const double nc = std::max(1.0, sh.n_calls);
     o << ",\"fast_head\":{\"candidates_per_token\":" << sh.n_cand / nc << ",\"coarse_ms\":" << sh.ms_coarse / nc << ",\"exact_ms\":" << sh.ms_exact / nc << "}";
   }
+  if (V) o << ",\"verify\":" << verify_json();
   o << "}";
   return o.str();
 }
