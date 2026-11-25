@@ -8,14 +8,10 @@ flag after the known ones goes to dmeng unchanged.
   python python/run.py --model MODEL --prompt "..." --n 200 --draft lookup --early 2  # any dmeng flag passes through
 
 The family comes from MODEL/moved-store.json ("family"), else from the resident file's cfg `model` (--resident F, else
-MODEL/dmeng_resident.bin), else --family. --chat renders the template the release ships:
-  qwen3_5_moe    python/serve/qwen3_5_moe/chat_format.py (the server's), one user turn with the generation prompt;
-                 --reasoning-effort none turns thinking off (enable_thinking=false), anything else keeps the release's default
-  inkling2_loop  MODEL/chat_template.jinja, one user turn, rendered as the MLX runner renders it (plain jinja2, the
-                 {% generation %} block renders its body, no generation prompt); --reasoning-effort is the template's
-                 reasoning_effort (default none)
-  qwen4_exp      python/serve/qwen4_exp/chat_format.py (the server's: MODEL/chat_template.jinja), one user turn with the
-                 generation prompt; --reasoning-effort xhigh (the release's default) | medium | low, none turns thinking off
+MODEL/dmeng_resident.bin), else --family. --chat renders the template as the server does (python/serve/dmserve.py): the
+family's format module python/serve/<family>/chat_format.py if there is one, else python/serve/generic/chat_format.py
+(MODEL/chat_template.jinja and the release's response format); one user turn with the generation prompt;
+--reasoning-effort goes in as a request's reasoning_effort (template_kwargs of that module: none turns thinking off).
 --out PREFIX writes PREFIX.json (dmeng's statistics + the text) and PREFIX.ids. --bin (or DMENG_BIN) picks the binary,
 default build/dmeng of this repo. MODEL may also come from DM_MODEL.
 
@@ -76,44 +72,15 @@ def detect_family():
     raise SystemExit(f"cannot tell the model family of {a.model} (no moved-store.json, no resident cfg `model`): pass --family")
 
 
-def render_inkling(model_dir, messages, **kw):
-    """The MLX runner's render_chat: plain jinja2, the {% generation %} block renders its body; no generation prompt."""
-    import jinja2
-    from jinja2.ext import Extension
-
-    class Generation(Extension):
-        tags = {"generation"}
-
-        def parse(self, parser):
-            next(parser.stream)
-            return parser.parse_statements(["name:endgeneration"], drop_needle=True)
-
-    def raise_exception(msg):
-        raise ValueError(msg)
-
-    env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True, extensions=[Generation, "jinja2.ext.loopcontrols"])
-    env.globals["raise_exception"] = raise_exception
-    env.filters["tojson"] = lambda x, sort_keys=False, separators=None, **_: json.dumps(x, sort_keys=sort_keys, separators=separators, ensure_ascii=False)
-    tpl = env.from_string(open(os.path.join(model_dir, "chat_template.jinja")).read())
-    return tpl.render(messages=messages, **{k: v for k, v in kw.items() if v is not None})
-
-
 def render(family, prompt):
-    msgs = [{"role": "user", "content": prompt}]
-    if family == "qwen3_5_moe":
-        sys.path.insert(0, os.path.join(REPO, "python", "serve", "qwen3_5_moe"))
-        import chat_format as CF  # noqa: E402
+    """the server's rendering of one user turn (dmserve.py: the format module by folder, its template_kwargs)"""
+    serve = os.path.join(REPO, "python", "serve")
+    fmt = os.path.join(serve, family) if os.path.exists(os.path.join(serve, family, "chat_format.py")) else os.path.join(serve, "generic")
+    sys.path.insert(0, fmt)
+    import chat_format as CF  # noqa: E402
 
-        kw, _budget = CF.effort(a.reasoning_effort)  # a thinking budget is the server's; here only the switch
-        return CF.Tok(a.model).render(msgs, **kw)
-    if family == "inkling2_loop":
-        return render_inkling(a.model, msgs, reasoning_effort=a.reasoning_effort or "none")
-    if family == "qwen4_exp":
-        sys.path.insert(0, os.path.join(REPO, "python", "serve", "qwen4_exp"))
-        import chat_format as CF  # noqa: E402
-
-        return CF.Tok(a.model).render(msgs, **CF.effort_kwargs(a.reasoning_effort))
-    raise SystemExit(f"--chat: no chat format for family {family}")
+    kw, _budget = CF.template_kwargs({"reasoning_effort": a.reasoning_effort} if a.reasoning_effort else {})
+    return CF.Tok(a.model).render([{"role": "user", "content": prompt}], **kw)
 
 
 family = detect_family()

@@ -109,7 +109,6 @@ struct Args {
   int run_ahead = 0, run_ahead_depth = 1;  // run-ahead while a step waits on reads: picks named (0 = off), depth (profile's)
   double ra_budget = 0;                     // its limits (Core::ra_budget / ra_max_tok / ra_sat_skip; the profile's)
   int ra_max = 0, ra_sat = 0;
-  bool gpu_off = false;      // --prefill-gpu off: both shares 0 (the profile's default: mac 0.4 / 0.4)
   int gpu_min_wave = 0;      // prefill: a wave of landed experts uses the GPU from this many assignments; 0 = 128
   bool keep_scratch = false;  // prefill: keep the scratch between prefills (default: freed after each)
   int ahead_span = 512;       // idle-time prefill: positions per span (a cancel keeps the finished spans); 0 = --span
@@ -134,6 +133,7 @@ struct Args {
   bool print_defaults = false;
   std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
   std::set<std::string> given;  // flags on the command line (a profile default fills only the others)
+  Given g;                      // the run settings given (presets.h run_flag), resolved by resolve_run
 };
 
 static const char* HELP_SHORT = R"(usage: dmserve --model DIR [options]   (the model worker; python/serve/dmserve.py is the HTTP server)
@@ -353,6 +353,15 @@ int main(int argc, char** argv) {
     std::string k = argv[i];
     auto v = [&]() { return std::string(i + 1 < argc ? argv[++i] : ""); };
     a.given.insert(k);
+    if (const std::string rf = run_flag_name(k); !rf.empty()) {  // a run setting: one spelling in every front end (presets.h)
+      std::string e;
+      if (!run_flag(k, v(), a.g, e)) {
+        fprintf(stderr, "flags: %s\n", e.c_str());
+        return 2;
+      }
+      a.given.insert(rf);
+      continue;
+    }
     if (k == "--help" || k == "-h") {
       printf("%s", HELP_SHORT);
       return 0;
@@ -365,18 +374,11 @@ int main(int argc, char** argv) {
       const size_t e = kv.find('=');
       a.model_opts.push_back({kv.substr(0, e), e == std::string::npos ? "1" : kv.substr(e + 1)});
     }
-    else if (k == "--mode") a.mode = v();
-    else if (k == "--drafts") a.drafts = std::stoi(v());
     else if (k == "--fast-head") a.fast_head = std::stoi(v());
     else if (k == "--print-defaults") a.print_defaults = true;
     else if (k == "--model") a.model = v();
-    else if (k == "--resident") a.resident = v();
     else if (k == "--family") a.family = v();
-    else if (k == "--cache-gb") {
-      const std::string x = v();
-      a.cache_auto = x == "auto";
-      if (!a.cache_auto) a.cache_gb = std::stod(x);
-    } else if (k == "--reserve-gb") a.mr.reserve_gb = std::stod(v());
+    else if (k == "--reserve-gb") a.mr.reserve_gb = std::stod(v());
     else if (k == "--cache-min-gb") a.mr.min_gb = std::stod(v());
     else if (k == "--mem-watch") a.mem_watch = std::stoi(v());
     else if (k == "--mem-low-pct") a.mem_low = std::stoi(v());
@@ -384,25 +386,14 @@ int main(int argc, char** argv) {
     else if (k == "--mem-grow-after-s") a.mem_grow_s = std::stod(v());
     else if (k == "--mem-retry-s") a.mem_retry_s = std::stod(v());
     else if (k == "--headroom-gb") a.mr.headroom_gb = std::stod(v());
-    else if (k == "--evict") a.evict = v();
-    else if (k == "--layer-caps") a.layer_caps = v();
-    else if (k == "--rt-tau") a.rt_tau = std::stod(v());
-    else if (k == "--rt-cand") a.rt_cand = std::stoi(v());
-    else if (k == "--xtok") a.xtok = v();
-    else if (k == "--xtok-tau") a.xtok_tau = std::stod(v());
-    else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
     else if (k == "--name-gate") a.name_gate = std::stoi(v());
     else if (k == "--ctx") a.ctx = std::stoi(v());
     else if (k == "--kv-plan") a.kv_plan = std::stoi(v());
     else if (k == "--threads") a.threads = std::stoi(v());
-    else if (k == "--readers") a.readers = std::stoi(v());
     else if (k == "--mem") a.mem = v();
     else if (k == "--res-mem") a.res_mem = v();
-    else if (k == "--chunk") a.chunk = std::stoi(v());
     else if (k == "--stream") a.stream = std::stoi(v());
     else if (k == "--span") a.span = std::stoi(v());
-    else if (k == "--routers") a.routers = v();
-    else if (k == "--m") a.m = std::stoi(v());
     else if (k == "--ckpt-gb") a.s.ckpt_gb = std::stod(v());
     else if (k == "--ckpt-min") a.s.ckpt_min = std::stoi(v());
     else if (k == "--park-gb") a.s.park_gb = std::stod(v());
@@ -418,22 +409,12 @@ int main(int argc, char** argv) {
     else if (k == "--prefill-bench") a.bench = v();
     else if (k == "--rep") a.bench_rep = std::stoi(v());
     else if (k == "--record-routing") a.record = v();
-    else if (k == "--gpu-frac") a.gpu_frac = std::stod(v());
-    else if (k == "--gpu-experts") a.gpu_experts = std::stod(v());
-    else if (k == "--prefill-gpu") a.gpu_off = v() == "off";
     else if (k == "--gpu-min") a.gpu_min = std::stoi(v());
     else if (k == "--gpu-kernel") a.gpu_kernel = v();
     else if (k == "--gpu-min-wave") a.gpu_min_wave = std::stoi(v());
-    else if (k == "--run-ahead") a.run_ahead = std::stoi(v());
-    else if (k == "--run-ahead-depth") a.run_ahead_depth = std::stoi(v());
-    else if (k == "--run-ahead-budget") a.ra_budget = std::stod(v());
-    else if (k == "--run-ahead-max") a.ra_max = std::stoi(v());
-    else if (k == "--run-ahead-sat-skip") a.ra_sat = std::stoi(v());
     else if (k == "--ref-no-gpu") a.ref_no_gpu = true;
     else if (k == "--keep-scratch") a.keep_scratch = true;
-    else if (k == "--draft") a.draft = v();
     else if (k == "--draft-max") a.draft_max = std::stoi(v());
-    else if (k == "--early") a.early = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
     else if (k == "--verify-old") a.verify_old = std::stoi(v());
     else if (k == "--copy-free") a.copy_free = std::stoi(v());
@@ -469,34 +450,9 @@ int main(int argc, char** argv) {
   // the settings: explicit options > the profile > the manifest's defaults > dmserve's own values (resolve_run, the
   // resolver dmeng and the C API use too)
   auto has = [&](const char* f) { return a.given.count(f) > 0; };
-  Given g;
-  if (!a.mode.empty()) g.mode = a.mode;
-  if (has("--resident")) g.resident = a.resident;
-  if (has("--routers")) g.routers = a.routers.empty() ? "none" : a.routers;
-  if (has("--xtok")) g.xtok = a.xtok.empty() ? "none" : a.xtok;
-  if (has("--m")) g.m = a.m;
-  if (has("--rt-tau")) g.tau = a.rt_tau;
-  if (has("--rt-cand")) g.cand = a.rt_cand;
-  if (has("--xtok-tau")) g.xtok_tau = a.xtok_tau;
-  if (has("--rd-prio")) g.rd_prio = a.rd_prio != 0;
-  if (has("--evict")) g.evict = a.evict;
-  if (has("--layer-caps")) g.layer_caps = a.layer_caps;
-  if (has("--cache-gb") && a.cache_auto) g.cache_auto = true;
-  else if (has("--cache-gb")) g.cache_gb = a.cache_gb;
-  if (has("--gpu-frac")) g.gpu_frac = a.gpu_frac;
-  if (has("--gpu-experts")) g.gpu_experts = a.gpu_experts;
-  g.gpu_off = a.gpu_off;
-  g.prefill_chunk = a.chunk;  // the server's prompt path is always chunked (--chunk, 512)
-  if (has("--run-ahead")) g.run_ahead = a.run_ahead;
-  if (has("--run-ahead-depth")) g.run_ahead_depth = a.run_ahead_depth;
-  if (has("--run-ahead-budget")) g.ra_budget = a.ra_budget;
-  if (has("--run-ahead-max")) g.ra_max_tok = a.ra_max;
-  if (has("--run-ahead-sat-skip")) g.ra_sat_skip = a.ra_sat != 0;
-  if (has("--readers")) g.readers = a.readers;
-  if (a.drafts >= 0) g.drafts = a.drafts;
-  RunOpts ro;  // dmserve's own values where nothing else sets one
-  ro.mode = "lossless", ro.m = a.m, ro.tau = a.rt_tau, ro.cand = a.rt_cand, ro.xtok_tau = a.xtok_tau, ro.rd_prio = a.rd_prio, ro.evict = a.evict;
-  ro.cache = a.cache_auto ? "auto" : "fixed", ro.cache_gb = a.cache_gb, ro.readers = a.readers;
+  const Given& g = a.g;
+  RunOpts ro;  // dmserve's own values where nothing else sets one: RunOpts', the prompt always chunked (512)
+  ro.prefill_chunk = 512;
   if (!resolve_run(a.model, a.profile, g, "", -1, ro, err)) {
     fprintf(stderr, "profile: %s\n", err.c_str());
     return 1;
@@ -527,7 +483,7 @@ int main(int argc, char** argv) {
   }
   a.gpu_frac = ro.gpu_frac, a.gpu_experts = ro.gpu_experts;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
-  a.readers = ro.readers, a.drafts = ro.drafts;
+  a.readers = ro.readers, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early, a.chunk = ro.prefill_chunk;
   if (ro.bg_ranks > 0) {  // background reads are a dmeng option only: say so, never resolve to something not done
     fprintf(stderr, "dmserve: the profile's background reads (ranks %d) are not implemented in the server: off\n", ro.bg_ranks);
     ro.bg_ranks = 0;
@@ -538,8 +494,6 @@ int main(int argc, char** argv) {
     if (!has("--draft-cost")) a.draft_cost = P.cache_dir + "/draft_cost.txt";
   }
   if (a.draft_cost == "none") a.draft_cost.clear();
-  if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
-  if (a.drafts > 0 && !has("--early")) a.early = 4;
   if (a.hotset == "none") a.hotset.clear();
   if (a.s.disk_dir == "none") a.s.disk_dir.clear();
   auto tl = sclk::now();

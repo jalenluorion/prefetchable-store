@@ -10,6 +10,7 @@
 #endif
 
 #include <cstdio>
+#include <cstdlib>
 #include <sstream>
 
 #include "../format/derive.h"
@@ -490,6 +491,82 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   // drafting
   if (g.drafts) r.drafts = *g.drafts;
   else if (pf) r.drafts = P.drafts ? 1 : 0;
+  r.draft = g.draft ? *g.draft : r.drafts > 0 ? "lookup" : r.draft;
+  r.early = g.early ? *g.early : r.drafts > 0 ? 4 : r.early;
+  return true;
+}
+
+namespace {
+struct RunFlag {
+  const char* name;
+  const char* alias;
+  bool (*set)(const std::string& v, Given& g);
+};
+template <class T>
+bool num(const std::string& v, T& out) {
+  char* e = nullptr;
+  const double d = std::strtod(v.c_str(), &e);
+  if (v.empty() || *e) return false;
+  out = (T)d;
+  return true;
+}
+#define RF_INT(field) [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.field = x), true); }
+#define RF_DBL(field) [](const std::string& v, Given& g) { double x; return num(v, x) && ((g.field = x), true); }
+#define RF_STR(field) [](const std::string& v, Given& g) { return (g.field = v), true; }
+#define RF_NONE(field) [](const std::string& v, Given& g) { return (g.field = v.empty() ? std::string("none") : v), true; }
+const RunFlag RUN_FLAGS[] = {
+    {"--mode", nullptr, RF_STR(mode)},
+    {"--resident", nullptr, RF_STR(resident)},
+    {"--routers", nullptr, RF_NONE(routers)},
+    {"--xtok", nullptr, RF_NONE(xtok)},
+    {"--m", nullptr, RF_INT(m)},
+    {"--rt-tau", nullptr, RF_DBL(tau)},
+    {"--rt-cand", nullptr, RF_INT(cand)},
+    {"--xtok-tau", nullptr, RF_DBL(xtok_tau)},
+    {"--rd-prio", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.rd_prio = x != 0), true); }},
+    {"--evict", nullptr, RF_STR(evict)},
+    {"--layer-caps", nullptr, RF_STR(layer_caps)},
+    {"--cache-gb", nullptr, [](const std::string& v, Given& g) {
+       if (v == "auto") return (g.cache_auto = true, g.cache_gb.reset()), true;
+       double x;
+       return num(v, x) && ((g.cache_gb = x, g.cache_auto = false), true);
+     }},
+    {"--prefill-gpu-frac", "--gpu-frac", RF_DBL(gpu_frac)},
+    {"--prefill-gpu-experts", "--gpu-experts", RF_DBL(gpu_experts)},
+    {"--prefill-gpu", nullptr, [](const std::string& v, Given& g) { return (v == "off" || v == "on") && ((g.gpu_off = v == "off"), true); }},
+    {"--prefill-chunk", "--chunk", RF_INT(prefill_chunk)},
+    {"--run-ahead", nullptr, RF_INT(run_ahead)},
+    {"--run-ahead-depth", nullptr, RF_INT(run_ahead_depth)},
+    {"--run-ahead-budget", nullptr, RF_DBL(ra_budget)},
+    {"--run-ahead-max", nullptr, RF_INT(ra_max_tok)},
+    {"--run-ahead-sat-skip", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.ra_sat_skip = x != 0), true); }},
+    {"--readers", nullptr, RF_INT(readers)},
+    {"--bg-ranks", nullptr, RF_INT(bg_ranks)},
+    {"--bg-gate", nullptr, RF_INT(bg_gate)},
+    {"--drafts", nullptr, RF_INT(drafts)},
+    {"--draft", nullptr, RF_STR(draft)},
+    {"--early", nullptr, RF_INT(early)},
+};
+#undef RF_INT
+#undef RF_DBL
+#undef RF_STR
+#undef RF_NONE
+const RunFlag* find_flag(const std::string& f) {
+  for (const RunFlag& r : RUN_FLAGS)
+    if (f == r.name || (r.alias && f == r.alias)) return &r;
+  return nullptr;
+}
+}  // namespace
+
+std::string run_flag_name(const std::string& flag) {
+  const RunFlag* r = find_flag(flag);
+  return r ? r->name : "";
+}
+
+bool run_flag(const std::string& flag, const std::string& value, Given& g, std::string& err) {
+  const RunFlag* r = find_flag(flag);
+  if (!r) return (err = flag + ": not a run setting"), false;
+  if (!r->set(value, g)) return (err = flag + ": bad value '" + value + "'"), false;
   return true;
 }
 }  // namespace dm

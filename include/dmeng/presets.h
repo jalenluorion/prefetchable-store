@@ -114,9 +114,20 @@ struct Given {
   std::optional<int> run_ahead, run_ahead_depth, ra_max_tok;
   std::optional<double> ra_budget;
   std::optional<bool> ra_sat_skip;
-  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts;
+  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts, early;
+  std::optional<std::string> draft;    // none | lookup | fixed | head | both
   bool recording = false;  // a routing record is written (dmeng --record): single steps unless a chunk is given
 };
+
+// The run settings' flags, one spelling for dmeng and dmserve (the C API passes its dm_open_opts fields through the same
+// function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
+// --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
+// --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
+// and err on a malformed value).
+std::string run_flag_name(const std::string& flag);
+bool run_flag(const std::string& flag, const std::string& value, Given& g, std::string& err);
 
 // The run options after the precedence. Before resolve_run, a front end puts its own built-in values here (what applies
 // when neither the command line, the profile nor the manifest sets a value); resolve_run fills in the rest.
@@ -140,6 +151,10 @@ struct RunOpts {
   double ra_budget = 0;
   bool ra_sat_skip = false;
   int readers = 4, bg_ranks = 0, bg_gate = 0, prefill_chunk = 1, drafts = 0;
+  // drafting: --drafts 1 expands here, once for every front end, to the lookup and tool-call drafts with early names 4
+  // positions ahead (a model's draft head is asked for explicitly: --draft head|both)
+  std::string draft = "none";
+  int early = 0;
   std::vector<std::string> notes;
   // the "resolved" block of every run's JSON (the cache's size once a front end has computed it)
   Resolved resolved(double cache_gb_in_force) const;

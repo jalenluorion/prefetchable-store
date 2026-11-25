@@ -221,7 +221,6 @@ struct Args {
   std::string draft_cost;
   double draft_margin = 0.05;
   double prefill_gpu_frac = 0, prefill_gpu_experts = 0;
-  bool prefill_gpu_off = false;
   std::string xtok, xtok_bg, skeleton, draft_light, draft_light_dump;
   int draft_light_q8 = 1, draft_light_backoff = 1;
   double draft_light_thr = 0;
@@ -247,6 +246,7 @@ struct Args {
   MemRule mr;
   std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
   std::set<std::string> given;  // the flags on the command line (a profile default fills only the others)
+  Given g;                      // the run settings given (presets.h run_flag), resolved by resolve_run
 };
 
 // --prompt TEXT: text in, text out through python/run.py of this repo (the tokenizer and chat template are Python's);
@@ -361,6 +361,12 @@ int main(int argc, char** argv) {
       return argv[++i];
     };
     a.given.insert(k);
+    if (const std::string rf = run_flag_name(k); !rf.empty()) {  // a run setting: one spelling in every front end (presets.h)
+      std::string e;
+      if (!run_flag(k, v(), a.g, e)) return die("flags", e);
+      a.given.insert(rf);
+      continue;
+    }
     if (k == "--help" || k == "-h") {
       printf("%s", HELP_SHORT);
       return 0;
@@ -370,7 +376,6 @@ int main(int argc, char** argv) {
       printf("%s", h.c_str());
       return 0;
     } else if (k == "--model") a.model = v();
-    else if (k == "--resident") a.resident = v();
     else if (k == "--embeddings") a.embeddings = v();
     else if (k == "--family") a.family = v();
     else if (k == "--prompt-ids") a.prompt_ids = v();
@@ -380,16 +385,12 @@ int main(int argc, char** argv) {
     else if (k == "--dump-from") a.dump_from = std::stoi(v());
     else if (k == "--record") a.record = v();
     else if (k == "--oracle") a.oracle = v();
-    else if (k == "--routers") a.routers = v();
     else if (k == "--router-stats") a.router_stats = true;
     else if (k == "--out-ids") a.out_ids = v();
     else if (k == "--json") a.json = v();
     else if (k == "--steps-out") a.steps_out = v();
     else if (k == "--prefetch") a.prefetch = v();
     else if (k == "--lead") a.lead = v();
-    else if (k == "--m") a.m = std::stoi(v());
-    else if (k == "--rt-tau") a.rt_tau = std::stod(v());
-    else if (k == "--rt-cand") a.rt_cand = std::stoi(v());
     else if (k == "--router-ecache") a.router_ecache = std::stoi(v());
     else if (k == "--mem") a.mem = v();
     else if (k == "--res-mem") a.res_mem = v();
@@ -398,25 +399,19 @@ int main(int argc, char** argv) {
     else if (k == "--ctx") a.ctx = std::stoi(v());
     else if (k == "--start-pos") a.start_pos = std::stoi(v());
     else if (k == "--threads") a.threads = std::stoi(v());
-    else if (k == "--readers") a.readers = std::stoi(v());
     else if (k == "--split") a.split = std::stoi(v());
     else if (k == "--reader-io-low") a.reader_io_low = std::stoi(v());
     else if (k == "--temp") a.temp = std::stod(v());
     else if (k == "--top-k") a.top_k = std::stoi(v());
     else if (k == "--top-p") a.top_p = std::stod(v());
     else if (k == "--seed") a.seed = std::stoull(v());
-    else if (k == "--cache-gb") {
-      const std::string x = v();
-      a.cache_auto = x == "auto";
-      if (!a.cache_auto) a.cache_gb = std::stod(x);
-    } else if (k == "--cache-start-gb") a.cache_start_gb = std::stod(v());
+    else if (k == "--cache-start-gb") a.cache_start_gb = std::stod(v());
     else if (k == "--profile") a.profile = v();
     else if (k == "--model-opt") {
       const std::string kv = v();
       const size_t e = kv.find('=');
       a.model_opts.push_back({kv.substr(0, e), e == std::string::npos ? "1" : kv.substr(e + 1)});
     }
-    else if (k == "--drafts") a.drafts = std::stoi(v());
     else if (k == "--prompt") a.prompt_text = v();
     else if (k == "--chat") a.chat = true;
     else if (k == "--reasoning-effort") a.reasoning_effort = v();
@@ -429,29 +424,18 @@ int main(int argc, char** argv) {
     else if (k == "--no-loop-hold") a.loop_hold = false;
     else if (k == "--force-routing") a.force = v();
     else if (k == "--fast-head") a.fast_head = std::stoi(v());
-    else if (k == "--run-ahead") a.run_ahead = std::stoi(v());
-    else if (k == "--run-ahead-depth") a.run_ahead_depth = std::stoi(v());
-    else if (k == "--run-ahead-budget") a.ra_budget = std::stod(v());
-    else if (k == "--run-ahead-max") a.ra_max = std::stoi(v());
-    else if (k == "--run-ahead-sat-skip") a.ra_sat = std::stoi(v());
-    else if (k == "--mode") a.mode = v();
     else if (k == "--late") a.late = v();
     else if (k == "--read-w") a.read_w = std::stod(v());
     else if (k == "--read-mass") a.read_mass = std::stod(v());
     else if (k == "--bg") a.bg = std::stoi(v());
-    else if (k == "--evict") a.evict = v();
     else if (k == "--evict-policy") a.evict_policy = v();
     else if (k == "--evict-trace") a.evict_trace = v();
-    else if (k == "--layer-caps") a.layer_caps = v();
     else if (k == "--drop") a.drop = std::stoi(v());
     else if (k == "--cold-floor") a.cold_floor = std::stoi(v());
     else if (k == "--router-heavy") a.router_heavy = v();
-    else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
     else if (k == "--rd-excl") a.rd_excl = std::stoi(v());
     else if (k == "--name-gate") a.name_gate = std::stoi(v());
     else if (k == "--spec-max") a.spec_max = std::stoi(v());
-    else if (k == "--bg-ranks") a.bg_ranks = std::stoi(v());
-    else if (k == "--bg-gate") a.bg_gate = std::stoi(v());
     else if (k == "--bg-split") a.bg_split = std::stoi(v());
     else if (k == "--bg-queue") a.bg_queue = std::stoi(v());
     else if (k == "--bg-max") a.bg_max = std::stoi(v());
@@ -474,14 +458,7 @@ int main(int argc, char** argv) {
     else if (k == "--dump-names") a.dump_names = v();
     else if (k == "--taps-out") a.taps_out = v();
     else if (k == "--state-check") a.state_check = true;
-    else if (k == "--prefill-chunk") a.prefill_chunk = std::stoi(v());
-    else if (k == "--prefill-gpu-frac") a.prefill_gpu_frac = std::stod(v());
-    else if (k == "--prefill-gpu-experts") a.prefill_gpu_experts = std::stod(v());
-    else if (k == "--prefill-gpu") a.prefill_gpu_off = v() == "off";
-    else if (k == "--xtok") a.xtok = v();
     else if (k == "--xtok-bg") a.xtok_bg = v();
-    else if (k == "--xtok-tau") a.xtok_tau = std::stod(v());
-    else if (k == "--draft") a.draft = v();
     else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--draft-thr") a.draft_thr = std::stod(v());
     else if (k == "--draft-exact") a.draft_exact = std::stoi(v());
@@ -497,7 +474,6 @@ int main(int argc, char** argv) {
       a.backoff_max = b.size() > 1 ? std::stoi(b[1]) : a.backoff0;
     }
     else if (k == "--probe-every") a.probe_every = std::stoi(v());
-    else if (k == "--early") a.early = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
     else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
     else if (k == "--verify-old") a.verify_old = std::stoi(v());
@@ -540,38 +516,10 @@ int main(int argc, char** argv) {
   // ---- the settings: explicit options > the profile > the manifest's defaults > dmeng's own values (resolve_run, the
   // resolver dmserve and the C API use too)
   auto has = [&](const char* f) { return a.given.count(f) > 0; };
-  Given g;
-  if (has("--mode")) g.mode = a.mode;
-  if (has("--resident")) g.resident = a.resident;
-  if (has("--routers")) g.routers = a.routers.empty() ? "none" : a.routers;
-  if (has("--xtok")) g.xtok = a.xtok.empty() ? "none" : a.xtok;
+  Given g = a.g;
   g.other_address = has("--prefetch") || has("--oracle") || has("--plan-routers");
-  if (has("--m")) g.m = a.m;
-  if (has("--rt-tau")) g.tau = a.rt_tau;
-  if (has("--rt-cand")) g.cand = a.rt_cand;
-  if (has("--xtok-tau")) g.xtok_tau = a.xtok_tau;
-  if (has("--rd-prio")) g.rd_prio = a.rd_prio != 0;
-  if (has("--evict")) g.evict = a.evict;
-  if (has("--layer-caps")) g.layer_caps = a.layer_caps;
-  if (has("--cache-gb") && a.cache_auto) g.cache_auto = true;
-  else if (has("--cache-gb")) g.cache_gb = a.cache_gb;
-  if (has("--prefill-gpu-frac")) g.gpu_frac = a.prefill_gpu_frac;
-  if (has("--prefill-gpu-experts")) g.gpu_experts = a.prefill_gpu_experts;
-  g.gpu_off = a.prefill_gpu_off;
-  if (has("--prefill-chunk")) g.prefill_chunk = a.prefill_chunk;
   g.recording = !a.record.empty();
-  if (has("--run-ahead")) g.run_ahead = a.run_ahead;
-  if (has("--run-ahead-depth")) g.run_ahead_depth = a.run_ahead_depth;
-  if (has("--run-ahead-budget")) g.ra_budget = a.ra_budget;
-  if (has("--run-ahead-max")) g.ra_max_tok = a.ra_max;
-  if (has("--run-ahead-sat-skip")) g.ra_sat_skip = a.ra_sat != 0;
-  if (has("--readers")) g.readers = a.readers;
-  if (has("--bg-ranks")) g.bg_ranks = a.bg_ranks;
-  if (has("--bg-gate")) g.bg_gate = a.bg_gate;
-  if (a.drafts >= 0) g.drafts = a.drafts;
-  RunOpts ro;  // dmeng's own values where nothing else sets one
-  ro.mode = a.mode, ro.m = a.m, ro.tau = a.rt_tau, ro.cand = a.rt_cand, ro.xtok_tau = a.xtok_tau, ro.rd_prio = a.rd_prio, ro.evict = a.evict;
-  ro.cache = a.cache_auto ? "auto" : "fixed", ro.cache_gb = a.cache_gb, ro.readers = a.readers, ro.prefill_chunk = a.prefill_chunk;
+  RunOpts ro;  // dmeng's own values where nothing else sets one: RunOpts' (single steps for the prompt, a 5 GB cache)
   if (!resolve_run(a.model, a.profile, g, "", -1, ro, err)) return die("profile", err);
   const Preset& P = ro.preset;
   const bool profiled = ro.profiled;
@@ -591,17 +539,12 @@ int main(int argc, char** argv) {
   if (!set_start_rule(a.mr, ro.cache_start, err)) return die("cache", err);
   a.prefill_gpu_frac = ro.gpu_frac, a.prefill_gpu_experts = ro.gpu_experts, a.prefill_chunk = ro.prefill_chunk;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
-  a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts;
+  a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early;
   LoadOpts lo;
   std::string family;
   if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings, profiled ? P.profile : ""))
     return die("model", err);
   if (!a.family.empty()) family = a.family;
-  // --drafts 1: the lookup and the tool-call fragments, the same in every front end and for every model (dmserve's
-  // meaning; the manifests' notes: "lookup and tool-call skeleton drafts"); a model's draft head is asked for explicitly
-  // (--draft head|both); early names from the copied spans
-  if (a.drafts > 0 && !has("--draft")) a.draft = "lookup";
-  if (a.drafts > 0 && !has("--early")) a.early = 4;
   CoreOpts co;
   co.threads = a.threads;
   co.readers = a.readers;
@@ -797,12 +740,11 @@ int main(int argc, char** argv) {
   // drafting or the verify check, or top-k sampling with k <= 64; --fast-head 0 = the full head, 1 / 2 asked explicitly
   // (2 also checks every token against the full head)
   const bool fh_auto = a.fast_head < 0;
-  const bool fh_family = true;  // every family's own set_option says whether it can (a model without one keeps the full head)
-  if (fh_auto) a.fast_head = fh_family ? 1 : 0;
+  if (fh_auto) a.fast_head = 1;  // every family's own set_option says whether it can (a model without one keeps the full head)
   // (drafting too: plain steps and verify passes then screen the same way; the verify check compares the full logits
   // unless --fast-head is given, then the screened ones)
   const bool fh_greedy_ok = a.temp <= 0 && a.draft_check.empty() && (a.verify_check <= 0 || !fh_auto);
-  bool head_topk = a.fast_head > 0 && a.temp > 0 && a.top_k > 0 && a.top_k <= 64 && fh_family;
+  bool head_topk = a.fast_head > 0 && a.temp > 0 && a.top_k > 0 && a.top_k <= 64;
   if (a.fast_head > 0 && (fh_greedy_ok || head_topk) && a.teacher.empty()) {
     std::string e2;
     const bool ok = M->set_option("fast_head", std::to_string(a.fast_head), e2) &&

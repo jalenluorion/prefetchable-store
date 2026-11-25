@@ -188,35 +188,49 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   // the settings: explicit options > the profile > the manifest's defaults > the C API's own values (resolve_run, the
   // resolver dmeng and dmserve use too); an option left at zero / NULL is not given, a negative one is "off"
   const std::string prof = o.profile && *o.profile ? o.profile : "auto";
+  // the fields through the front ends' own flag spelling (presets.h run_flag): one reading of every value
   Given g;
-  if (o.mode && *o.mode) g.mode = o.mode;
-  if (o.resident) g.resident = o.resident;
-  if (o.routers && *o.routers) g.routers = o.routers;  // a file or "none"
-  else if (o.routers_id && std::strcmp(o.routers_id, "none") == 0) g.routers = "none";
+  auto F = [&](const char* flag, const std::string& v) {
+    std::string e;
+    if (!run_flag(flag, v, g, e) && err.empty()) err = e;
+  };
+  auto num = [](double x) {
+    char b[32];
+    snprintf(b, sizeof b, "%.17g", x);
+    return std::string(b);
+  };
+  if (o.mode && *o.mode) F("--mode", o.mode);
+  if (o.resident) F("--resident", o.resident);
+  if (o.routers && *o.routers) F("--routers", o.routers);  // a file or "none"
+  else if (o.routers_id && std::strcmp(o.routers_id, "none") == 0) F("--routers", "none");
   else if (o.routers_id && *o.routers_id) {
     std::string rp;
     if (!router_path(model_dir, derived, o.routers_id, rp, err)) {
       g_err = "routers: " + err;
       return nullptr;
     }
-    g.routers = rp;
+    F("--routers", rp);
   }
-  if (o.xtok) g.xtok = std::strcmp(o.xtok, "none") == 0 || !*o.xtok ? "none" : o.xtok;
-  if (o.router_m > 0) g.m = o.router_m;
-  if (o.router_tau != 0) g.tau = o.router_tau;
-  if (o.router_cand > 0) g.cand = o.router_cand;
-  if (o.evict && *o.evict) g.evict = o.evict;
-  if (o.layer_caps == 1) g.layer_caps = "uniform";
-  else if (o.layer_caps == 2) g.layer_caps = "none";
-  if (o.cache_bytes > 0) g.cache_gb = (double)o.cache_bytes / 1e9;
-  if (o.prefill_gpu_frac != 0) g.gpu_frac = std::max(0.0, o.prefill_gpu_frac);
-  if (o.prefill_gpu_experts != 0) g.gpu_experts = std::max(0.0, o.prefill_gpu_experts);
-  if (o.run_ahead != 0) g.run_ahead = std::max(0, o.run_ahead);
-  if (o.run_ahead_depth > 0) g.run_ahead_depth = o.run_ahead_depth;
-  if (o.run_ahead_budget != 0) g.ra_budget = std::max(0.0, o.run_ahead_budget);
-  if (o.run_ahead_max != 0) g.ra_max_tok = std::max(0, o.run_ahead_max);
-  if (o.run_ahead_sat_skip != 0) g.ra_sat_skip = o.run_ahead_sat_skip > 0;
-  if (o.readers > 0) g.readers = o.readers;
+  if (o.xtok) F("--xtok", std::strcmp(o.xtok, "none") == 0 ? "none" : o.xtok);
+  if (o.router_m > 0) F("--m", std::to_string(o.router_m));
+  if (o.router_tau != 0) F("--rt-tau", num(o.router_tau));
+  if (o.router_cand > 0) F("--rt-cand", std::to_string(o.router_cand));
+  if (o.evict && *o.evict) F("--evict", o.evict);
+  if (o.layer_caps == 1) F("--layer-caps", "uniform");
+  else if (o.layer_caps == 2) F("--layer-caps", "none");
+  if (o.cache_bytes > 0) F("--cache-gb", num((double)o.cache_bytes / 1e9));
+  if (o.prefill_gpu_frac != 0) F("--prefill-gpu-frac", num(std::max(0.0, o.prefill_gpu_frac)));  // negative: off
+  if (o.prefill_gpu_experts != 0) F("--prefill-gpu-experts", num(std::max(0.0, o.prefill_gpu_experts)));
+  if (o.run_ahead != 0) F("--run-ahead", std::to_string(std::max(0, o.run_ahead)));
+  if (o.run_ahead_depth > 0) F("--run-ahead-depth", std::to_string(o.run_ahead_depth));
+  if (o.run_ahead_budget != 0) F("--run-ahead-budget", num(std::max(0.0, o.run_ahead_budget)));
+  if (o.run_ahead_max != 0) F("--run-ahead-max", std::to_string(std::max(0, o.run_ahead_max)));
+  if (o.run_ahead_sat_skip != 0) F("--run-ahead-sat-skip", o.run_ahead_sat_skip > 0 ? "1" : "0");
+  if (o.readers > 0) F("--readers", std::to_string(o.readers));
+  if (!err.empty()) {
+    g_err = "options: " + err;
+    return nullptr;
+  }
   RunOpts ro;  // the C API's own values where nothing else sets one
   ro.cache_gb = 3.3;
   ro.readers = CoreOpts().readers;

@@ -2647,11 +2647,12 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
   if (name == "verify_old") return (verify_old = std::stoi(value) != 0), true;  // the previous verify pass (A/B measurements)
   if (name == "prefill_span") return (po_span = std::max(1, std::stoi(value))), true;  // positions per application-major span
   if (name == "prefill_stream") return (po_names = std::stoi(value) != 0), true;  // 0: no early names in a span
-  if (name == "prefill_batched_always") return true;                              // the 35B's knob
+  if (name == "prefill_batched_always" && std::stoi(value) == 0) return true;      // off
   if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), err);       // 0: CPU only
   if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), err, true);  // NVFP4 experts (MXFP8 on the CPU)
   if (name == "prefill_gpu_min") return (po_gpu_min = std::max(1, std::stoi(value))), true;
-  if (name == "prefill_gpu_min_wave") return true;  // experts' waves: the 35B's knob
+  if (name == "prefill_batched_always" || name == "prefill_gpu_min_wave")  // refused, not ignored
+    return (err = name + ": not implemented for inkling2_loop's prefill"), false;
   if (name == "prefill_gpu_kernel") return (po_gpu_kernel = std::stoi(value) != 0), true;  // 1 matrix units, 0 integer
   if (name == "prefill_release") {  // 1: give the GPU split's buffers back after each prefill
     po_release = std::stoi(value) != 0;

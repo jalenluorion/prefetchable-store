@@ -1000,7 +1000,10 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
     core->run_ahead = [this](int step, const float* yp, int32_t* pk, int maxk) { return run_ahead_step(step, yp, pk, maxk); };
     return true;
   }
-  if (name == "run_ahead_depth") return true;  // (the 35B's measurement of deeper run-aheads: one layer here)
+  if (name == "run_ahead_depth") {  // the 35B's measurement of deeper run-aheads only: refused, not ignored
+    if (std::stoi(value) <= 1) return true;
+    return (err = "run_ahead_depth > 1: not implemented for qwen4_exp (one layer ahead)"), false;
+  }
   if (name == "fast_head") {  // 1: the screened head (greedy, and top-k with head_topk)
     if (std::stoi(value) <= 0 || fast_head) return true;
     if (prec != Prec::I16 || ref) return (err = "fast_head: needs I16 activations"), false;
@@ -1015,7 +1018,9 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
   if (name == "prefill_span") return (po.span = std::max(1, std::stoi(value))), true;
   if (name == "prefill_stream") return (po.names = std::stoi(value) != 0), true;
   if (name == "prefill_whole_from") return (po.whole_from = std::stoi(value)), true;
-  if (name == "prefill_batched_always" || name == "prefill_gpu_min_wave" || name == "prefill_record") return true;  // the 35B's knobs
+  if ((name == "prefill_batched_always" && std::stoi(value) == 0) || (name == "prefill_record" && value.empty())) return true;  // off
+  if (name == "prefill_batched_always" || name == "prefill_gpu_min_wave" || name == "prefill_record")  // refused, not ignored
+    return (err = name + ": not implemented for qwen4_exp's prefill"), false;
   if (name == "prefill_gpu_frac") return set_gpu_frac(std::stod(value), false, err);
   if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), true, err);
   if (name == "prefill_gpu_min") return (po.gpu_min = std::max(1, std::stoi(value))), true;

@@ -320,7 +320,8 @@ if wanted("presets"):
             while i < len(flags):
                 f, v = flags[i], (flags[i + 1] if i + 1 < len(flags) else None)
                 if f == "--gpu":
-                    out += [{"dmeng": "--prefill-gpu-frac"}.get(front, "--gpu-frac"), v]; i += 2
+                    # one spelling in every front end (presets.h run_flag): dmeng is given the old alias, dmserve the name
+                    out += [{"dmeng": "--gpu-frac", "dmserve": "--prefill-gpu-frac"}.get(front, "--gpu-frac"), v]; i += 2
                 elif f == "--gpu-off":
                     out += ["--gpu-frac", "-1", "--gpu-experts", "-1"] if front == "capi" else ["--prefill-gpu", "off"]; i += 1
                 elif f == "--ra-off":
