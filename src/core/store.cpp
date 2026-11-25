@@ -373,6 +373,7 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
   }
   tab.assign((size_t)NL * NE, -1);
   ev_step.assign((size_t)NL * NE, -1);
+  n_reads.assign((size_t)NL * NE, 0);
   ev_pf.assign((size_t)NL * NE, 0);
   pred.assign((size_t)NL * NE, -1.f);
   char buf[4096];
@@ -704,6 +705,7 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
     }
   }
   (urgent ? st.bytes_urgent : st.bytes_pf) += S.rec;
+  n_reads[(size_t)L * NE + e]++;
   if (bg_issue) st.bytes_bg += S.rec;
   if (skip_reads) return;  // timing without reads: the slot keeps whatever bytes it has
   const int sp = bg_issue ? std::max(1, bg_split) : split;
@@ -880,6 +882,7 @@ bool Cache::cancel(int L, int slot) {
   Slot& b = S.s[slot];
   if (b.layer >= 0) {
     tab[(size_t)b.layer * NE + b.e] = -1;
+    n_reads[(size_t)b.layer * NE + b.e]--;  // (cancelled before it ran: not a read)
     if (!lheld.empty()) lheld[b.layer]--;
     hz_gone(b.layer, slot);
   }
@@ -900,6 +903,7 @@ int Cache::cancel_stale(long step) {
     Slot& b = S.s[ps.second];
     if (b.layer >= 0) {
       tab[(size_t)b.layer * NE + b.e] = -1;
+      n_reads[(size_t)b.layer * NE + b.e]--;
       if (!lheld.empty()) lheld[b.layer]--;
       hz_gone(b.layer, ps.second);
     }

@@ -108,6 +108,7 @@ bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std
   const auto t0 = std::chrono::steady_clock::now();
   const uint64_t b0 = core.cache.st.bytes_urgent + core.cache.st.bytes_pf;
   const double w0 = core.cache.st.wait_ms;
+  const std::vector<uint32_t> r0 = st ? core.cache.n_reads : std::vector<uint32_t>();
   const int sp = std::max(1, o.span);
   int done = 0, spans = 0;
   bool ok = true;
@@ -133,6 +134,8 @@ bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std
     st->ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     st->ms_wait = core.cache.st.wait_ms - w0;
     st->mb_read = (core.cache.st.bytes_urgent + core.cache.st.bytes_pf - b0) / MB;
+    for (long& h : st->read_hist) h = 0;
+    for (size_t i = 0; i < r0.size() && i < core.cache.n_reads.size(); i++) st->read_hist[std::min<uint32_t>(4, core.cache.n_reads[i] - r0[i])]++;
   }
   if (spans_out) *spans_out = spans;
   return ok;

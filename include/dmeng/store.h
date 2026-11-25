@@ -235,6 +235,7 @@ struct Cache {
   bool evict_pf_ctx = false;     // the eviction being made is for a speculative read
   bool read_bg = false;          // a speculative read issued now goes to the readers' background class
   std::vector<long> ev_step;     // [NL * NE] step at which (L, e) was last evicted (-1: never)
+  std::vector<uint32_t> n_reads;  // [NL * NE] reads issued per record since start (the prompt path's re-read count)
   std::vector<uint8_t> ev_pf;    // ... and whether a speculative read evicted it
   // estimate-aware eviction (Stage 3): a slot's value = a planner's probability that its layer's next pass uses it
   // (pred >= 0), else P(used at its layer's next pass | decayed use count), learned online

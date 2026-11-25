@@ -302,15 +302,26 @@ static int run_bench(ModelLM& lm, const Args& a) {
   std::string e;
   for (int rep = 0; rep < a.bench_rep; rep++) {
     lm.reset();
-    if (rep == 0 && !a.record.empty()) lm.model().set_option("prefill_record", a.record, e);
+    std::vector<int16_t> picks;  // a family without its own record: the core's pick log ([pos][steps][K] int16)
+    const bool rec_core = rep == 0 && !a.record.empty() && !lm.model().set_option("prefill_record", a.record, e);
+    if (rec_core) lm.core().pick_log = &picks;
     std::vector<float> lg(lm.info().vocab);
     PrefillStats st;
     auto t = sclk::now();
+    if (getenv("DMSERVE_BENCH_PROGRESS"))  // a time line: positions done (layer by layer) and MB read so far, to stderr
+      lm.on_progress = [t](int done, int total, double mb) { fprintf(stderr, "PROG %.0f %d %d %.0f\n", ms_since2(t), done, total, mb); };
     lm.prefill(ids.data(), (int)ids.size(), lg.data(), {}, nullptr, &st);
     double ms = ms_since2(t);
     double fp_now, fp_peak;
     footprint_mb(fp_now, fp_peak);  // after the prefill (its scratch freed unless --keep-scratch)
-    if (rep == 0 && !a.record.empty()) lm.model().set_option("prefill_record", "", e);
+    if (rep == 0 && !a.record.empty() && !rec_core) lm.model().set_option("prefill_record", "", e);
+    if (rec_core) {
+      lm.core().pick_log = nullptr;
+      if (FILE* f = fopen(a.record.c_str(), "wb")) {
+        fwrite(picks.data(), 2, picks.size(), f);
+        fclose(f);
+      }
+    }
     // a few decode steps after it (greedy): decode speed at this context, with the cache as prefill left it
     std::mt19937_64 rng(0);
     std::vector<double> sm;
@@ -325,9 +336,9 @@ static int run_bench(ModelLM& lm, const Args& a) {
     for (double v : sm) dsum += v;
     printf("{\"mode\":\"prefill_bench\",\"rep\":%d,\"positions\":%zu,\"chunk\":%d,\"stream\":%d,\"cache_gb\":%.2f,\"ms\":%.1f,\"tok_s\":%.2f,\"mb_read\":%.1f,"
            "\"decode_steps\":%zu,\"decode_tok_s\":%.2f,\"gpu_frac\":%.2f,\"keep_scratch\":%s,\"footprint_mb_after_prefill\":%.1f,"
-           "\"footprint_peak_mb\":%.1f,\"prefill\":%s}\n",
+           "\"footprint_peak_mb\":%.1f,\"read_hist\":[%ld,%ld,%ld,%ld,%ld],\"prefill\":%s}\n",
            rep, ids.size(), a.chunk, a.stream, a.cache_gb, ms, ids.size() / (ms / 1e3), st.mb_read, sm.size(), sm.size() / (dsum / 1e3), a.gpu_frac,
-           a.keep_scratch ? "true" : "false", fp_now, fp_peak, st.json.empty() ? "{}" : st.json.c_str());
+           a.keep_scratch ? "true" : "false", fp_now, fp_peak, st.read_hist[0], st.read_hist[1], st.read_hist[2], st.read_hist[3], st.read_hist[4], st.json.empty() ? "{}" : st.json.c_str());
     fflush(stdout);
   }
   return 0;

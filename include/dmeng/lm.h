@@ -40,6 +40,8 @@ struct PrefillStats {              // what one prefill call did (for the server'
   int positions = 0, chunks = 0;
   double ms = 0, ms_wait = 0;      // wall time, of which waiting on expert reads
   double mb_read = 0;
+  // records read during the prefill by how many times each was read (0, 1, 2, 3, 4 or more; batched prompt path only)
+  long read_hist[5] = {0, 0, 0, 0, 0};
   std::string json;                // model-specific detail
   PrefillProgress progress;        // input: called as the prefill runs (empty: none)
 };
