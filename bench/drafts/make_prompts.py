@@ -4,6 +4,7 @@ tool-call skeleton fragments (token ids, one fragment per line) the server's fro
 
   python make_prompts.py q36 ENGINE_DIR Q36_MODEL_DIR     (a Python with tokenizers + jinja2; the repo's qwen3_5_moe format)
   python make_prompts.py ink ENGINE_DIR INK_MODEL_DIR     (Inkling's template through engine/ink/run_ink.py's render_chat)
+  python make_prompts.py flash ENGINE_DIR FLASH_MODEL_DIR (Flash-Next: python/serve/qwen4_exp; ENGINE_DIR unused)
 
 Cases: prose (the Pittsburgh prompt), code (the coding chat prompt), edit (copy-heavy: change a file and print it whole),
 toolnew (a tool call that writes a new file of ~600 tokens), toolrw (rewrite a file the conversation read with a tool),
@@ -61,6 +62,20 @@ if which == "q36":
     copy_ids("code", os.path.join(ENG, "results", "stage3", "code_ids.txt"))
     copy_ids("edit", os.path.join(ENG, "results", "stage4", "copy_ids.txt"))
     off = {"enable_thinking": False}
+    for name, msgs in (("toolnew", [{"role": "user", "content": NEW}]), ("toolrw", msgs_rw('{"path": "orders.py"}')),
+                       ("toolshort", [{"role": "user", "content": SHORT}])):
+        ids, _ = tok.prompt_ids(CF.to_template(msgs), TOOLS, **off)
+        save(name, ids, skel)
+elif which == "flash":  # Qwen3.8-Flash-Next: the server's format module (python/serve/qwen4_exp), thinking off for the tool cases
+    sys.path.insert(0, os.path.join(REPO, "python", "serve", "qwen4_exp"))
+    import chat_format as CF
+
+    tok = CF.Tok(MODEL)
+    CF.bind(tok)  # (the generic module renders the skeletons with the folder's template, as the server does)
+    skel = [tok.encode(t) for t in CF.tool_skeletons(TOOLS)]
+    copy_ids("prose", os.path.join(REPO, "bench", "flash_audit", "results", "prose.ids"))
+    copy_ids("code", os.path.join(REPO, "bench", "flash_audit", "results", "code.ids"))
+    off = CF.effort_kwargs("none")
     for name, msgs in (("toolnew", [{"role": "user", "content": NEW}]), ("toolrw", msgs_rw('{"path": "orders.py"}')),
                        ("toolshort", [{"role": "user", "content": SHORT}])):
         ids, _ = tok.prompt_ids(CF.to_template(msgs), TOOLS, **off)

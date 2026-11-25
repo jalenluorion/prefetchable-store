@@ -123,7 +123,8 @@ struct PrefillOpts {
   double gpu_frac = 0, gpu_experts = 0;  // the GPU's share of the projections' rows / the experts' (prefill_gpu_*)
   int gpu_min = 64;       // sub-chunks of at least this many positions use the GPU
   int gpu_kernel = 1;
-  bool release = false;   // give the GPU split's buffers back after each prefill
+  bool release = false;   // give the span's scratch and the GPU split's buffers back after each prefill
+  double scratch_mb = 320;  // the prefill's scratch bound: sub-chunk buffers and the span's streams, half each (prefill.cpp)
 };
 
 struct Flash : Model {
@@ -243,6 +244,7 @@ struct Flash : Model {
   std::string verify_json() const;
   bool set_gpu_frac(double f, bool experts, std::string& err);
   size_t span_bytes() const;
+  double sub_bytes_per_pos() const;
 };
 
 }  // namespace qwen4

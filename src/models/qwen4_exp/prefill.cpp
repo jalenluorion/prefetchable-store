@@ -64,6 +64,15 @@ struct Flash::Ver {
 
 size_t Flash::span_bytes() const { return sp ? sp->bytes() : 0; }
 
+// bytes of a sub-chunk's scratch per position (Span's per-position buffers and input buffers, as span_run sizes them)
+double Flash::sub_bytes_per_pos() const {
+  const double N = c.N(), H = c.H, PW = std::max((size_t)c.conv_dim() + c.NVH * c.DV + 2 * c.NVH,
+                                                    (size_t)2 * c.NQ * c.HD + 2 * c.NKV * c.HD + (c.IXH + 1) * c.IXD + 2 * c.NQ * c.HD);
+  const double floats = 6 * N + 3 * H + c.LOW + 3 * 64 + PW + c.conv_dim() + std::max(c.NVH * c.DV, c.NQ * c.HD) + c.ple_dim;
+  const int ka = std::max(c.N(), c.H), kc = std::max({c.ple_dim, c.NVH * c.DV, c.NQ * c.HD});
+  return 4 * floats + xq_bytes(ka) + xq_bytes(c.LOW) + xq_bytes(kc) + 2.0 * 4 * ka;
+}
+
 static size_t proj_width(const FCfg& c) {
   return std::max((size_t)c.conv_dim() + c.NVH * c.DV + 2 * c.NVH,
                   (size_t)2 * c.NQ * c.HD + 2 * c.NKV * c.HD + (c.IXH + 1) * c.IXD + 2 * c.NQ * c.HD);
@@ -112,14 +121,16 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
     P.gated.resize(w * N);
     P.normed.resize(w * N);
     P.pout.resize(w * N);
-    const int kmax = std::max({N, H, c.ple_dim, c.LOW, c.NVH * c.DV, c.NQ * c.HD});
+    // each per-position input buffer at the widest input it takes: xa the mixers' norms (N) and the mixers' outputs (H),
+    // xb the mixers' low rank (LOW), xc the PLE rows and the attention outputs
+    const int ka = std::max(N, H), kc = std::max({c.ple_dim, c.NVH * c.DV, c.NQ * c.HD});
     while ((int)P.xa.size() < wmax) {
       P.xa.emplace_back();
-      P.xa.back().init(kmax, prec);
+      P.xa.back().init(ka, prec);
       P.xb.emplace_back();
-      P.xb.back().init(kmax, prec);
+      P.xb.back().init(c.LOW, prec);
       P.xc.emplace_back();
-      P.xc.back().init(kmax, prec);
+      P.xc.back().init(kc, prec);
     }
     P.sel.resize(wmax);
     P.sub_cap = wmax;
@@ -468,7 +479,18 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
   const double me_w0 = core->moe_gpu_wait_ms, me_m0 = core->moe_gpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
   int done = 0, spans = 0;
-  const int span = std::max(po.chunk, po.span);
+  // The scratch is bounded by memory, not only by the front end's chunk and span: this model's per-position scratch is
+  // large (four streams of the hidden state, 40 KB per position for the streams alone, and about 0.6 MB per position of a
+  // sub-chunk), and on the 16 GB Mac the prompt path's peak decides whether it swaps. Sub-chunks of at most
+  // scratch_mb / 2 (each layer's resident matrices are read once per sub-chunk: 4 GB / 256 positions = 16 MB per position,
+  // under 1% of the position's compute) and spans of at most scratch_mb / 2 of streams (a span reads every expert of
+  // every layer once, 68 GB: at 3,000 positions that is 20 s of drive under 75+ s of compute).
+  const int sub_cap = std::max(64, (int)(po.scratch_mb * 1e6 / 2 / sub_bytes_per_pos()) / 64 * 64);
+  const int chunk_eff = std::min(po.chunk, sub_cap);
+  const int span_cap = std::max(chunk_eff, (int)(po.scratch_mb * 1e6 / 2 / (4.0 * c.N())) / chunk_eff * chunk_eff);
+  const int span = std::min(std::max(chunk_eff, po.span), span_cap);
+  const int chunk_keep = po.chunk;
+  po.chunk = chunk_eff;  // (span_run's sub-chunks)
   bool ok = true;
   while (done < n) {
     if (cancel && cancel->load()) {
@@ -506,7 +528,7 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     st->mb_read = (core->cache.st.bytes_urgent + core->cache.st.bytes_pf - b0) / MB;
     const double np_ = std::max(1, done);
     std::ostringstream o;
-    o << "{\"chunk\":" << po.chunk << ",\"span\":" << span << ",\"spans\":" << spans << ",\"union_batches\":" << core->n_union_batches
+    o << "{\"chunk\":" << po.chunk << ",\"chunk_asked\":" << chunk_keep << ",\"span\":" << span << ",\"span_asked\":" << po.span << ",\"spans\":" << spans << ",\"union_batches\":" << core->n_union_batches
       << ",\"mb_read\":" << st->mb_read << ",\"read_mb_per_pos\":" << st->mb_read / np_ << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / MB / np_
       << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / MB / np_ << ",\"wait_ms\":" << st->ms_wait
       << ",\"ngram_mb\":" << ngs.n_bytes.load() / 1e6;
@@ -526,7 +548,11 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     o << "}";
     st->json = o.str();
   }
-  if (gpu && po.release) gpu->trim();
+  po.chunk = chunk_keep;
+  if (po.release) {  // the span's scratch (40 KB per position for the streams alone) and the GPU's buffers go back
+    sp.reset();
+    if (gpu) gpu->trim();
+  }
   if (ok && fast_head && want_logits) greedy_ = argmax();
   return ok;
 }

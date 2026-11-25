@@ -1022,6 +1022,7 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
   if (name == "prefill_gpu_experts") return set_gpu_frac(std::stod(value), true, err);
   if (name == "prefill_gpu_min") return (po.gpu_min = std::max(1, std::stoi(value))), true;
   if (name == "prefill_gpu_kernel") return (po.gpu_kernel = std::stoi(value) != 0), true;
+  if (name == "prefill_scratch_mb") return (po.scratch_mb = std::max(16.0, std::stod(value))), true;
   if (name == "prefill_release") return (po.release = std::stoi(value) != 0), true;
   err = "unknown option " + name + " for qwen4_exp";
   return false;
