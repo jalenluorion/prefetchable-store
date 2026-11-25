@@ -30,6 +30,9 @@ struct SessionOptions {
   int ckpt_every = 2048;       // also checkpoint every this many positions inside a long prefill (memory)
   int disk_every = 256;        // the disk copy of the system prefix keeps a checkpoint every this many positions, so a
                                // change near its end (the date, the working directory) recomputes only the tail
+  // the server's rule for disk_every from the model's fixed (recurrent) state, one checkpoint's bytes: every 256
+  // positions up to 100 MB a checkpoint (the 35B's 66 MB), every 1024 above (Inkling's 173 MB, Flash-Next's 118 MB)
+  static int disk_every_for(size_t fixed_bytes) { return fixed_bytes > (size_t)100e6 ? 1024 : 256; }
   int park_min = 1024;         // park the live sequence only if it would lose at least this many positions
   std::string disk_dir;        // "" = no disk copies
   double disk_gb = 4.0;        // size cap of disk_dir (least recently used files go first)

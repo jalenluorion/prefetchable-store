@@ -516,7 +516,6 @@ int main(int argc, char** argv) {
   }
   if (profiled) {  // the server's own files, in the engine's cache folder
     if (!has("--disk")) a.s.disk_dir = P.cache_dir + "/prefix";
-    if (!has("--disk-every") && (P.family == "inkling2_loop" || P.family == "qwen4_exp")) a.s.disk_every = 1024;  // fixed states of 173 / 118 MB
     if (!has("--hotset")) a.hotset = P.cache_dir + "/hotset.bin";
     if (!has("--draft-cost")) a.draft_cost = P.cache_dir + "/draft_cost.txt";
   }
@@ -533,6 +532,11 @@ int main(int argc, char** argv) {
   if (!M || !M->load(lo, err)) {
     fprintf(stderr, "load: %s\n", err.c_str());
     return 1;
+  }
+  if (profiled && !has("--disk-every")) {  // from the size of a checkpoint (SessionOptions::disk_every_for)
+    std::string e2;
+    auto tmp = M->new_state(a.ctx, e2);
+    if (tmp) a.s.disk_every = SessionOptions::disk_every_for(M->fixed_bytes(*tmp));
   }
   std::string auto_why = "null";
   double cache_start = 0;
@@ -681,7 +685,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "draft: drafting is not supported for this family (%s): the model has no multi-position verify pass\n", M->info().family.c_str());
     return 1;
   }
-  dr.init(M->info().family, a.early > 0 && a.draft != "none" ? &C : nullptr);
+  dr.init(M->info().family, a.early > 0 && a.draft != "none" ? &C : nullptr, draft_cost_prior(a.model));
   dr.reads = &C;
   if (dr.on() && !a.draft_cost.empty()) {  // the pass costs an earlier session measured, in place of the family's prior
     struct stat sb;

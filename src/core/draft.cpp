@@ -543,15 +543,12 @@ std::string LightHeadSource::stats_json() const {
 }
 
 // ------------------------------------------------------------------------------------------------ controller
-const double* DraftCtl::cost_prior(const std::string& family) {
-  // compute of a pass of n positions / one position, per family, before the run has measured any (the controller fits
-  // its own from every pass as it runs, the prior weighing three passes; a cost file, Drafter::load_cost, replaces it).
-  // Inkling: measured on the base M4 (dmeng step costs). The 35B: the pass after the verify fixes (the recurrent state
-  // streamed once per pass, the screened head, the packed gemm from 2 positions), 1.15 at 2 positions and 2.8 at 8 as
-  // expected from the old pass's measured parts, linear between; to be replaced by its real-model measurement.
-  static const double ink[DMAX + 1] = {0, 1.0, 1.64, 2.07, 2.50, 2.95, 3.41, 3.86, 4.32};
-  static const double q36[DMAX + 1] = {0, 1.0, 1.15, 1.43, 1.70, 1.98, 2.25, 2.53, 2.80};
-  return family == "qwen3_5_moe" ? q36 : ink;
+const double* DraftCtl::neutral_prior() {
+  // the compute of a pass of n positions over one position before anything is measured, when the model's manifest
+  // declares no measured one (drafting.cost_prior) and no draft_cost file exists: a pass costs its n steps, so drafting
+  // pays only once the controller has measured cheaper passes (it fits its own from every pass, the prior weighing three)
+  static const double r[DMAX + 1] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+  return r;
 }
 
 bool Drafter::load_cost(const std::string& path, std::string& err) {
@@ -659,18 +656,21 @@ void DraftCtl::cost(int n, double ms) {
 }
 
 // ------------------------------------------------------------------------------------------------ the decode step
-void Drafter::init(const std::string& family, Core* c) {
+void Drafter::init(const std::string& family, Core* c, const std::vector<double>& prior) {
+  double pr[DraftCtl::DMAX + 1];
+  const bool declared = prior.size() == DraftCtl::DMAX + 1;
+  for (int k = 0; k <= DraftCtl::DMAX; k++) pr[k] = declared ? prior[k] : DraftCtl::neutral_prior()[k];
+  cost_prior_src = declared ? "manifest" : "neutral";
   srcs_ = {&lookup, &skeleton};
   for (auto* s : extra) srcs_.push_back(s);
   std::vector<int> nb;
   for (auto* s : srcs_) nb.push_back(s->buckets());
-  ctl.init(nb, DraftCtl::cost_prior(family));
+  ctl.init(nb, pr);
   ctl.probe_every = o.probe_every;
   ctl.fixed = o.mode == "fixed";
   o.max = std::max(1, std::min(o.max, DraftCtl::DMAX - 1));
   core = c;
   if (core && o.early > 0) core->pick_log = &pick_log;
-  const double* pr = DraftCtl::cost_prior(family);
   for (int k = 0; k <= DraftCtl::DMAX; k++) rho0_[k] = pr[k];
   family_ = family;
 }
@@ -1032,7 +1032,7 @@ std::string Drafter::stats_json() const {
        std::ostringstream q;
        for (int k = 1; k <= DraftCtl::DMAX; k++) q << (k > 1 ? "," : "") << rho0_[k];
        return q.str();
-     }() << "],\"cost_file\":\"" << cost_loaded << "\""
+     }() << "],\"cost_prior_source\":\"" << (cost_loaded.empty() ? cost_prior_src : std::string("file")) << "\",\"cost_file\":\"" << cost_loaded << "\""
      << ",\"steps_by_positions\":[";
   for (int k = 1; k <= DraftCtl::DMAX; k++) o2 << (k > 1 ? "," : "") << by_n[k];
   o2 << "],\"verifies_by_source\":{\"lookup\":" << by_src_steps[0] << ",\"skeleton\":" << by_src_steps[1] << ",\"extra\":" << by_src_steps[2]

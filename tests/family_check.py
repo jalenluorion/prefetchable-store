@@ -19,6 +19,8 @@ checked):
               decoding (greedy and sampled), the server worker the same; without a verify pass: every front end refuses
   presets     the precedence (explicit > profile > manifest > built-in) in dmeng, the C API (dm_gate) and dmserve, each
               read back from its "resolved" JSON, and the three front ends printing the same resolved settings
+  files       every engine-ready file the engine uses is listed in the manifest with its sha256 and checked at load: a
+              copy with one byte changed is refused; the manifest declares its in-memory rule (resident.q8_rule)
   counters    the stages (one set of names, Times::stages_json, in dmeng and the server) sum to the token's time within 1%,
               compute = time - wait - run-ahead, and the server's MB per token equals dmeng's (MB = 10^6 bytes in both)
 Writes OUT_DIR/family_check.json and prints one line per check; exit 1 if any check fails.
@@ -362,6 +364,39 @@ if wanted("presets"):
                 + ("" if not cross else " | front ends differ: " + " || ".join(cross[:6])))
     except Exception as e:
         verdict("presets", "FAIL", str(e)[-400:])
+
+# ---------------------------------------------------------------------------------------------- files
+if wanted("files"):
+    try:
+        bad = []
+        listed = {d["id"]: d for d in man["derived"]}
+        held = sorted(f for f in os.listdir(os.path.join(M, ".dmeng")) if f.endswith(".bin"))
+        for f in held:
+            did = f.split(".dmr1.")[0].split(".dmres1.")[0]
+            if did not in listed or not listed[did].get("sha256"):
+                bad.append(f"{f}: not listed with a sha256")
+        q8 = man["resident"].get("q8_rule") or {}
+        if not (q8.get("quantiser") == "mlx_affine" and q8.get("bits") == 8 and q8.get("group") == 64 and q8.get("input_cast") in ("f16", "bf16")):
+            bad.append("resident.q8_rule not declared")
+        # a corrupted copy of the resident: same size, one byte changed, in a fresh cache folder
+        F = os.path.join(T, "files")
+        shutil.rmtree(F, ignore_errors=True)
+        os.makedirs(os.path.join(F, ".dmeng"))
+        for e in os.listdir(M):
+            if e != ".dmeng":
+                os.symlink(os.path.join(M, e), os.path.join(F, e))
+        res = [f for f in held if f.startswith("resident_q8.")][0]
+        b = bytearray(open(os.path.join(M, ".dmeng", res), "rb").read())
+        b[len(b) // 2] ^= 1
+        open(os.path.join(F, ".dmeng", res), "wb").write(b)
+        r = run([DMENG, "--model", F, *BASE, "--prompt-ids", "11,12,13", "--n", "2", "--cache-gb", f"{ALL_GB:.6f}"])
+        refused = r.returncode != 0 and "sha256" in r.stderr
+        if not refused:
+            bad.append("a corrupted resident was not refused")
+        verdict("files", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") +
+                f"{len(held)} engine-ready files listed with sha256; q8 rule {q8.get('input_cast')} cast; a corrupted resident refused: {refused}")
+    except Exception as e:
+        verdict("files", "FAIL", str(e)[-400:])
 
 # ---------------------------------------------------------------------------------------------- counters
 STAGES = ["embed", "depth_attn", "message_gates_norms", "attn_proj", "attn_core", "attn_out", "moe_router", "experts", "run_ahead", "wait",

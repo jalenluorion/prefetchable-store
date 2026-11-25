@@ -111,6 +111,7 @@ bool Manifest::load(const std::string& model_dir, std::string& err) {
     x.id = d["id"].s();
     x.engine_format = d["engine_format"].s();
     x.sha256 = d["sha256"].str_or("");
+    x.bytes = d["bytes"].kind == Json::NUM ? d["bytes"].i() : -1;
     x.path = d["path"].str_or("");
     for (auto& f : d["from"].arr) x.from.push_back(f.s());
     derived.push_back(x);
@@ -557,6 +558,42 @@ bool manifest_validate(const Manifest& m, std::vector<std::string>& problems) {
     else if (f && p->bytes >= 0 && p->bytes != f->record_bytes * m.experts) problems.push_back(std::string(b) + ": bytes != experts x record_bytes");
   }
   return problems.empty();
+}
+
+bool Manifest::check_derived(const Derived& d, const std::string& path, std::string& err) const {
+  struct stat st;
+  if (stat(path.c_str(), &st) != 0) {
+    err = path + ": missing";
+    return false;
+  }
+  if (d.bytes >= 0 && (int64_t)st.st_size != d.bytes) {
+    err = path + ": " + std::to_string((long long)st.st_size) + " bytes, the manifest's " + d.id + " lists " + std::to_string((long long)d.bytes);
+    return false;
+  }
+  if (d.sha256.empty()) return true;
+  const long long mt = (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
+  const std::string base = path.substr(path.rfind('/') + 1), stamps = cache_dir() + "/checked", stamp = stamps + "/" + base + ".sha256";
+  char want[256];
+  snprintf(want, sizeof want, "%lld %lld %s", (long long)st.st_size, mt, d.sha256.c_str());
+  if (FILE* f = fopen(stamp.c_str(), "r")) {  // checked before, and the file has not changed since
+    char got[256] = {0};
+    const bool same = fgets(got, sizeof got, f) && std::string(got).rfind(want, 0) == 0;
+    fclose(f);
+    if (same) return true;
+  }
+  std::string e2;
+  const std::string h = sha256_file(path, e2, false);
+  if (h != d.sha256) {
+    err = path + ": sha256 " + (h.empty() ? e2 : h) + " is not the manifest's " + d.id + " (" + d.sha256 + "): derive it again or fetch it again";
+    return false;
+  }
+  mkdir(cache_dir().c_str(), 0755);
+  mkdir(stamps.c_str(), 0755);
+  if (FILE* f = fopen(stamp.c_str(), "w")) {  // (a read-only folder: checked again next time)
+    fprintf(f, "%s\n", want);
+    fclose(f);
+  }
+  return true;
 }
 
 }  // namespace ms

@@ -38,7 +38,7 @@ ap.add_argument("--mode", default=None, choices=["exact", "fast"], help="exact: 
 ap.add_argument("--profile", default="auto", help="mac | phone | phone-small (default: from the device); none: the worker's built-in values")
 ap.add_argument("--drafts", type=int, default=0, help="1: draft and verify for greedy requests (lookup + tool-call skeletons), experimental (default 0)")
 ap.add_argument("--format", default=None, help=adv("folder holding the model's chat_format.py (default: python/serve/<family> if it exists, else python/serve/generic, which reads the model folder's own template and response format)"))
-ap.add_argument("--model-id", default=None, help=adv("the model name /v1/models reports (default: qwen3.6-35b-a3b; qwen3.8-flash-next for a qwen4_exp folder)"))
+ap.add_argument("--model-id", default=None, help=adv("the model name /v1/models reports (default: the release's name from the manifest's source repo, lower case, e.g. qwen3.6-35b-a3b)"))
 ap.add_argument("--worker", default=os.path.join(REPO, "build", "dmserve"), help=adv("the worker binary"))
 ap.add_argument("--log", default="server.jsonl", help=adv("request log (JSON lines)"))
 ap.add_argument("--max-new-cap", type=int, default=0, help=adv("cap on max_tokens (0: the client's value); the replay uses it to bound decode"))
@@ -49,15 +49,16 @@ ap.add_argument("--ahead", type=int, default=1, help=adv("idle-time prefill: whe
 ap.add_argument("--reserve-gb", type=float, default=None, help=adv("memory left to the rest of the system by the automatic cache size (worker default 5.5)"))
 ap.add_argument("--log-bodies", action="store_true", help=adv("log every request's body (a later warm-start replay sends one again)"))
 ap.add_argument("--allow-force", action="store_true", help=adv("benchmarks only: honour a request's dm_force (a recorded answer fed as the model's turn, so a replay's next request matches the live state)"))
-ap.add_argument("--preserve-thinking", type=int, default=None, choices=[0, 1], help=adv("1: every earlier assistant turn keeps its reasoning in the prompt (the chat template's preserve_thinking; a request's chat_template_kwargs still wins), so the history stays the token sequence the model produced and a new user message reuses the live prefix instead of recomputing the last turn; 0: the template's default (Qwen3.6 drops the reasoning of turns before the last user message). Default: 1 for Qwen3.6 (qwen3_5_moe), else the template's own"))
+ap.add_argument("--preserve-thinking", type=int, default=None, choices=[0, 1], help=adv("1: every earlier assistant turn keeps its reasoning in the prompt (the chat template's preserve_thinking; a request's chat_template_kwargs still wins), so the history stays the token sequence the model produced and a new user message reuses the live prefix instead of recomputing the last turn; 0: the template's default (Qwen3.6 drops the reasoning of turns before the last user message). Default: 1 where the model's chat template has the switch (Qwen3.6; Flash-Next's template keeps the reasoning already), else the template's own"))
 ap.add_argument("--idle-s", type=float, default=300, help=adv("stop the model worker after this long without a request (frees its locked memory); the next request starts it again and the prefix cache resumes from disk (0: never)"))
 argv = sys.argv[1:]
 wargs = argv[argv.index("--") + 1:] if "--" in argv else []
 a = ap.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
 try:
-    fam = json.load(open(os.path.join(a.model_dir, "moved-store.json"))).get("family", "")
+    MAN = json.load(open(os.path.join(a.model_dir, "moved-store.json")))
 except Exception:
-    fam = ""
+    MAN = {}
+fam = MAN.get("family", "")
 if not fam:  # a folder without a manifest: the release's model_type
     try:
         fam = json.load(open(os.path.join(a.model_dir, "config.json"))).get("model_type", "")
@@ -65,12 +66,25 @@ if not fam:  # a folder without a manifest: the release's model_type
         fam = ""
 if a.format is None:
     a.format = os.path.join(HERE, fam) if fam and os.path.exists(os.path.join(HERE, fam, "chat_format.py")) else os.path.join(HERE, "generic")
-    if a.model_id is None and fam == "qwen4_exp":
-        a.model_id = "qwen3.8-flash-next"
-if a.model_id is None:
-    a.model_id = "qwen3.6-35b-a3b"
-if a.preserve_thinking is None:
-    a.preserve_thinking = 1 if fam == "qwen3_5_moe" else None
+if a.model_id is None:  # the release's own name (the manifest's source repo), lower case
+    rep = (MAN.get("source") or {}).get("repo") or ""
+    a.model_id = rep.split("/")[-1].lower() if "/" in rep else (fam or "model")
+
+
+def template_has(word):
+    """the model folder's chat template mentions `word` (chat_template.jinja, else tokenizer_config.json's chat_template)"""
+    for f, key in (("chat_template.jinja", None), ("tokenizer_config.json", "chat_template")):
+        try:
+            t = open(os.path.join(a.model_dir, f)).read() if key is None else str(json.load(open(os.path.join(a.model_dir, f))).get(key) or "")
+        except Exception:
+            continue
+        if word in t:
+            return True
+    return False
+
+
+if a.preserve_thinking is None:  # on where the chat template has the switch (keeps the history the tokens the model produced)
+    a.preserve_thinking = 1 if template_has("preserve_thinking") else None
 sys.path.insert(0, a.format)
 import chat_format as CF  # noqa: E402
 sys.path.insert(0, HERE)

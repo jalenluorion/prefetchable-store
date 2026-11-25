@@ -241,7 +241,7 @@ struct DraftCtl {
   double expected(int s, const Draft& d, int l) const;  // expected tokens of a pass with l drafts
   void accepted(int s, const Draft& d, int l, int acc);
   void cost(int n, double ms);
-  static const double* cost_prior(const std::string& family);
+  static const double* neutral_prior();  // a pass of n positions costs n steps (no model's numbers)
 };
 
 struct DraftOpts {
@@ -283,8 +283,11 @@ class Drafter {
   // exactly when it equals the token sampled decoding would give there.
   std::function<int(const float* lg, int i)> pick;
   std::vector<int16_t> pick_log;         // every position's released picks (Core::pick_log points here with early on)
-  // init after the options are set: family = the model family (the cost prior)
-  void init(const std::string& family, Core* c);
+  // init after the options are set: family = the model family (reported, and the key of a draft_cost file)
+  // prior: the pass costs the model's manifest declares (drafting.cost_prior, DMAX + 1 values); empty: the
+  // neutral prior. A draft_cost file (load_cost) replaces either.
+  void init(const std::string& family, Core* c, const std::vector<double>& prior = {});
+  std::string cost_prior_src;  // manifest | neutral (load_cost: the file)
   bool on() const { return o.mode != "none"; }
   // One decode step. hist = the whole sequence, its last token the one to feed now (not yet in the model's state).
   // Produces 1 + accepted tokens into out (appended), stopping early at a stop token or when `budget` tokens are out;
@@ -307,7 +310,7 @@ class Drafter {
   long plain_n = 0;
   double est(int n) const;      // estimated ms of a pass of n positions (1: a plain step)
   // the compute ratios of passes measured by an earlier run (a line "draft_cost FAMILY r1 .. r8"), in place of the
-  // family's prior (DraftCtl::cost_prior); after init. save_cost writes this run's (false: too few passes, or not
+  // prior (the manifest's, else the neutral one); after init. save_cost writes this run's (false: too few passes, or not
   // written): the measured prior of the next run
   bool load_cost(const std::string& path, std::string& err);
   bool save_cost(const std::string& path) const;

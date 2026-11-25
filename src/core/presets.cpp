@@ -20,42 +20,21 @@ namespace dm {
 
 using ms::Json;
 
-// The built-in values: equal to the tables of PRESETS.md, used for every key a manifest leaves out.
-static const char* BUILTIN_Q36 = R"({
+// The built-in values, used for every key a manifest leaves out: one table for every model. What differs between models
+// is declared in each one's manifest (modes, profiles, defaults); what is left here is a property of the device class
+// each profile stands for, measured with the models of the weight repos (results/ios/p3-gpu/GPU-PREFILL.md: the Mac's
+// GPU share of the prefill; results/parity/PARITY.md: run-ahead at depth 1; the phones: 8 readers, run-ahead limited to
+// 0.2 of the token's compute, off while the readers are saturated, exact mode only). The run-ahead names a step's
+// top_k picks ("top_k": the manifest's experts.top_k) unless a profile says otherwise.
+static const char* BUILTIN = R"({
  "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
  "profiles": {
-  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
-          "run_ahead": {"picks": 8, "depth": 1}},
-  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
-            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
-  "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
-                  "readers": 8,
-            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
- "defaults": {"routers": ["linear_k2"], "names": {"rule": "top", "m": 8}, "cross_token": null, "eviction": "auto", "drafts": false}})";
-static const char* BUILTIN_INK = R"({
- "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
- "profiles": {
-  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
-          "run_ahead": {"picks": 8, "depth": 1}},
-  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
-            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
-  "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "readers": 8,
-            "run_ahead": {"picks": 8, "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
- "defaults": {"routers": ["linear_k2", "mlp_k2_h512"], "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
-  "cross_token": {"routers": ["xtok_s47_h512"], "source": 47, "tau": 0.5, "priority_reads": true}, "eviction": "auto", "drafts": false}})";
-
-// Qwen3.8-Flash-Next: the Mac only (its 68 GB of experts and 52 GB of n-gram rows are not a phone's); its trained routers
-// are the lag-4 set the repo publishes as the trainer's npz (routers_k4.npz), derived in place on first use; top-k is 10
-// Flash-Next (10 picks of 512, routing weights about 0.1 each; docs/MANIFEST-PRESETS.md): fast mode leaves out at most 0.13
-// of a step's routing weight (the heaviest missing picks are read until the rest weighs <= 0.13, and a light pick in
-// flight is not waited for); the routers name a top 4; one slot pool (per-layer caps would refuse names at these sizes)
-static const char* BUILTIN_FLASH = R"({
- "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop:w=0.13:mass=0.13:late=-1"}},
- "profiles": {
-  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "names": {"rule": "top", "m": 4},
-          "prefill_gpu": {"projections": 0.4, "experts": 0.4}, "run_ahead": {"picks": 10, "depth": 1}}},
- "defaults": {"routers": ["mlp_k4"], "names": {"rule": "top", "m": 4}, "cross_token": null, "eviction": "auto", "layer_caps": "none",
-              "drafts": false}})";
+  "mac": {"resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4}, "run_ahead": {"picks": "top_k", "depth": 1}},
+  "phone": {"resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+            "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
+  "phone-small": {"resident": "resident_q4", "cache": "slab", "readers": 8,
+                  "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
+ "defaults": {"routers": [], "names": {"rule": "top", "m": 8}, "cross_token": null, "eviction": "auto", "drafts": false}})";
 
 static bool exists(const std::string& p) {
   struct stat st;
@@ -83,29 +62,8 @@ std::string device_profile(int64_t avail, double min_gb, std::string& why) {
 #endif
 }
 
-// Research folders keep the files the defaults were measured with in their own places (docs/MANIFEST-PRESETS.md step 3)
-static std::vector<std::string> research_paths(const std::string& family, const std::string& id) {
-  auto num = [&](const std::string& pre, const std::string& post) -> std::string {  // "linear_k2" -> "2"
-    if (id.rfind(pre, 0) != 0 || id.size() < pre.size() + post.size() || id.compare(id.size() - post.size(), post.size(), post) != 0) return "";
-    return id.substr(pre.size(), id.size() - pre.size() - post.size());
-  };
-  std::vector<std::string> v;
-  std::string n;
-  if (family == "qwen3_5_moe") {
-    if (!(n = num("linear_k", "")).empty()) v.push_back("routers/lin/q36_router_lin_k" + n + ".dmr");
-  } else if (family == "inkling2_loop") {
-    if (!(n = num("linear_k", "")).empty()) v.push_back("routers/ink_r_main/ink_router_lin_k" + n + "_b8.dmr");
-    if (!(n = num("mlp_k", "_h512")).empty()) {
-      v.push_back("routers/ink_r_best/ink_router_full_k" + n + "_h512_b8.dmr");
-      v.push_back("routers/ink_r_fast/ink_router_full_k" + n + "_h512_b8.dmr");
-    }
-    if (!(n = num("xtok_s", "_h512")).empty()) v.push_back("routers/ink_x_main/ink_router_xtok_s" + n + "_t0-5_b8.dmr");
-  }
-  return v;
-}
-
 // The engine file of router id `id` (cross-token: xtok), in the order of docs/MANIFEST-PRESETS.md; "" if none
-static std::string router_file(const ms::Manifest* m, const std::string& dir, const std::string& family, const std::string& id, bool xtok,
+static std::string router_file(const ms::Manifest* m, const std::string& dir, const std::string& id, bool xtok,
                                std::vector<std::string>& notes) {
   std::string src = "routers/" + id + ".safetensors";
   if (m && !xtok) {
@@ -117,15 +75,19 @@ static std::string router_file(const ms::Manifest* m, const std::string& dir, co
   const std::string did = "router." + id + ".q8";
   const ms::Derived* d = m ? m->derived_of(did) : nullptr;
   ms::Derived dd = d ? *d : ms::Derived{did, "dmr1", "", {src}, ""};
+  auto checked = [&](const std::string& f) -> std::string {  // the manifest's size and sha256 of the file
+    std::string e;
+    if (m->check_derived(dd, f, e)) return f;
+    notes.push_back((xtok ? "cross-token router " : "router ") + id + ": " + e + "; left out");
+    return "";
+  };
   if (m) {
     const std::string p = m->shipped_path(dd);
-    if (!p.empty()) return p;
+    if (!p.empty()) return checked(p);
   }
-  for (auto& r : research_paths(family, id))
-    if (exists(dir + "/" + r)) return dir + "/" + r;
   if (!m) return "";
   const std::string cached = m->derived_path(dd);
-  if (exists(cached)) return cached;
+  if (exists(cached)) return checked(cached);
   if (xtok || !exists(dir + "/" + src)) {
     notes.push_back((xtok ? "cross-token router " : "router ") + id + ": no file found, left out");
     return "";
@@ -173,19 +135,13 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.engine_mode = engine_mode_of(p.mode);
     return true;
   }
-  if (!m) {  // a named profile on a folder without a manifest: the family from config.json, the built-in profile
-    Json cfg;
-    std::string cerr;
-    if (ms::json_load(dir + "/config.json", cfg, cerr)) p.family = cfg["model_type"].str_or("");
-    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop" && p.family != "qwen4_exp") {
-      err = "profile " + profile_req + ": no moved-store.json and no known model_type in config.json";
-      return false;
-    }
-    p.cache_dir = dir + "/.dmeng";
+  if (!m) {  // a profile is declared in the manifest: a folder without one has none
+    err = "profile " + profile_req + ": the folder has no moved-store.json (profiles are declared there; --profile none runs without one)";
+    return false;
   }
   Json bi;
   std::string jerr;
-  if (!ms::json_parse(p.family == "inkling2_loop" ? BUILTIN_INK : p.family == "qwen4_exp" ? BUILTIN_FLASH : BUILTIN_Q36, bi, jerr)) {
+  if (!ms::json_parse(BUILTIN, bi, jerr)) {
     err = "built-in presets: " + jerr;
     return false;
   }
@@ -203,8 +159,10 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   }
   const Json* mp = member(member(&raw, "profiles"), p.profile);
   const Json* bp = member(member(&bi, "profiles"), p.profile);
-  if (!bp && !(mp && member(mp, "mode"))) {
-    err = "profile " + p.profile + ": not in the manifest's profiles (mac, phone, phone-small)";
+  if (!mp) {
+    std::string have;
+    for (auto& kv : member(&raw, "profiles") ? member(&raw, "profiles")->obj : std::vector<std::pair<std::string, Json>>{}) have += (have.empty() ? "" : ", ") + kv.first;
+    err = "profile " + p.profile + ": not declared in the manifest's profiles (" + have + ")";
     return false;
   }
   const Json* md = member(&raw, "defaults");
@@ -233,6 +191,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     ms::Derived dd = d ? *d : ms::Derived{p.resident_id, "dmres1", "", d8 ? d8->from : std::vector<std::string>{"resident.safetensors"}, ""};
     std::string f = m->shipped_path(dd);
     if (f.empty() && exists(m->derived_path(dd))) f = m->derived_path(dd);
+    if (!f.empty() && !m->check_derived(dd, f, err)) return false;
     if (f.empty()) {
       p.notes.push_back(p.resident_id + ": not in the folder, resident_q8 used");
       p.resident_id = "resident_q8";
@@ -245,7 +204,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   // names
   if (const Json* rt = dflt("routers")) {
     for (auto& id : rt->arr) {
-      const std::string f = router_file(m, dir, p.family, id.s(), false, p.notes);
+      const std::string f = router_file(m, dir, id.s(), false, p.notes);
       if (!f.empty()) {
         p.router_id = id.s();
         p.routers = f;
@@ -263,7 +222,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   }
   if (const Json* xt = dflt("cross_token"); xt && xt->kind == Json::OBJ) {
     for (auto& id : (*xt)["routers"].arr) {
-      const std::string f = router_file(m, dir, p.family, id.s(), true, p.notes);
+      const std::string f = router_file(m, dir, id.s(), true, p.notes);
       if (!f.empty()) {
         p.xtok_id = id.s();
         p.xtok = f;
@@ -289,7 +248,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
 #endif
   }
   if (const Json* ra = prof("run_ahead"); ra && ra->kind == Json::OBJ) {  // per profile only (measured per device)
-    p.run_ahead = (int)(*ra)["picks"].i(0);
+    p.run_ahead = (*ra)["picks"].kind == Json::STR && (*ra)["picks"].s() == "top_k" ? (int)m->top_k : (int)(*ra)["picks"].i(0);
     p.run_ahead_depth = (int)(*ra)["depth"].i(1);
     p.ra_budget = (*ra)["budget"].f(0);
     p.ra_max_tok = (int)(*ra)["max_tok"].i(0);
@@ -367,6 +326,19 @@ std::string Resolved::json() const {
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk << "}";
   return o.str();
+}
+
+std::vector<double> draft_cost_prior(const std::string& dir) {
+  std::vector<double> v;
+  if (!exists(dir + "/moved-store.json")) return v;
+  ms::Manifest m;
+  std::string err;
+  if (!m.load(dir, err)) return v;
+  const Json& cp = m.raw["drafting"]["cost_prior"];
+  // a prior that states where it comes from: "measured" (step costs of passes) or "estimated" (from measured parts)
+  if (cp.kind != Json::OBJ || (cp["measured"].kind != Json::STR && cp["estimated"].kind != Json::STR)) return v;
+  for (auto& x : cp["pass_ms_over_step_ms"].arr) v.push_back(x.f(0));
+  return v;
 }
 
 Resolved RunOpts::resolved(double cache_gb_in_force) const {

@@ -1318,7 +1318,15 @@
     }
    ],
    "bytes": 21309272620,
-   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
+   "prefill_gpu": {
+    "projections": 0.4,
+    "experts": 0.4
+   },
+   "run_ahead": {
+    "picks": 8,
+    "depth": 1
+   }
   },
   "phone": {
    "when": "iOS with at least 5.0 GB available at open",
@@ -1581,7 +1589,17 @@
     }
    ],
    "bytes": 21309272620,
-   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
+   "readers": 8,
+   "run_ahead": {
+    "picks": 8,
+    "depth": 1,
+    "budget": 0.2,
+    "sat_skip": true,
+    "modes": [
+     "exact"
+    ]
+   }
   },
   "phone-small": {
    "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
@@ -1845,7 +1863,17 @@
    ],
    "bytes": 20352447020,
    "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast (threshold 0.08) 0.891 / 0.881",
-   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
+   "readers": 8,
+   "run_ahead": {
+    "picks": 8,
+    "depth": 1,
+    "budget": 0.2,
+    "sat_skip": true,
+    "modes": [
+     "exact"
+    ]
+   }
   }
  },
  "defaults": {
@@ -1873,5 +1901,21 @@
   "engine_cache_dir": ".dmeng/",
   "rule": "engine-ready files are in derived/ under the engine's own names (<id>.<engine_format>.<first 12 hex of the source part's sha256>.bin); the engine looks for them in DIR/derived/ as well as DIR/.dmeng/ and derives what is missing into DIR/.dmeng/",
   "profile_rule": "the engine picks the profile from the device; --profile NAME overrides it, --mode exact|fast overrides the profile's mode"
+ },
+ "drafting": {
+  "cost_prior": {
+   "pass_ms_over_step_ms": [
+    0,
+    1.0,
+    1.15,
+    1.43,
+    1.7,
+    1.98,
+    2.25,
+    2.53,
+    2.8
+   ],
+   "estimated": "from the measured parts of the verify pass after its fixes (the recurrent state streamed once per pass, the screened head, the packed gemm from 2 positions): 1.15 at 2 positions and 2.8 at 8, linear between; to be replaced by a real-model measurement (a draft_cost.txt measured by the engine replaces it)"
+  }
  }
 }

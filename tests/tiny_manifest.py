@@ -151,7 +151,7 @@ for d in derived:
     d["sha256"] = known.get(name)
     d["made_by"] = "ms_derive (the engine's own derivation) from " + d["from"][0]
 m["derived"] = derived
-m.update({"name": f"tiny-{fam}", "source": {"repo": "synthetic", "revision": None, "license": m["source"].get("license"), "license_file": None},
+m.update({"name": f"tiny-{fam}", "source": {"repo": m["source"]["repo"], "synthetic": True, "revision": None, "license": m["source"].get("license"), "license_file": None},
           "converter": {"code": f"tests/{fam}/make_tiny.py", "commit": None, "sha256": None, "date": None}, "complete": True, "parts": parts,
           "legacy": [p["path"] for p in parts if p["role"] == "legacy"], "pending": [], "unknown": [], "notes": [],
           "generated": {"by": "tests/tiny_manifest.py", "date": None}})

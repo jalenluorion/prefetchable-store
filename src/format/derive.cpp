@@ -154,10 +154,9 @@ bool put_q4_cal(Ctx& c, const SafeTensors& cal, std::set<std::string>& used, con
   return true;
 }
 
-bool resident_qwen3_5_moe(Ctx& c, const Manifest& m, int bits, const SafeTensors* cal = nullptr,
+bool resident_qwen3_5_moe(Ctx& c, const Manifest& m, Rule F, int bits, const SafeTensors* cal = nullptr,
                           std::set<std::string>* used = nullptr) {
   const std::string P = "model.language_model.";
-  const Rule F = Rule::F16;
   const char* qs = bits == 4 ? ".q4" : ".q";
   // every affine matrix of the 8-bit recipe at `bits` (the call sites below pass bits and the suffix through this);
   // with a calibrated export, its codes / scales / biases instead of today's quantiser
@@ -194,10 +193,9 @@ bool resident_qwen3_5_moe(Ctx& c, const Manifest& m, int bits, const SafeTensors
   return put_f32(c, "norm", P + "norm.weight", true) && put_q(c, "head", "lm_head.weight", F);
 }
 
-bool resident_inkling2_loop(Ctx& c, const Manifest& m, int bits = 8, const SafeTensors* cal = nullptr,
+bool resident_inkling2_loop(Ctx& c, const Manifest& m, Rule B, int bits = 8, const SafeTensors* cal = nullptr,
                             std::set<std::string>* used = nullptr) {
   const std::string P = "model.llm.";
-  const Rule B = Rule::BF16;
   // bits 4 (memory-limited phones, profile phone-small): the same matrices (head and the six attention projections) as
   // plain affine 4-bit g64 (NAME.q4 / .s / .b); everything the 8-bit file keeps exact stays as it is; with a calibrated
   // export (jobs/babel/ink_q4c_export.py), its codes / scales / biases instead of today's quantiser
@@ -281,7 +279,7 @@ bool resident_inkling2_loop(Ctx& c, const Manifest& m, int bits = 8, const SafeT
 // f32; the Gated DeltaNet's norm, conv weights, A_log, dt_bias widened to f32 as released. The embedding is not copied
 // (one bf16 row per token is read from resident.safetensors); the n-gram table is the store's ngram/ parts. The release's
 // three hashing-constant tensors are copied (int64) so the engine can check its own construction against them.
-bool resident_qwen4_exp(Ctx& c, const Manifest& m) {
+bool resident_qwen4_exp(Ctx& c, const Manifest& m, Rule F) {
   const std::string P = "model.language_model.";
   const Json& tc = m.config.get("text_config") ? m.config["text_config"] : m.config;
   auto lin = [&](const std::string& name, const std::string& key) {  // the 8-bit rule, from the tensor's shape
@@ -289,7 +287,7 @@ bool resident_qwen4_exp(Ctx& c, const Manifest& m) {
     if (!t) return false;
     if (t->shape.size() != 2) return fail(c, key + ": not a matrix");
     const bool q8 = t->shape[0] >= 64 && t->shape[1] % 64 == 0;
-    return q8 ? put_q(c, name, key, Rule::F16) : put_bf16(c, name, key);
+    return q8 ? put_q(c, name, key, F) : put_bf16(c, name, key);
   };
   auto hc = [&](const std::string& name, const std::string& pre, bool combine) {
     return put_f32(c, name + "_n", pre + ".hc_norm.weight", true) && lin(name + "_d", pre + ".input_mix_weight_down.weight") &&
@@ -362,6 +360,16 @@ bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats
     }
     if (!cal.open(calibrated, err)) return false;
   }
+  // how the 8-bit (and 4-bit) matrices are made: the manifest's declared resident.q8_rule (MLX's affine quantiser, groups
+  // of 64, from the release's weights cast to f16 or bf16 first); which matrices: the family's recipe below
+  const Json& qr = m.raw["resident"]["q8_rule"];
+  const std::string cast = qr["input_cast"].str_or("");
+  if (qr.kind != Json::OBJ || qr["quantiser"].str_or("") != "mlx_affine" || qr["bits"].i(0) != 8 || qr["group"].i(0) != 64 ||
+      (cast != "f16" && cast != "bf16")) {
+    err = "moved-store.json: resident.q8_rule must declare quantiser mlx_affine, bits 8, group 64, input_cast f16 | bf16 (the engine's rule)";
+    return false;
+  }
+  const Rule rule = cast == "bf16" ? Rule::BF16 : Rule::F16;
   Cfg cfg;
   if (!m.engine_cfg(cfg, err)) return false;
   DmWriter w;
@@ -372,9 +380,9 @@ bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats
   if (m.family == "qwen3_5_moe" || m.family == "inkling2_loop") {
     if (bits == 4) w.cfg("resident_bits", "4");
     if (m.family == "qwen3_5_moe") {
-      ok = resident_qwen3_5_moe(c, m, bits, calibrated.empty() ? nullptr : &cal, &used);
+      ok = resident_qwen3_5_moe(c, m, rule, bits, calibrated.empty() ? nullptr : &cal, &used);
     } else {
-      ok = resident_inkling2_loop(c, m, bits, calibrated.empty() ? nullptr : &cal, &used);
+      ok = resident_inkling2_loop(c, m, rule, bits, calibrated.empty() ? nullptr : &cal, &used);
       w.cfg("fp16_inexact", std::to_string(st.q.f16_inexact));
     }
     if (ok && !calibrated.empty()) {  // every matrix of the export used, nothing else in it
@@ -395,7 +403,7 @@ bool derive_resident(const Manifest& m, const std::string& out_path, DeriveStats
       err = "qwen4_exp: an 8-bit resident only";
       return false;
     }
-    ok = resident_qwen4_exp(c, m);
+    ok = resident_qwen4_exp(c, m, rule);
   } else {
     err = "no resident recipe for family " + m.family;
     return false;

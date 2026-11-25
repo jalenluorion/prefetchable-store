@@ -57,6 +57,11 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   } else if (!exists(dir + "/" + m.emb_file) && exists(dir + "/embeddings.safetensors")) {
     fprintf(stderr, "dmeng: %s absent: embedding rows from embeddings.safetensors\n", m.emb_file.c_str());
     m.emb_file = "embeddings.safetensors";
+    // an engine-ready file like the others: checked against the manifest (its derived entry, else its part entry)
+    ms::Derived de;
+    if (const ms::Derived* d = m.derived_of("embeddings")) de = *d;
+    else if (const ms::Part* q = m.part("embeddings.safetensors")) de.id = "embeddings", de.sha256 = q->sha256, de.bytes = q->bytes;
+    if (!m.check_derived(de, dir + "/embeddings.safetensors", err)) return false;
   }
   family = m.family;
   if (!m.engine_cfg(lo.cfg, err)) return false;
@@ -70,9 +75,9 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
     return false;
   }
   lo.resident = m.shipped_path(*d);  // a folder from the Hub ships it in derived/
-  if (!lo.resident.empty()) return true;
+  if (!lo.resident.empty()) return m.check_derived(*d, lo.resident, err);
   lo.resident = m.derived_path(*d);
-  if (exists(lo.resident)) return true;
+  if (exists(lo.resident)) return m.check_derived(*d, lo.resident, err);
   mkdir(m.cache_dir().c_str(), 0755);
   const std::string legacy = dir + "/dmeng_resident.bin";
   if (exists(legacy) && !d->sha256.empty()) {  // the file today's converter wrote: link it if it is the derivation's

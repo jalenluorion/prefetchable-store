@@ -42,6 +42,7 @@ struct Derived {
   std::string id, engine_format, sha256;
   std::vector<std::string> from;
   std::string path;  // where the weight repo ships the engine-ready file (e.g. derived/<name>), "" = not shipped
+  int64_t bytes = -1;
 };
 
 using Cfg = std::vector<std::pair<std::string, std::string>>;
@@ -88,6 +89,10 @@ struct Manifest {
   // An engine-ready file the model folder already holds: the entry's `path`, else derived/<the derived_path name>
   // (a folder downloaded from the Hub); "" if neither exists. The cache folder is not looked at here.
   std::string shipped_path(const Derived& d) const;
+  // An engine-ready file about to be used against the manifest's entry: its size (when listed) and sha256 (when
+  // listed); the hash is computed once per file version and remembered in the cache folder (checked/<name>.sha256: size,
+  // modification time, hash). False with err when it does not match; true when it matches or the entry lists no hash.
+  bool check_derived(const Derived& d, const std::string& path, std::string& err) const;
 
   // The configuration today's engines read from the cfg lines of their resident file, built from the manifest,
   // config.json and the resident safetensors header (the embedding offset), in the order the converters write it.

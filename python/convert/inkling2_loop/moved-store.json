@@ -1313,7 +1313,15 @@
    ],
    "bytes_with_optional": 21867894869,
    "optional_note": "the background cross-token source (source 41); the release's draft head (dmeng --draft head|both, command-line tool only), which also needs resident.safetensors (its output layer is folded from the bf16 unembedding)",
-   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
+   "prefill_gpu": {
+    "projections": 0.4,
+    "experts": 0.4
+   },
+   "run_ahead": {
+    "picks": 8,
+    "depth": 1
+   }
   },
   "phone": {
    "when": "iOS with at least 5.0 GB available at open",
@@ -1507,7 +1515,17 @@
     }
    ],
    "bytes": 17992385621,
-   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
+   "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
+   "readers": 8,
+   "run_ahead": {
+    "picks": 8,
+    "depth": 1,
+    "budget": 0.2,
+    "sat_skip": true,
+    "modes": [
+     "exact"
+    ]
+   }
   },
   "phone-small": {
    "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
@@ -1735,6 +1753,16 @@
      "23": "store_nv4/layer_23.bin"
     },
     "note": "layers 20-23 re-quantised from the release's MXFP8 to NVFP4 (least-squares block scales); the release's files stay as they are for the other profiles"
+   },
+   "readers": 8,
+   "run_ahead": {
+    "picks": 8,
+    "depth": 1,
+    "budget": 0.2,
+    "sat_skip": true,
+    "modes": [
+     "exact"
+    ]
    }
   }
  },
@@ -1853,5 +1881,21 @@
   "engine_cache_dir": ".dmeng/",
   "rule": "engine-ready files are in derived/ under the engine's own names (<id>.<engine_format>.<first 12 hex of the source part's sha256>.bin); the engine looks for them in DIR/derived/ as well as DIR/.dmeng/ and derives what is missing into DIR/.dmeng/",
   "profile_rule": "the engine picks the profile from the device; --profile NAME overrides it, --mode exact|fast overrides the profile's mode"
+ },
+ "drafting": {
+  "cost_prior": {
+   "pass_ms_over_step_ms": [
+    0,
+    1.0,
+    1.64,
+    2.07,
+    2.5,
+    2.95,
+    3.41,
+    3.86,
+    4.32
+   ],
+   "measured": "base M4, dmeng step costs of passes of 1-8 positions (the drafting controller's prior; a draft_cost.txt measured by the engine replaces it)"
+  }
  }
 }

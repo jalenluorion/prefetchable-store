@@ -1,9 +1,21 @@
 # Manifest keys for modes, profiles and defaults
 
 `moved-store.json` carries three keys that describe the user-facing surface: `modes`, `profiles` and `defaults`.
-The engine (`dmeng`, `dmserve`, the C API) reads them when they are present and falls back to built-in values equal
-to the tables below when they are absent. Unknown keys are ignored, so a manifest may carry more than this file
-lists (notes, download lists).
+The engine (`dmeng`, `dmserve`, the C API) reads them when they are present and falls back to built-in values when
+they are absent. The built-in values are one table for every model (`src/core/presets.cpp` BUILTIN): what differs
+between models is declared in each one's manifest, never chosen in the engine by the model's name. What the table keeps
+is per profile, a property of the device class: `mac`: the prefill's GPU share 0.4 / 0.4, run-ahead at depth 1;
+`phone`, `phone-small`: 8 readers, run-ahead at depth 1 limited to 0.2 of the token's compute, off while the readers are
+saturated, in exact mode only; the run-ahead names the manifest's `experts.top_k` picks unless a profile gives
+`picks`. A profile must be declared in the manifest (`profiles.<name>`), and a folder without a manifest has no profile
+(`--profile none`). Unknown keys are ignored, so a manifest may carry more than this file lists (notes, download
+lists). The weight repos' manifests as this repository writes them are `python/convert/<family>/moved-store.json`.
+
+Also declared per model: `resident.q8_rule` (required to derive the in-memory file: MLX's affine quantiser, 8 bits,
+groups of 64, the release's weights cast to `f16` or `bf16` first: the engine takes the cast from here), and
+`drafting.cost_prior` (the drafting controller's prior, the cost of a pass of 0..8 positions over one step, used when
+it states where it comes from, `measured` or `estimated`; else the engine's neutral prior, a pass of n positions costing
+n steps; either is replaced by the pass costs the engine has measured itself, `DIR/.dmeng/draft_cost.txt`).
 
 ## `modes`
 
@@ -102,8 +114,7 @@ Inkling 2 Mini:
 Inkling's `linear_k2` (one linear layer, lag 2; engine file 49 MB, source `routers/linear_k2.safetensors`) replaced the
 MLP `mlp_k2_h512` as the default: in one process with alternating segments it was 2-4% faster beside run-ahead and
 reads about a fifth of the router bytes per token (44 against 222 MB). The MLP stays available by explicit option
-(`--routers FILE`, `routers_id = "mlp_k2_h512"`); the built-in list is `["linear_k2", "mlp_k2_h512"]` (the MLP when the
-linear file is absent).
+(`--routers FILE`, `routers_id = "mlp_k2_h512"`).
 
 Qwen3.8-Flash-Next (`qwen4_exp`; one profile, `mac`: exact, 8-bit in-memory weights, cache auto, names a top 4, the
 GPU's share of the prefill 0.4 / 0.4, run-ahead naming 10 at depth 1):
@@ -135,12 +146,12 @@ alternating runs) at 2.0 GB (15 records per layer) and 3.1 GB (24):
   unpinned records in its layer: 241 of 352 names per token refused at 2.0 GB), so the cache runs on misses alone.
 
 Its router entry `mlp_k4` points at `routers_k4.npz`, the lag-4 set as the trainer exported it (float32): the engine reads
-the npz in place and derives its 8-bit file from it (step 5 below), the same bytes as the Python converter's.
+the npz in place and derives its 8-bit file from it (step 4 below), the same bytes as the Python converter's.
 
-Built-in values, used when the manifest has no `defaults` (and for any key it leaves out), are the objects above
-by family (`qwen3_5_moe`, `inkling2_loop`, `qwen4_exp`). The names rule is a per-profile default: the 35B names a top 8 on `mac`
-and `phone` and uses the confidence rule on `phone-small` (its built-in profile carries `names`); Inkling uses the
-confidence rule on every profile.
+The built-in `defaults`, used for any key the manifest leaves out, are the same for every model: no routers, a top 8,
+no cross-token routers, eviction `auto`, no drafting. The names rule is a per-profile value each manifest declares:
+the 35B names a top 8 on `mac` and `phone` and uses the confidence rule on `phone-small`; Inkling uses the confidence
+rule on every profile.
 
 ## How an id becomes a file
 
@@ -149,15 +160,16 @@ For a router id `X` (or a cross-token id), the engine looks, in order, for:
 1. the `path` of the manifest's `derived` entry `router.X.q8`, relative to the model folder (a folder downloaded from
    the Hub: `derived/router.X.q8.dmr1.<hash>.bin`);
 2. `derived/router.X.q8.dmr1.<hash>.bin` in the model folder (the same name without a `path` key);
-3. a few built-in locations of research folders (for example `routers/lin/q36_router_lin_k2.dmr`), which hold the
-   files the defaults were measured with;
-4. the same name as in 2 in the engine's own cache folder, `DIR/.dmeng/`;
-5. otherwise it derives the file from `routers/X.safetensors` (or the router entry's `path`: an `.npz` is read in place)
+3. the same name as in 2 in the engine's own cache folder, `DIR/.dmeng/`;
+4. otherwise it derives the file from `routers/X.safetensors` (or the router entry's `path`: an `.npz` is read in place)
    into `DIR/.dmeng/` (routers only; cross-token files are not derived by the engine, and the default is skipped with a
    note if none is found).
 
-`<hash>` is the first 12 hex digits of the sha256 of the source part (`from[0]`). The in-memory weights follow
-steps 1, 2 and 4 the same way; `resident_q8` is derived from `resident.safetensors` when missing, `resident_q4` is not
+`<hash>` is the first 12 hex digits of the sha256 of the source part (`from[0]`). Every engine-ready file found this
+way (and `embeddings.safetensors`, under `derived` or `parts`) is checked against the manifest's `bytes` and `sha256`
+before it is used, once per version of the file (the result is kept in `DIR/.dmeng/checked/`); a router that does not
+match is left out with a note, an in-memory file that does not match stops the run. The in-memory weights follow
+steps 1 to 3 the same way; `resident_q8` is derived from `resident.safetensors` when missing, `resident_q4` is not
 (`ms_derive resident DIR --bits 4` makes it).
 
 A default that does not resolve (no file and nothing to derive it from) is dropped with one line on stderr; the run

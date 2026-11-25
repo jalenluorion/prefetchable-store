@@ -64,7 +64,7 @@ ids300 = [int(t) for t in rng.integers(0, V, 300)]
 base40, info = dmeng(ids40, name="base40")
 if base40 is None:
     raise SystemExit(f"dmeng failed: {info}")
-resf = sorted(f for f in os.listdir(os.path.join(MOD, ".dmeng")) if f.startswith("resident_q8."))[-1]
+resf = sorted(f for f in os.listdir(os.path.join(MOD, ".dmeng")) if f.startswith("resident_q8.") and f.endswith(".bin"))[-1]
 resf = os.path.join(MOD, ".dmeng", resf)
 
 

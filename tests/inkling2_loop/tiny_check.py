@@ -30,7 +30,7 @@ OUT = os.environ.get("TINY_OUT", os.path.join(REPO, "build", "tests", "inkling2_
 OLD = os.environ.get("DMENG_OLD_FLAGS") == "1"
 os.makedirs(OUT, exist_ok=True)
 TMP = tempfile.mkdtemp()
-RES8 = os.environ.get("INK_RES8") or os.path.join(MOD, ".dmeng", sorted(f for f in os.listdir(os.path.join(MOD, ".dmeng")) if f.startswith("resident_q8."))[-1])
+RES8 = os.environ.get("INK_RES8") or os.path.join(MOD, ".dmeng", sorted(f for f in os.listdir(os.path.join(MOD, ".dmeng")) if f.startswith("resident_q8.") and f.endswith(".bin"))[-1])
 RES0 = os.environ.get("INK_RES0")
 if not RES0:  # the release's bf16 matrices in the engine's format (the exact reference path's resident)
     RES0 = os.path.join(TMP, "resident_b0.bin")

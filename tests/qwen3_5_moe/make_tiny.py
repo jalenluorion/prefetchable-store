@@ -17,7 +17,6 @@ import json, os, subprocess, sys
 
 import numpy as np
 import torch
-from safetensors.numpy import save_file as save_np
 from safetensors.torch import save_file
 
 OUT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "q36_tiny")
@@ -110,9 +109,25 @@ for L in range(NL):
     blob[f"{L}.emb_norm.weight"] = (1 + 0.1 * rng.standard_normal(H)).astype(np.float32)
     blob[f"{L}.lin.weight"] = (0.05 * rng.standard_normal((E, W))).astype(np.float16)
     blob[f"{L}.lin.bias"] = (0.05 * rng.standard_normal(E)).astype(np.float32)
+
+
+def save_st(tensors, path, metadata):
+    """a safetensors file with its header in a fixed order (the same bytes every run: its sha256 names the engine's file)"""
+    hdr, off, data = {"__metadata__": metadata}, 0, []
+    for k, v in tensors.items():
+        b = np.ascontiguousarray(v).tobytes()
+        hdr[k] = {"dtype": {"float32": "F32", "float16": "F16"}[str(v.dtype)], "shape": list(v.shape), "data_offsets": [off, off + len(b)]}
+        off += len(b)
+        data.append(b)
+    h = json.dumps(hdr, separators=(",", ":")).encode()
+    h += b" " * (-len(h) % 8)
+    with open(path, "wb") as f:
+        f.write(len(h).to_bytes(8, "little") + h + b"".join(data))
+
+
 os.makedirs(os.path.join(MODEL, "routers"), exist_ok=True)
-save_np(blob, os.path.join(MODEL, "routers", "linear_k2.safetensors"),
-        metadata={"family": "qwen3_5_moe", "lag": str(LAG), "targets": str(NL), "hidden": "0", "run": "tiny", "variant": "linear_k2", "source": "synthetic"})
+save_st(blob, os.path.join(MODEL, "routers", "linear_k2.safetensors"),
+        {"family": "qwen3_5_moe", "lag": str(LAG), "targets": str(NL), "hidden": "0", "run": "tiny", "variant": "linear_k2", "source": "synthetic"})
 r = subprocess.run([sys.executable, os.path.join(REPO, "tests/tiny_manifest.py"), MODEL], capture_output=True, text=True)
 if r.returncode:
     sys.exit(f"tiny_manifest.py failed:\n{r.stdout}\n{r.stderr}")

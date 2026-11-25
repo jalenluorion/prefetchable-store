@@ -783,7 +783,7 @@ int main(int argc, char** argv) {
   // drafting or the verify check, or top-k sampling with k <= 64; --fast-head 0 = the full head, 1 / 2 asked explicitly
   // (2 also checks every token against the full head)
   const bool fh_auto = a.fast_head < 0;
-  const bool fh_family = family == "qwen3_5_moe" || family == "inkling2_loop" || family == "qwen4_exp";
+  const bool fh_family = true;  // every family's own set_option says whether it can (a model without one keeps the full head)
   if (fh_auto) a.fast_head = fh_family ? 1 : 0;
   // (drafting too: plain steps and verify passes then screen the same way; the verify check compares the full logits
   // unless --fast-head is given, then the screened ones)
@@ -1199,7 +1199,7 @@ int main(int argc, char** argv) {
       dr.extra.push_back(&hs);
     }
     dr.o.copy_free = a.copy_free != 0;
-    dr.init(family, a.early > 0 ? &C : nullptr);
+    dr.init(family, a.early > 0 ? &C : nullptr, draft_cost_prior(a.model));
     dr.reads = &C;
     if (!a.draft_cost.empty() && a.draft != "none") {  // a cost file: the prior an earlier run measured (absent: the family's)
       struct stat sb;

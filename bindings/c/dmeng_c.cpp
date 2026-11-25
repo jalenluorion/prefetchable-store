@@ -254,6 +254,10 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       g_err = "load: no 4-bit resident " + res_file + " (ms_derive resident DIR --bits 4)";
       return nullptr;
     }
+    if (!mf.check_derived(dd, res_file, err)) {
+      g_err = "load: " + err;
+      return nullptr;
+    }
   } else if (o.resident_bits != 0 && o.resident_bits != 8 && o.resident_bits != 4) {
     g_err = "resident_bits: 8 or 4";
     return nullptr;

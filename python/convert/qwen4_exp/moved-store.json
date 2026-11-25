@@ -565,6 +565,34 @@
    "role": "legacy",
    "precision": "text",
    "optional": true
+  },
+  {
+   "path": "derived/resident_q8.dmres1.b53e7aa2212f.bin",
+   "bytes": 4674699264,
+   "sha256": "c8c593fb2f2919756458fed8474826d3067a4f88d63f7dc3e57c43398e9fe9ce",
+   "role": "derived",
+   "precision": "dmres1",
+   "optional": true,
+   "derived_id": "resident_q8"
+  },
+  {
+   "path": "derived/router.mlp_k4.q8.dmr1.f8be3d8aa914.bin",
+   "bytes": 615776256,
+   "sha256": "99fcd282f1dee42ee7e8e91a1bd06633f966b4401c7dc242f27fe71128e73b6c",
+   "role": "derived",
+   "precision": "dmr1",
+   "optional": true,
+   "derived_id": "router.mlp_k4.q8"
+  },
+  {
+   "path": "embeddings.safetensors",
+   "bytes": 1271398904,
+   "sha256": "a1af823089d6de654878ac7601179f790f0200b811619c47efae48a9870ecfad",
+   "role": "embedding",
+   "precision": "bf16",
+   "optional": true,
+   "tensor": "model.language_model.embed_tokens.weight",
+   "check": "its data region equals the bytes of model.language_model.embed_tokens.weight in resident.safetensors"
   }
  ],
  "model": {
@@ -718,8 +746,9 @@
     "resident.safetensors"
    ],
    "engine_format": "dmres1",
-   "sha256": null,
-   "note": "made by the engine (or ms_derive resident DIR) from resident.safetensors on first use; no full-size reference file exists yet"
+   "sha256": "c8c593fb2f2919756458fed8474826d3067a4f88d63f7dc3e57c43398e9fe9ce",
+   "path": "derived/resident_q8.dmres1.b53e7aa2212f.bin",
+   "bytes": 4674699264
   },
   {
    "id": "router.mlp_k4.q8",
@@ -727,14 +756,30 @@
     "routers_k4.npz"
    ],
    "engine_format": "dmr1",
-   "sha256": null,
-   "note": "made by the engine (or ms_derive router DIR mlp_k4) from routers_k4.npz on first use"
+   "sha256": "99fcd282f1dee42ee7e8e91a1bd06633f966b4401c7dc242f27fe71128e73b6c",
+   "path": "derived/router.mlp_k4.q8.dmr1.f8be3d8aa914.bin",
+   "bytes": 615776256
+  },
+  {
+   "id": "embeddings",
+   "from": [
+    "resident.safetensors"
+   ],
+   "engine_format": "safetensors",
+   "path": "embeddings.safetensors",
+   "bytes": 1271398904,
+   "sha256": "a1af823089d6de654878ac7601179f790f0200b811619c47efae48a9870ecfad",
+   "made_by": "the embed_tokens table of resident.safetensors as its own safetensors file (the same bytes)"
   }
  ],
  "legacy": [
   "check.py",
   "ref_released.json"
  ],
+ "drafting": {
+  "cost_prior": null,
+  "note": "the engine has no multi-position verify pass for this family: drafting is refused"
+ },
  "modes": {
   "exact": {
    "definition": "Generated tokens never depend on the cache, the routers or timing: the model's own router picks 10 experts per layer and the engine waits for every one.",
@@ -1135,17 +1180,22 @@
      "sha256": "f7c07febcbc6394bf13f4feb66272ce14325c5abba667cc543a537ad51a0dd11"
     },
     {
-     "path": "resident.safetensors",
-     "bytes": 9895548368,
-     "sha256": "b53e7aa2212fc59e93ac2de001daa146a4940d625128159fc028e6d72be5909d"
+     "path": "derived/resident_q8.dmres1.b53e7aa2212f.bin",
+     "bytes": 4674699264,
+     "sha256": "c8c593fb2f2919756458fed8474826d3067a4f88d63f7dc3e57c43398e9fe9ce"
     },
     {
-     "path": "routers_k4.npz",
-     "bytes": 2303645492,
-     "sha256": "f8be3d8aa91441524690cb73e6839cb8527d5c1128fad913a97f9e077f633a42"
+     "path": "derived/router.mlp_k4.q8.dmr1.f8be3d8aa914.bin",
+     "bytes": 615776256,
+     "sha256": "99fcd282f1dee42ee7e8e91a1bd06633f966b4401c7dc242f27fe71128e73b6c"
+    },
+    {
+     "path": "embeddings.safetensors",
+     "bytes": 1271398904,
+     "sha256": "a1af823089d6de654878ac7601179f790f0200b811619c47efae48a9870ecfad"
     }
    ],
-   "bytes": 132100669200,
+   "bytes": 126463349764,
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed"
   }
  },

@@ -127,6 +127,10 @@ emb = part("embeddings.safetensors", precision="bf16", optional=True, tensor="mo
            check="its data region equals the bytes of model.language_model.embed_tokens.weight in resident.safetensors")
 if emb:
     parts.append(emb)
+    # an engine-ready file too: listed under derived with its sha256, so the engine checks it when it reads the rows from it
+    derived.append({"id": "embeddings", "from": ["resident.safetensors"], "engine_format": "safetensors", "path": "embeddings.safetensors",
+                    "bytes": emb["bytes"], "sha256": emb["sha256"],
+                    "made_by": "the embed_tokens table of resident.safetensors as its own safetensors file (the same bytes)"})
 
 types = "".join("L" if t == "linear_attention" else "Q" for t in tc["layer_types"])
 off, soff, boff, shp = meta["offsets"], meta["scale_offsets"], meta["bias_offsets"], meta["shapes"]
@@ -174,6 +178,7 @@ m = {
                "draft_head": None, "vision": None},
     "derived": derived,
     "legacy": [p["path"] for p in parts if p["role"] == "legacy"],
+    "drafting": {"cost_prior": None, "note": "the engine has no multi-position verify pass for this family: drafting is refused"},
     "modes": {"exact": {"definition": f"Generated tokens never depend on the cache, the routers or timing: the model's own router picks {K} experts per layer and the engine waits for every one.",
                         "engine": "lossless"},
               "fast": {"definition": FAST_DEF, "engine": "approx:drop:w=0.13:mass=0.13:late=-1",
