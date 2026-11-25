@@ -217,6 +217,7 @@ struct Args {
   int cold_floor = -1;  // approximate mode's cold-cache floor (Approx::cold_floor)
   int bg_ranks = 0, bg_gate = 0, bg_split = 2, bg_queue = 2, bg_max = 1;
   double bg_margin = 0;  // background reads (the profile's; --bg-ranks 0 = off)
+  int teacher_prefill = 0;  // --teacher: the first N ids through the batched prompt path (--prefill-chunk), the rest stepped
   int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1, verify_old = 0, copy_free = 1;
   std::string draft_cost;
   double draft_margin = 0.05;
@@ -381,6 +382,7 @@ int main(int argc, char** argv) {
     else if (k == "--prompt-ids") a.prompt_ids = v();
     else if (k == "--prompt-file") a.prompt_file = v();
     else if (k == "--teacher") a.teacher = v();
+    else if (k == "--teacher-prefill") a.teacher_prefill = std::stoi(v());
     else if (k == "--dump-logits") a.dump_logits = v();
     else if (k == "--dump-from") a.dump_from = std::stoi(v());
     else if (k == "--record") a.record = v();
@@ -1032,12 +1034,30 @@ int main(int argc, char** argv) {
     std::vector<int> am;
     std::vector<double> step_ms;
     std::vector<int> idx(VO);
+    // --teacher-prefill N: the first N ids as one prompt (the batched path with --prefill-chunk > 1), scored from the
+    // logits after it: the state a prompt leaves, judged by the decode that follows it
+    const int tpf = std::min<int>(a.teacher_prefill, (int)ids.size());
+    if (tpf > 0) {
+      std::string e2;
+      if (a.prefill_chunk > 1) {
+        if (!M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
+        if (a.prefill_gpu_frac > 0 && !M->set_option("prefill_gpu_frac", std::to_string(a.prefill_gpu_frac), e2)) return die("prefill", e2);
+        if (a.prefill_gpu_experts > 0 && !M->set_option("prefill_gpu_experts", std::to_string(a.prefill_gpu_experts), e2)) return die("prefill", e2);
+      }
+      std::vector<int32_t> pid(ids.begin(), ids.begin() + tpf);
+      PrefillStats pst;
+      auto tq = clk::now();
+      if (a.prefill_chunk > 1) M->prefill(*S, pid.data(), tpf, true, {}, nullptr, &pst, nullptr);
+      else
+        for (int i = 0; i < tpf; i++) M->step(*S, pid[i], i + 1 == tpf ? Want::LAST : Want::NONE);
+      fprintf(stderr, "teacher prefill: %d positions in %.1f s %s\n", tpf, ms_since(tq) / 1000, pst.json.c_str());
+    }
     reset_stats();
     auto t0 = clk::now();
-    for (size_t p = 0; p < ids.size(); p++) {
+    for (size_t p = tpf > 0 ? tpf - 1 : 0; p < ids.size(); p++) {
       const bool want = (int)p >= a.dump_from || qf || tf || !a.nll_out.empty() || !a.ref_nll.empty();
       auto ts = clk::now();
-      M->step(*S, ids[p], want ? Want::LAST : Want::NONE);
+      if (tpf == 0 || (int)p >= tpf) M->step(*S, ids[p], want ? Want::LAST : Want::NONE);
       const double model_ms = ms_since(ts);
       record();
       dump_names();

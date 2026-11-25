@@ -778,11 +778,14 @@
  ],
  "prefill": {
   "chunk": 256,
-  "span": 2048,
-  "whole_from": 256,
+  "span": 32768,
+  "whole_from": 2048,
   "join": 0.25,
   "gpu_min": 64,
-  "notes": "the batched prompt path (dmeng/prefill.h): layer-major spans of 2048 in sub-chunks of 256, the next layer named whole in spans of 256 or more, the last span joined under a quarter span, the GPU's share from sub-chunks of 64; the experts all at once once landed (no waves)"
+  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunks of 256 (at most a quarter of the scratch bound), spans as long as the 768 MB scratch bound allows after the sub-chunk and MoE-block buffers (a span reads each needed expert once: one span up to about 9,000 positions), the next layer named whole from 2,048 positions (the old runner's threshold), else the next layer's router picks on this layer's MoE inputs; the GPU's exact share from sub-chunks of 64; fast mode: the products and the experts on the GPU in half precision (fast: 1; exact mode never), checked by teacher forcing after a 7,610-token prompt (200 positions: top-1 agreement 0.985 with exact prefill + the same fast decode, NLL -0.026 +- 0.033)",
+  "short_names": "router",
+  "scratch_mb": 768,
+  "fast": 1
  },
  "drafting": {
   "cost_prior": null,

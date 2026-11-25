@@ -10,6 +10,7 @@
 
 #include "dmeng/core.h"
 #include "gpu_gemm.h"
+#include "gpu_half.h"
 
 namespace dm {
 
@@ -189,10 +190,18 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   if (C.n < n) {  // per-position buffers, grown as wider chunks come
     C.xin.resize(n);
     for (int i = C.n; i < n; i++) C.xin[i].init(H, o.prec);
-    C.act.resize((size_t)n * R);
-    for (size_t i = (size_t)C.n * R; i < (size_t)n * R; i++) C.act[i].init(IA, o.prec);
     C.n = n;
   }
+  // the CPU path's per-row buffers (not the GPU's half path, which keeps its own): grown when that path runs
+  auto cpu_rows = [&]() {
+    if (C.act.size() < (size_t)n * R) {
+      const size_t a0 = C.act.size();
+      C.act.resize((size_t)n * R);
+      for (size_t i = a0; i < (size_t)n * R; i++) C.act[i].init(IA, o.prec);
+    }
+    C.actf.resize((size_t)n * R * IA);
+    C.eout.resize((size_t)n * R * H);
+  };
   C.lg.resize((size_t)n * (NE + 1));
   C.sc.resize((size_t)n * NE);
   C.bz.resize((size_t)n * NE);
@@ -202,8 +211,6 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   C.zsum.resize(n);
   C.pk.resize((size_t)n * K);
   C.pw.resize((size_t)n * K);
-  C.actf.resize((size_t)n * R * IA);
-  C.eout.resize((size_t)n * R * H);
   const long now_s = (tok_clock + off) * steps + step;  // = now(step) for a chunk that starts the span
   cache.now_step = now_s;
   if (!cache.floor_keys.empty()) cache.expire_floors();
@@ -635,6 +642,93 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (const GT& r : gt) moe_gpu_macs += (double)r.rd * C.ent[run[r.k]].dn.cols * C.ent[run[r.k]].users.size();
     }
   };
+  // ---- the fast prompt path (moe_half): once every record of the union has landed, the experts and the combination on the
+  // GPU in half precision; a pass it cannot take runs the exact path below
+  bool half_done = false;
+  if (moe_half && !deferred && !o.ref && v.act == MoeView::SWIGLU) {
+    // in waves as the records land (the old runner's pipelined union: chunks of 24 computed while the next are read): wait
+    // until 24 more (or the rest) have landed, give them to the GPU without waiting for it, repeat; the shared expert with
+    // the first wave
+    const auto th = clk::now();
+    static thread_local std::vector<GpuHalf::Exp> ex;
+    static thread_local std::vector<float> wk;
+    ex.resize(C.ent.size());
+    half_done = moe_half->moe_begin(*pool, x, n, H, K, F.I, v.shared ? v.sh_gate : nullptr, v.shared ? v.sh_up : nullptr,
+                                    v.shared ? v.sh_down : nullptr, sh_inter_);
+    constexpr int WAVE = 24;
+    std::vector<const GpuHalf::Exp*> wave;
+    size_t next = 0;  // entries before it are given to the GPU
+    while (half_done && (next < C.ent.size() || wave.empty())) {
+      wave.clear();
+      int landed = 0;
+      for (size_t q = next; q < C.ent.size(); q++) landed += cache.ready(L, C.ent[q].slot);
+      const size_t want = std::min<size_t>(WAVE, C.ent.size() - next);
+      for (size_t q = next; q < C.ent.size() && (size_t)landed < want; q++)
+        if (!cache.ready(L, C.ent[q].slot)) {
+          cache.wait(L, C.ent[q].slot);
+          landed++;
+        }
+      // the landed entries from `next` on, in order; the first not landed (if any) stays for the next wave
+      std::vector<int> take;
+      for (size_t q = next; q < C.ent.size(); q++)
+        if (cache.ready(L, C.ent[q].slot)) take.push_back((int)q);
+      for (int q : take) {  // (moved to the front of the remaining entries: the union's order is free)
+        Chunk::Ent& E = C.ent[q];
+        F.mats(cache.rec(L, E.slot), E.gu, E.up, E.dn);
+        E.inter = F.I;
+        E.done = true;
+        GpuHalf::Exp& X = ex[q];
+        X.gate = &E.gu, X.up = &E.up, X.down = &E.dn;
+        X.pos.clear();
+        X.row.clear();
+        for (int row : E.users) X.pos.push_back(row / R), X.row.push_back(row / R * K + row % R);
+        wave.push_back(&X);
+      }
+      // the taken entries to the front (C.ent's order only matters for the bookkeeping, which reads it by ent_of)
+      {
+        std::vector<char> tk(C.ent.size() - next, 0);
+        for (int q : take) tk[q - next] = 1;
+        std::vector<Chunk::Ent> a2, b2;
+        std::vector<GpuHalf::Exp> ea, eb;
+        for (size_t q = next; q < C.ent.size(); q++) {
+          (tk[q - next] ? a2 : b2).push_back(std::move(C.ent[q]));
+          (tk[q - next] ? ea : eb).push_back(std::move(ex[q]));
+        }
+        size_t w = next;
+        for (auto* src : {&a2, &b2})
+          for (auto& e : *src) C.ent[w++] = std::move(e);
+        w = next;
+        for (auto* src : {&ea, &eb})
+          for (auto& e : *src) ex[w++] = std::move(e);
+        for (size_t q = next; q < C.ent.size(); q++) {
+          C.ent_of[C.ent[q].e] = (int)q;
+          ex[q].gate = &C.ent[q].gu, ex[q].up = &C.ent[q].up, ex[q].down = &C.ent[q].dn;
+        }
+        wave.clear();
+        for (size_t q = next; q < next + take.size(); q++) wave.push_back(&ex[q]);
+      }
+      next += take.size();
+      half_done = moe_half->moe_wave(*pool, wave.data(), (int)wave.size());
+      if (C.ent.empty()) break;
+    }
+    if (half_done) {
+      wk.assign(C.pw.begin(), C.pw.begin() + (size_t)n * K);
+      if (keep)
+        for (size_t r = 0; r < (size_t)n * K; r++)
+          if (!keep[r]) wk[r] = 0.f;
+      half_done = moe_half->moe_end(*pool, wk.data(), C.shw.data(), y);
+    } else {
+      moe_half->moe_end(*pool, nullptr, nullptr, y);  // (drops the block)
+    }
+    moe_half_ms += ms_since(th);
+    moe_half_sets++;
+    if (half_done) t.bytes_exp += (double)C.ent.size() * F.touched;
+    if (!half_done) {
+      moe_half_failed++;
+      for (auto& E : C.ent) E.done = false;
+    }
+  }
+  if (!half_done) cpu_rows();
   // the kernel choice (one rule for every record): the packed batched kernels from a number of users where the format has
   // one, else the multi-vector kernels; the same bits either way. NVFP4 from PACK_MIN; the affine routed records from
   // chunk_pack_affine (-1: PACK_MIN with ModelInfo::chunk_aff4, else never); the shared expert from chunk_pack_shared
@@ -660,6 +754,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   // chunk_waves in waves as they land (wait for one, compute it with whatever else has landed), a wave using the GPU's
   // share only from chunk_wave_gpu_min (position, expert) rows. The order of computation never changes a bit: every row of
   // C.eout is computed once from its record, and the combination below reads them in pick order.
+  if (!half_done) {
   for (int ps = 0;; ps++) {
     std::vector<int> run;
     if (ps == 0 && v.shared) {  // the shared expert as one more entry: every position, row K
@@ -759,6 +854,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       y[i][r] = v.shared ? __builtin_fmaf(C.shw[i], eo[(size_t)K * H + r], acc) : acc;
     }
   });
+  }
   if (pk_out) std::copy(C.pk.begin(), C.pk.begin() + (size_t)n * K, pk_out);
   if (w_out) std::copy(C.pw.begin(), C.pw.begin() + (size_t)n * K, w_out);
   std::copy(C.pk.begin() + (size_t)(n - 1) * K, C.pk.begin() + (size_t)n * K, picks.data() + (size_t)step * K);
@@ -795,6 +891,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
     for (int s : holds[L]) cache.unpin(L, s);
     holds[L].clear();
   }
+  if (hook && chunk_prefill) hook->observe(*this, step, x[n - 1]);  // (the prompt's last position wins)
   if (nh) {
     auto tp = clk::now();
     nh->chunk_after_moe(*this, step, n, C.pk.data());

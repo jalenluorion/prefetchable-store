@@ -1,5 +1,6 @@
 // run_rows_n with the GPU's share (gpu_split.h).
 #include "gpu_split.h"
+#include "gpu_half.h"
 
 #include <chrono>
 #include <cstring>
@@ -79,6 +80,33 @@ void run_rows_n_split(Pool& pool, GpuGemm* gpu, double frac, const JobN* jobs, i
     }
     run_rows_n(pool, R.data(), (int)R.size(), chunk, ref, nullptr);
   }
+}
+
+bool run_rows_n_half(Pool& pool, GpuHalf* gpu, const JobN* jobs, int nj, int chunk, double* bytes) {
+  if (!gpu) {
+    run_rows_n(pool, jobs, nj, chunk, false, bytes);
+    return true;
+  }
+  std::vector<JobN> cpu;
+  std::vector<std::pair<int, int>> tk;  // (ticket, job)
+  gpu->begin();
+  for (int i = 0; i < nj; i++) {
+    const JobN& j = jobs[i];
+    int t = -1;
+    if (j.n > 0 && j.r0 == 0 && j.r1 < 0 && gpu->holds(*j.w)) t = gpu->add(*j.w, j.w->rows, gpu->input(j.xf, j.n, j.w->cols), j.n);
+    if (t >= 0) tk.push_back({t, i});
+    else cpu.push_back(j);
+  }
+  const bool ok = tk.empty() || gpu->run(pool);
+  if (!cpu.empty()) run_rows_n(pool, cpu.data(), (int)cpu.size(), chunk, false, bytes);
+  if (!ok) return false;
+  parallel_for(pool, (int)tk.size() * 8, [&](int u) {
+    const JobN& j = jobs[tk[u / 8].second];
+    for (int k = u % 8; k < j.n; k += 8) gpu->row(tk[u / 8].first, k, j.out[k]);
+  });
+  if (bytes)
+    for (auto& p : tk) *bytes += (double)jobs[p.second].w->bytes();
+  return true;
 }
 
 }  // namespace dm

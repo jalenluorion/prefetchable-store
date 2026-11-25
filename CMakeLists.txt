@@ -56,15 +56,20 @@ endif()
 if(DM_METAL)
   enable_language(OBJCXX)
   set(CMAKE_OBJCXX_FLAGS_RELEASE "-O3 -DNDEBUG")
-  target_sources(dmengcore PRIVATE src/core/gpu_gemm.mm)
+  target_sources(dmengcore PRIVATE src/core/gpu_gemm.mm src/core/gpu_half.mm)
   set_target_properties(dmengcore PROPERTIES OBJCXX_STANDARD 17 OBJCXX_STANDARD_REQUIRED ON)
-  set_source_files_properties(src/core/gpu_gemm.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  set_source_files_properties(src/core/gpu_gemm.mm src/core/gpu_half.mm PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
   target_compile_definitions(dmengcore PRIVATE DM_METAL=1)
   target_link_libraries(dmengcore PUBLIC "-framework Metal" "-framework Foundation")
   # the GPU kernels against the CPU kernels, bit for bit, on random data (no model): tests/kernels/gpu_gemm_check.cpp
   add_executable(gpu_gemm_check tests/kernels/gpu_gemm_check.cpp)
   target_link_libraries(gpu_gemm_check PRIVATE dmengcore)
   target_compile_options(gpu_gemm_check PRIVATE ${DM_ARCH})
+  # the fast prompt path's half-precision products against an fp32 reference on random data, and their throughput
+  add_executable(gpu_half_check tests/kernels/gpu_half_check.cpp)
+  target_link_libraries(gpu_half_check PRIVATE dmengcore)
+  target_compile_options(gpu_half_check PRIVATE ${DM_ARCH})
+  target_compile_definitions(gpu_half_check PRIVATE DM_METAL=1)
 endif()
 # A counting build: per-thread instructions and cycles of the pool's work, the main thread's serial work and its
 # spin-waits (macOS thread_selfcounts), printed to stderr at exit when DM_COUNTS is set (see bench/README.md).

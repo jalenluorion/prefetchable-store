@@ -117,7 +117,10 @@ struct NGramHash {
 
 // the prompt path's bound of this model (the shared options: dmeng/prefill.h PrefillOpts, its values from the manifest)
 struct PrefillExtra {
-  double scratch_mb = 320;  // the prefill's scratch bound: sub-chunk buffers and the span's streams, half each (prefill.cpp)
+  double scratch_mb = 320;  // the prefill's scratch bound when the manifest declares none (prefill.cpp: streams first)
+  bool fast = false;        // the prefill running now takes the fast path (PrefillOpts::fast, fast mode)
+  int moe_block = 0;        // its MoE blocks (positions)
+  double gdn_ms = 0, qsa_ms = 0;  // the attention cores of the prefill running now: Gated DeltaNet, QSA
 };
 
 struct Flash : Model {
@@ -239,6 +242,7 @@ struct Flash : Model {
   std::string verify_json() const;
   size_t span_bytes() const;
   double sub_bytes_per_pos() const;
+  double moe_bytes_per_pos() const;  // the fast path's MoE block (the GPU's buffers and the core's routing) per position
 };
 
 }  // namespace qwen4

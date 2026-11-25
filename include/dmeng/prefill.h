@@ -14,6 +14,7 @@
 namespace dm {
 
 struct GpuGemm;
+struct GpuHalf;
 class Core;
 
 struct PrefillOpts {
@@ -37,6 +38,14 @@ struct PrefillOpts {
   double gpu_frac = 0, gpu_experts = 0;
   int gpu_kernel = 1;
   bool release = false;  // give the scratch and the GPU's buffers back after each prefill
+  // the fast prompt path (fast mode only; exact mode never takes it): the prompt's 8- and 4-bit matrix products and its
+  // experts on the GPU in half precision (gpu_half.h), the experts of a layer computed over MoE blocks of up to
+  // moe_block positions (0: as the scratch bound allows). Not exact: decode after it is checked against exact prefill's.
+  bool fast = false;
+  int moe_block = 0;
+  // the scratch bound of a prefill in MB (the span's streams first, then the sub-chunk and MoE-block buffers); 0: the
+  // family's own default. A longer span reads each layer's experts once for more positions.
+  double scratch_mb = 0;
   // the early names of a span of n positions (multi: several sub-chunks): 0 none, 1 whole next layer, 2 router picks
   int names_for(int n, bool multi) const {
     if (stream != 3) return stream;
@@ -49,6 +58,9 @@ struct PrefillOpts {
 struct GpuShare {
   std::unique_ptr<GpuGemm> g;
   bool slab_wrapped = false;
+  std::unique_ptr<GpuHalf> h;  // the fast prompt path's half-precision products (PrefillOpts::fast), the resident weights and
+                               // the expert slab(s) wrapped
+  GpuHalf* half() const { return h.get(); }
   GpuShare();
   ~GpuShare();
   GpuGemm* get() const { return g.get(); }

@@ -12,6 +12,7 @@
 #include <sstream>
 
 #include "../../core/gpu_gemm.h"
+#include "../../core/gpu_half.h"
 #include "qwen4_exp.h"
 
 namespace dm {
@@ -20,6 +21,7 @@ namespace qwen4 {
 struct Flash::Span {
   int n_cap = 0, sub_cap = 0;
   std::vector<float> hyp;  // [n][N] the span's streams
+  std::vector<float> mixs, inj2s, ys;  // the fast path: every position's MoE input [n][H] and injection [n][64], a MoE block's outputs
   // per position of a sub-chunk
   std::vector<float> nrm, lo, up, r, mix, y, inj1, inj2, proj, cv, att, e, key, val, gated, normed, pout;
   std::vector<XBuf> xa, xb, xc;
@@ -29,7 +31,7 @@ struct Flash::Span {
   std::shared_ptr<RowStore::Batch> rows;
   std::vector<uint8_t> snap;
   size_t bytes() const {
-    size_t b = 4 * (hyp.capacity() + nrm.capacity() + lo.capacity() + up.capacity() + r.capacity() + mix.capacity() + y.capacity() + inj1.capacity() +
+    size_t b = 4 * (hyp.capacity() + mixs.capacity() + inj2s.capacity() + ys.capacity() + nrm.capacity() + lo.capacity() + up.capacity() + r.capacity() + mix.capacity() + y.capacity() + inj1.capacity() +
                     inj2.capacity() + proj.capacity() + cv.capacity() + att.capacity() + e.capacity() + key.capacity() + val.capacity() +
                     gated.capacity() + normed.capacity() + pout.capacity());
     for (auto* v : {&xa, &xb, &xc})
@@ -73,6 +75,13 @@ double Flash::sub_bytes_per_pos() const {
   return 4 * floats + xq_bytes(ka) + xq_bytes(c.LOW) + xq_bytes(kc) + 2.0 * 4 * ka;
 }
 
+double Flash::moe_bytes_per_pos() const {
+  const double K = c.K, H = c.H, I = std::max(c.I, c.SI);
+  // the GPU's block (half inputs, activations and expert outputs of K + 1 rows, fp32 outputs, weights) + the core's routing
+  // (logits and scores of NE, the quantised input) + the block's outputs here
+  return 2 * H + (K + 1) * (2 * I + 2 * H) + 4 * H + 4 * K + 4 * (3.0 * c.NE + 1) + xq_bytes(c.H) + 4 * H;
+}
+
 static size_t proj_width(const FCfg& c) {
   return std::max((size_t)c.conv_dim() + c.NVH * c.DV + 2 * c.NVH,
                   (size_t)2 * c.NQ * c.HD + 2 * c.NKV * c.HD + (c.IXH + 1) * c.IXD + 2 * c.NQ * c.HD);
@@ -82,6 +91,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
                      const std::atomic<bool>* cancel, const PrefillProgress* progress, int prog_base, int prog_total, Ver* ver) {
   const int H = c.H, N = c.N(), NL = c.NL, sub = ver ? n : std::max(1, std::min(po.chunk, n));
   Pool& pool = *core->pool;
+  GpuHalf* const GH = px.fast && !ver ? gpu.half() : nullptr;  // the fast path: half-precision products on the GPU
   if (!sp) sp = std::make_shared<Span>();
   Span& P = *sp;
   // sub-chunk boundaries: every `sub` positions and at each capture position (a layer's state is delivered there)
@@ -101,6 +111,12 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
   if (P.n_cap < n) {
     P.hyp.resize((size_t)n * N);
     P.n_cap = n;
+  }
+  const int PB = GH ? std::max(1, std::min(n, px.moe_block)) : 0;  // the fast path's MoE blocks
+  if (GH) {
+    if (P.mixs.size() < (size_t)n * H) P.mixs.resize((size_t)n * H);
+    if (P.inj2s.size() < (size_t)n * 64) P.inj2s.resize((size_t)n * 64);
+    if (P.ys.size() < (size_t)PB * H) P.ys.resize((size_t)PB * H);
   }
   if (P.sub_cap < wmax) {
     const size_t w = wmax, PW = proj_width(c);
@@ -177,8 +193,8 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
   Cache::ChunkClock span_clock(core->cache, core->tok_clock + n - 1);  // the whole span is one token to the policy
   const int names = po.names_for(n, multi);  // the next layer's early names in this span (prefill.h)
   MoePass moe_pass(*core, po);
-  const bool packed_ok = !ref && prec == Prec::I16;
-  GpuGemm* const G0 = gpu && po.gpu_frac > 0 ? gpu.get() : nullptr;
+  const bool packed_ok = !ref && prec == Prec::I16 && !GH;
+  GpuGemm* const G0 = gpu && po.gpu_frac > 0 && !GH ? gpu.get() : nullptr;
   if (gpu) gpu->set_kernel(po.gpu_kernel);
   const size_t PW = proj_width(c);
   // the n-gram history's slice of the fixed blob at position p (relative): ids p - 2, p - 1 of the history
@@ -207,21 +223,35 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
       auto inputs = [&](std::vector<XBuf>& xs, const float* base, size_t stride) {
         for (int i = 0; i < m; i++) xq[i] = &xs[i].q, xf[i] = base + (size_t)i * stride;
       };
+      // a set of products: the exact path (CPU, the GPU's exact share), or the fast path (the GPU's half products; a job it
+      // does not take on the CPU, its quantised input prepared then)
+      auto prods = [&](JobN* jb, int nj, int chunk, std::vector<XBuf>& xs, XQB* qb, const float* base, size_t stride, int K) {
+        if (!GH) {
+          quant(xs, qb, base, stride, K);
+          run_rows_n_split(pool, G, po.gpu_frac, jb, nj, chunk, ref, &T->bytes_res, &gacct);
+          return;
+        }
+        bool need = false;
+        for (int k = 0; k < nj; k++) need |= jb[k].w->quantised() && !GH->holds(*jb[k].w);
+        if (need) quant(xs, nullptr, base, stride, K);
+        if (!run_rows_n_half(pool, GH, jb, nj, chunk, &T->bytes_res)) {  // the GPU did not complete: all on the CPU
+          if (!need) quant(xs, nullptr, base, stride, K);
+          run_rows_n(pool, jb, nj, chunk, ref, &T->bytes_res);
+        }
+      };
       // ---- a GatedResidual over the sub-chunk: mixed [m][H] into mixo, inj [m][64] into injo (null: the final mixer)
       auto hc_chunk = [&](const HCw& w, float* mixo, float* injo) {
         const auto th = clk::now();
         parallel_for(pool, m, [&](int i) { hc_norm(w, hp(i), P.nrm.data() + (size_t)i * N); });
-        quant(P.xa, &P.qa, P.nrm.data(), N, N);
         inputs(P.xa, P.nrm.data(), N);
         for (int i = 0; i < m; i++) o1[i] = P.lo.data() + (size_t)i * c.LOW, o2[i] = P.r.data() + (size_t)i * 64;
         JobN jb[2] = {{&w.down, m, xq.data(), xf.data(), o1.data(), packed ? &P.qa : nullptr}, {&w.inj, m, nullptr, xf.data(), o2.data(), nullptr}};
-        run_rows_n_split(pool, G, po.gpu_frac, jb, injo ? 2 : 1, 16, ref, &T->bytes_res, &gacct);
+        prods(jb, injo ? 2 : 1, 16, P.xa, &P.qa, P.nrm.data(), N, N);
         parallel_for(pool, m, [&](int i) { hc_lo(P.lo.data() + (size_t)i * c.LOW); });
-        quant(P.xb, &P.qc, P.lo.data(), c.LOW, c.LOW);
         inputs(P.xb, P.lo.data(), c.LOW);
         for (int i = 0; i < m; i++) o1[i] = P.up.data() + (size_t)i * N;
         JobN ju = {&w.up, m, xq.data(), xf.data(), o1.data(), packed ? &P.qc : nullptr};
-        run_rows_n_split(pool, G, po.gpu_frac, &ju, 1, 32, ref, &T->bytes_res, &gacct);
+        prods(&ju, 1, 32, P.xb, &P.qc, P.lo.data(), c.LOW, c.LOW);
         parallel_for(pool, m, [&](int i) {
           hc_mix(P.nrm.data() + (size_t)i * N, P.up.data() + (size_t)i * N, injo ? P.r.data() + (size_t)i * 64 : nullptr, mixo + (size_t)i * H,
                  injo ? injo + (size_t)i * 64 : nullptr);
@@ -248,11 +278,10 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
           for (int h = 0; h < nh; h++)
             ng_row(P.rows->data.data() + ((size_t)(i0 + i) * nh + h) * c.ng_bpr, P.e.data() + (size_t)i * c.ple_dim + (size_t)h * c.ng_dim);
         });
-        quant(P.xc, &P.qa, P.e.data(), c.ple_dim, c.ple_dim);
         inputs(P.xc, P.e.data(), c.ple_dim);
         for (int i = 0; i < m; i++) o1[i] = P.key.data() + (size_t)i * N, o2[i] = P.val.data() + (size_t)i * H;
         JobN jb[2] = {{&W.pk, m, xq.data(), xf.data(), o1.data(), packed ? &P.qa : nullptr}, {&W.pv, m, xq.data(), xf.data(), o2.data(), packed ? &P.qa : nullptr}};
-        run_rows_n_split(pool, G, po.gpu_frac, jb, 2, 32, ref, &T->bytes_res, &gacct);
+        prods(jb, 2, 32, P.xc, &P.qa, P.e.data(), c.ple_dim, c.ple_dim);
         parallel_for(pool, m, [&](int i) {
           ple_gate(W, P.key.data() + (size_t)i * N, P.val.data() + (size_t)i * H, hp(i), P.gated.data() + (size_t)i * N, P.normed.data() + (size_t)i * N);
         });
@@ -277,7 +306,6 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
       hc_chunk(W.ahc, P.mix.data(), P.inj1.data());
       auto ta = clk::now();
       stage_mark(ST_ATTN_PROJ);
-      quant(P.xa, &P.qa, P.mix.data(), H, H);
       inputs(P.xa, P.mix.data(), H);
       if (W.lin) {
         const int C = c.conv_dim(), ZD = c.NVH * c.DV;
@@ -291,7 +319,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
         const XQB* pa = packed ? &P.qa : nullptr;
         JobN jb[4] = {{&W.qkv, m, xq.data(), xf.data(), o1.data(), pa}, {&W.z, m, xq.data(), xf.data(), o2.data(), pa},
                       {&W.wb, m, nullptr, xf.data(), o3.data(), nullptr}, {&W.wa, m, nullptr, xf.data(), o4.data(), nullptr}};
-        run_rows_n_split(pool, G, po.gpu_frac, jb, 4, 32, ref, &T->bytes_res, &gacct);
+        prods(jb, 4, 32, P.xa, &P.qa, P.mix.data(), H, H);
         auto tb = clk::now();
         T->attn_proj += ms_between(ta, tb);
         stage_mark(ST_ATTN_CORE);
@@ -311,6 +339,10 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
         });
         const float* Sin = S->ls[L].S.data();
         float* Sst = ver ? ver->alts[L].data() : S->ls[L].S.data();
+        // the fast path: the heads on the GPU (fp32, positions in order); else head by head on the CPU
+        const bool gpu_heads = GH && GH->gdn(pool, m, c.NKH, c.NVH, c.DK, c.DV, Sst, CV, C, PJ, (int)PW, C, C + ZD, C + ZD + c.NVH, P.att.data(), ZD,
+                                             W.g.A_log, W.g.dt_bias, W.g.gnorm, gd.sigmoid_gate, gd.eps);
+        if (!gpu_heads)
         parallel_for(pool, c.NVH, [&](int h) {  // the heads: head by head, positions in order (gdn::head_io, as decode)
           const size_t hb = (size_t)h * c.DV * c.DK;
           for (int i = 0; i < m; i++) {
@@ -321,12 +353,12 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
         });
         auto tc = clk::now();
         T->attn_core += ms_between(tb, tc);
+        px.gdn_ms += ms_between(tb, tc);
         stage_mark(ST_ATTN_OUT);
-        quant(P.xc, &P.qc, P.att.data(), ZD, ZD);
         inputs(P.xc, P.att.data(), ZD);
         for (int i = 0; i < m; i++) o1[i] = P.y.data() + (size_t)i * H;
         JobN jo = {&W.o, m, xq.data(), xf.data(), o1.data(), packed ? &P.qc : nullptr};
-        run_rows_n_split(pool, G, po.gpu_frac, &jo, 1, 32, ref, &T->bytes_res, &gacct);
+        prods(&jo, 1, 32, P.xc, &P.qc, P.att.data(), ZD, ZD);
         T->attn_out += ms_since(tc);
         if (captured(bnd[bi])) {
           const LState& ls = S->ls[L];
@@ -342,7 +374,7 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
         const XQB* pa = packed ? &P.qa : nullptr;
         JobN jb[4] = {{&W.q, m, xq.data(), xf.data(), o1.data(), pa}, {&W.k, m, xq.data(), xf.data(), o2.data(), pa},
                       {&W.v, m, xq.data(), xf.data(), o3.data(), pa}, {&W.ix, m, xq.data(), xf.data(), o4.data(), pa}};
-        run_rows_n_split(pool, G, po.gpu_frac, jb, 4, 32, ref, &T->bytes_res, &gacct);
+        prods(jb, 4, 32, P.xa, &P.qa, P.mix.data(), H, H);
         auto tb = clk::now();
         T->attn_proj += ms_between(ta, tb);
         stage_mark(ST_ATTN_CORE);
@@ -363,22 +395,42 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
           parallel_for(pool, (int)blocks.size(), [&](int k) { pool_key(L, blocks[k]); });
         }
         parallel_for(pool, m, [&](int i) { qsa_select(L, pos0 + i, P.proj.data() + (size_t)i * PW + QW + 2 * KW, P.sel[i], false); });
-        parallel_for(pool, m * c.NQ, [&](int j) {
-          const int i = j / c.NQ, h = j % c.NQ;
-          qsa_head(L, h, qv(i) + (size_t)h * HD, qv(i) + (size_t)c.NQ * HD + (size_t)h * HD, P.sel[i], P.att.data() + (size_t)i * c.NQ * HD + (size_t)h * HD);
-        });
+        bool gpu_attn = false;
+        if (GH && S->ls[L].K) {  // the fast path: every position's heads on the GPU over its selected keys, then the gates
+          std::vector<const float*> qq(m);
+          std::vector<const std::vector<int>*> ss(m);
+          std::vector<float*> oo(m);
+          for (int i = 0; i < m; i++) qq[i] = qv(i), ss[i] = &P.sel[i], oo[i] = P.att.data() + (size_t)i * c.NQ * HD;
+          gpu_attn = GH->attn(pool, S->ls[L].K, S->ls[L].V, S->ctx, HD, c.NQ, c.NKV, m, qq.data(), ss.data(), oo.data());
+          if (gpu_attn)
+            parallel_for(pool, m, [&](int i) {
+              const float* gt = qv(i) + (size_t)c.NQ * HD;
+              float* o = P.att.data() + (size_t)i * c.NQ * HD;
+              for (int k = 0; k < c.NQ * HD; k++) o[k] *= sigm(gt[k]);
+            });
+        }
+        if (!gpu_attn)
+          parallel_for(pool, m * c.NQ, [&](int j) {
+            const int i = j / c.NQ, h = j % c.NQ;
+            qsa_head(L, h, qv(i) + (size_t)h * HD, qv(i) + (size_t)c.NQ * HD + (size_t)h * HD, P.sel[i], P.att.data() + (size_t)i * c.NQ * HD + (size_t)h * HD);
+          });
         auto tc = clk::now();
         T->attn_core += ms_between(tb, tc);
+        px.qsa_ms += ms_between(tb, tc);
         stage_mark(ST_ATTN_OUT);
-        quant(P.xc, &P.qc, P.att.data(), c.NQ * HD, c.NQ * HD);
         inputs(P.xc, P.att.data(), c.NQ * HD);
         for (int i = 0; i < m; i++) o1[i] = P.y.data() + (size_t)i * H;
         JobN jo = {&W.o, m, xq.data(), xf.data(), o1.data(), packed ? &P.qc : nullptr};
-        run_rows_n_split(pool, G, po.gpu_frac, &jo, 1, 32, ref, &T->bytes_res, &gacct);
+        prods(&jo, 1, 32, P.xc, &P.qc, P.att.data(), c.NQ * HD, c.NQ * HD);
         T->attn_out += ms_since(tc);
       }
       inject(P.y.data(), P.inj1.data());
       // ---- the MoE
+      if (GH) {  // the fast path: the MoE inputs of every position kept; the experts below, over MoE blocks, after the sub-chunks
+        hc_chunk(W.mhc, P.mixs.data() + (size_t)i0 * H, P.inj2s.data() + (size_t)i0 * 64);
+        if (L == 0 && captured(bnd[bi])) sink_ng(bnd[bi]);
+        continue;
+      }
       hc_chunk(W.mhc, P.mix.data(), P.inj2.data());
       std::vector<const float*> xm(m);
       std::vector<float*> ym(m);
@@ -394,6 +446,30 @@ bool Flash::span_run(const int32_t* ids, int n, bool want_last, const std::vecto
       inject(P.y.data(), P.inj2.data());
       if (ver && L + 1 == NL) hc_chunk(fin, ver->fx.data(), nullptr);  // every position's final mixer (step()'s hc_step, batched)
       if (L == 0 && captured(bnd[bi])) sink_ng(bnd[bi]);
+    }
+    if (GH) {  // the fast path's MoE: blocks of PB positions, each expert computed on the GPU for the block's positions that picked it
+      for (int b0 = 0; b0 < n; b0 += PB) {
+        const int pm = std::min(PB, n - b0);
+        std::vector<const float*> xm(pm);
+        std::vector<float*> ym(pm);
+        for (int i = 0; i < pm; i++) xm[i] = P.mixs.data() + (size_t)(b0 + i) * H, ym[i] = P.ys.data() + (size_t)i * H;
+        core->moe_half = GH;
+        if (b0 == 0 && names && L + 1 < NL) {  // named inside moe_chunk, behind this layer's own reads
+          core->span_next = L + 1;
+          core->span_next_router = names == 2;
+        }
+        core->moe_chunk(L, pm, xm.data(), ym.data(), views[L], nullptr, nullptr, b0);
+        core->moe_half = nullptr;
+        const auto tj = clk::now();
+        parallel_for(pool, pm, [&](int i) {  // h_s += inj_s * y
+          float* h = P.hyp.data() + (size_t)(b0 + i) * N;
+          const float* yy = P.ys.data() + (size_t)i * H;
+          const float* jj = P.inj2s.data() + (size_t)(b0 + i) * 64;
+          for (int s = 0; s < c.HC; s++)
+            for (int k = 0; k < H; k++) h[(size_t)s * H + k] = __builtin_fmaf(yy[k], jj[s], h[(size_t)s * H + k]);
+        });
+        T->misc += ms_since(tj);
+      }
     }
     core->span_unname(L);  // its union pins and its names
     if (multi && progress && *progress) (*progress)(prog_base + (int)((long)n * (L + 1) / NL), prog_total, 0.0);
@@ -472,16 +548,40 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
   const double me_w0 = core->moe_gpu_wait_ms, me_m0 = core->moe_gpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
   int spans = 0;
+  // The fast path (half-precision products and experts on the GPU) in fast mode only, when the build and the device have
+  // it; exact mode never takes it
+  bool fast = po.fast && core->ns.on && !ref;
+  if (fast && !gpu.half()) {
+    bool handled = false;
+    std::string e;
+    if (!prefill_option("prefill_fast", "1", po, gpu, R.base, R.size, core, handled, e)) {
+      fprintf(stderr, "dmeng: the fast prompt path is off (%s)\n", e.c_str());
+      po.fast = false;
+    }
+    fast = po.fast && gpu.half();
+  }
   // The scratch is bounded by memory, not only by the front end's chunk and span: this model's per-position scratch is
-  // large (four streams of the hidden state, 40 KB per position for the streams alone, and about 0.6 MB per position of a
-  // sub-chunk), and on the 16 GB Mac the prompt path's peak decides whether it swaps. Sub-chunks of at most
-  // scratch_mb / 2 (each layer's resident matrices are read once per sub-chunk: 4 GB / 256 positions = 16 MB per position,
-  // under 1% of the position's compute) and spans of at most scratch_mb / 2 of streams (a span reads every expert of
-  // every layer once, 68 GB: at 3,000 positions that is 20 s of drive under 75+ s of compute).
-  const int sub_cap = std::max(64, (int)(px.scratch_mb * 1e6 / 2 / sub_bytes_per_pos()) / 64 * 64);
+  // large (four streams of the hidden state, 40 KB per position, and about 0.6 MB per position of a sub-chunk), and on the
+  // 16 GB Mac the prompt path's peak decides whether it swaps. The bound (the manifest's scratch_mb) goes to the
+  // sub-chunks first (at most a quarter: each layer's resident matrices are read once per sub-chunk, 4 GB / 192 positions =
+  // 21 MB per position, under 1% of its compute), then in the fast path to the MoE blocks (at most a quarter: the GPU's
+  // efficiency grows with the users per expert), and the rest to the span's streams: a span reads every needed expert of
+  // every layer once (about 65 GB for a long prompt, 20 s of drive), so the prompt is cut into as few spans as the rest
+  // allows, of equal length.
+  const double B = (po.scratch_mb > 0 ? po.scratch_mb : px.scratch_mb) * 1e6;
+  const int sub_cap = std::max(64, (int)(B / 4 / sub_bytes_per_pos()) / 64 * 64);
   const int chunk_eff = std::min(po.chunk, sub_cap);
-  const int span_cap = std::max(chunk_eff, (int)(px.scratch_mb * 1e6 / 2 / (4.0 * c.N())) / chunk_eff * chunk_eff);
-  const int span = std::min(std::max(chunk_eff, po.span), span_cap);
+  px.fast = fast;
+  px.moe_block = !fast ? 0 : std::min(n, po.moe_block > 0 ? po.moe_block : std::max(256, (int)(B / 4 / moe_bytes_per_pos())));
+  const double rest = B - chunk_eff * sub_bytes_per_pos() - px.moe_block * moe_bytes_per_pos();
+  const double per = 4.0 * c.N() + (fast ? 4.0 * c.H + 4.0 * 64 : 0.0);  // streams (and the fast path's MoE inputs)
+  const int span_cap = std::max(chunk_eff, (int)(rest / per));
+  int span = std::min(std::max(chunk_eff, po.span), span_cap);
+  if (n > span) span = (n + (n + span - 1) / span - 1) / ((n + span - 1) / span);  // equal spans
+  px.gdn_ms = px.qsa_ms = 0;
+  const double hs0 = gpu.half() ? gpu.half()->ms_stage : 0, hg0 = gpu.half() ? gpu.half()->ms_gpu : 0, hf0 = gpu.half() ? gpu.half()->flops : 0;
+  const double mh0 = core->moe_half_ms;
+  const std::vector<double> ws0(core->wait_step.begin(), core->wait_step.end());
   const int chunk_keep = po.chunk;
   po.chunk = chunk_eff;  // (span_run's sub-chunks)
   PrefillOpts o = po;
@@ -513,7 +613,16 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
       d.embed -= tt0.embed, d.attn_proj -= tt0.attn_proj, d.attn_core -= tt0.attn_core, d.attn_out -= tt0.attn_out, d.depth -= tt0.depth;
       d.msg -= tt0.msg, d.router -= tt0.router, d.experts -= tt0.experts, d.wait -= tt0.wait, d.cache -= tt0.cache, d.pf -= tt0.pf;
       d.head -= tt0.head, d.misc -= tt0.misc, d.ra -= tt0.ra;
-      o << ",\"stages_ms\":{" << d.stages_json(1) << "}";
+      o << ",\"stages_ms\":{" << d.stages_json(1) << "},\"attn_core_ms\":{\"gated_deltanet\":" << px.gdn_ms << ",\"qsa\":" << px.qsa_ms << "}";
+    }
+    o << ",\"wait_ms_by_layer\":[";
+    for (size_t L = 0; L < ws0.size() && L < core->wait_step.size(); L++) o << (L ? "," : "") << (int)(core->wait_step[L] - ws0[L]);
+    o << "]";
+    if (fast) {
+      GpuHalf* h = gpu.half();
+      o << ",\"fast\":{\"moe_block\":" << px.moe_block << ",\"gpu_ms\":" << h->ms_gpu - hg0 << ",\"stage_ms\":" << h->ms_stage - hs0
+        << ",\"tflop\":" << (h->flops - hf0) / 1e12 << ",\"tflops_in_gpu_time\":" << (h->flops - hf0) / 1e9 / std::max(1.0, h->ms_gpu - hg0)
+        << ",\"moe_ms\":" << core->moe_half_ms - mh0 << ",\"moe_failed\":" << core->moe_half_failed << ",\"sets_failed\":" << h->failed << "}";
     }
     if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac
@@ -525,9 +634,11 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     st->json = o.str();
   }
   po.chunk = chunk_keep;
+  px.fast = false;
   if (po.release) {  // the span's scratch (40 KB per position for the streams alone) and the GPU's buffers go back
     sp.reset();
     if (gpu) gpu->trim();
+    if (gpu.half()) gpu.half()->trim();
   }
   if (ok && fast_head && want_logits) greedy_ = argmax();
   return ok;

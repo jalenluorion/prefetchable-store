@@ -7,6 +7,7 @@
 
 #include "dmeng/core.h"
 #include "gpu_gemm.h"
+#include "gpu_half.h"
 
 namespace dm {
 
@@ -57,6 +58,29 @@ bool prefill_option(const std::string& name, const std::string& value, PrefillOp
   if (name == "prefill_dn_rows") return (o.dn_rows = std::max(4, i() / 4 * 4)), true;
   if (name == "prefill_gpu_kernel") return (o.gpu_kernel = i() != 0), true;  // 1 matrix units, 0 integer
   if (name == "prefill_release") return (o.release = i() != 0), true;
+  if (name == "prefill_moe_block") return (o.moe_block = std::max(0, i())), true;
+  if (name == "prefill_scratch_mb") return (o.scratch_mb = std::max(0.0, std::stod(value))), true;
+  if (name == "prefill_fast") {
+    o.fast = i() != 0;
+    if (!o.fast || !res_base || !core) return true;  // (a manifest's declaration: set up when the model is bound)
+#if defined(DM_METAL)
+    if (!gpu.h) {
+      std::unique_ptr<GpuHalf> h(new GpuHalf());
+      if (!h->init()) return (err = "prefill_fast: GPU (Metal) init failed"), false;
+      if (!h->wrap(res_base, res_size)) return (err = "prefill_fast: the resident weights could not be wrapped"), false;
+      bool any = false;
+      for (int p = 0; p < core->cache.npools; p++)
+        if (core->cache.P[p].slab) any = h->wrap(core->cache.P[p].slab, core->cache.P[p].slab_bytes) || any;
+      if (!any) return (err = "prefill_fast: the expert slab could not be wrapped (plain or locked slots only)"), false;
+      gpu.h = std::move(h);
+      fprintf(stderr, "dmeng: fast prompt path on (half-precision products on the GPU, %.2f GB wrapped)\n", gpu.h->wrapped_bytes() / 1e9);
+    }
+    return true;
+#else
+    o.fast = false;
+    return (err = "prefill_fast: this build has no Metal (DM_METAL off)"), false;
+#endif
+  }
   if (name == "prefill_gpu_frac" || name == "prefill_gpu_experts") {
     const bool ex = name == "prefill_gpu_experts";
     const double f = std::stod(value);
@@ -102,6 +126,11 @@ bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std
     explicit NsOff(Approx& x) : a(x), on(x.on) { a.on = false; }
     ~NsOff() { a.on = on; }
   } ns_off(core.ns);
+  struct InPrefill {  // the hooks' previous-token state follows the prompt (Core::chunk_prefill)
+    Core& c;
+    explicit InPrefill(Core& x) : c(x) { c.chunk_prefill = true; }
+    ~InPrefill() { c.chunk_prefill = false; }
+  } in_prefill(core);
   std::vector<int> caps(capture);
   std::sort(caps.begin(), caps.end());
   caps.erase(std::unique(caps.begin(), caps.end()), caps.end());

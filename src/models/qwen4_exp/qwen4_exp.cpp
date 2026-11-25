@@ -1079,7 +1079,6 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
   if ((name == "prefill_batched_always" && std::stoi(value) == 0) || (name == "prefill_record" && value.empty())) return true;  // off
   if (name == "prefill_batched_always" || name == "prefill_record")  // refused, not ignored
     return (err = name + ": not implemented for qwen4_exp's prefill"), false;
-  if (name == "prefill_scratch_mb") return (px.scratch_mb = std::max(16.0, std::stod(value))), true;
   bool handled = false;  // the shared prefill_* options (dmeng/prefill.h)
   const bool ok = prefill_option(name, value, po, gpu, R.base, R.size, core, handled, err);
   if (handled) return ok;

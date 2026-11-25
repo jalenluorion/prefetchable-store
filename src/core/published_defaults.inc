@@ -258,10 +258,13 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   },
   "prefill": {
    "chunk": 256,
+   "fast": 1,
    "gpu_min": 64,
    "join": 0.25,
-   "span": 2048,
-   "whole_from": 256
+   "scratch_mb": 768,
+   "short_names": "router",
+   "span": 32768,
+   "whole_from": 2048
   },
   "profiles": {
    "mac": {

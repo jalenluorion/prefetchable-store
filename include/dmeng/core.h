@@ -122,6 +122,7 @@ struct Approx {
 };
 
 struct GpuGemm;  // src/core/gpu_gemm.h
+struct GpuHalf;  // src/core/gpu_half.h
 
 struct CoreOpts {
   int threads = 8, readers = 4, split = 1;
@@ -212,6 +213,16 @@ class Core {
   double moe_gpu_frac = 0;
   double moe_gpu_wait_ms = 0, moe_gpu_stage_ms = 0, moe_gpu_macs = 0, moe_cpu_macs = 0;
   uint64_t moe_gpu_sets = 0, moe_gpu_failed = 0;
+  // the fast prompt path (fast mode only; a model's batched prefill sets it for its passes): moe_chunk computes the whole
+  // pass's experts and their combination on the GPU in half precision (gpu_half.h moe) once every record of its union has
+  // landed; not exact. A pass it cannot take (records outside the wrapped slab, unions in batches) runs the exact path.
+  GpuHalf* moe_half = nullptr;
+  // a prompt's batched pass is running (prefill_spans): each multi-position MoE leaves its last position's input in the
+  // early-name hooks' previous-token state (Hook::observe), as a single step would, so the token after the prompt is named
+  // from the prompt's last position (names only: no output changes)
+  bool chunk_prefill = false;
+  double moe_half_ms = 0;
+  uint64_t moe_half_sets = 0, moe_half_failed = 0;
   double ra_budget = 0;
   int ra_max_tok = 0;
   bool ra_sat_skip = false;
