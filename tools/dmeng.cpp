@@ -679,7 +679,7 @@ int main(int argc, char** argv) {
   if (a.read_mass >= 0) C.ns.read_mass = a.read_mass;
   if (a.bg >= 0) C.ns.bg = a.bg != 0;
   if (a.drop >= 0) C.ns.drop = a.drop != 0;
-  C.ns.cold_floor = a.cold_floor;  // --drop overrides the preset (approx:drop sets it, the others clear it)
+  if (a.cold_floor != -1) C.ns.cold_floor = a.cold_floor;  // --cold-floor N: the mode string's floor=N (every front end)
   C.cache.rd.prio = a.rd_prio < 0 ? (plan || (C.ns.on && C.ns.prio)) : a.rd_prio != 0;
   C.cache.rd.excl = a.rd_excl != 0;
   C.cache.name_gate = a.name_gate != 0;

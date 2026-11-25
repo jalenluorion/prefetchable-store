@@ -45,6 +45,7 @@ bool Approx::preset(const std::string& spec) {
   const size_t c = spec.find(':');
   const std::string name = spec.substr(0, c);
   if (!preset_base(name)) return false;
+  cold_floor = -1;
   for (size_t i = c == std::string::npos ? spec.size() : c + 1; i < spec.size();) {
     size_t j = spec.find(':', i);
     if (j == std::string::npos) j = spec.size();
@@ -59,6 +60,7 @@ bool Approx::preset(const std::string& spec) {
     else if (k == "mass") read_mass = v;
     else if (k == "late") late_ms = v;
     else if (k == "bg") bg = v != 0;
+    else if (k == "floor") cold_floor = (int)v;  // the cold-cache floor (-1: 2K; 0: never, the old runner's substitution)
     else return false;
     i = j + 1;
   }
@@ -97,7 +99,8 @@ bool Approx::preset_base(const std::string& name) {
 const char* Approx::presets_help() {
   return "bounded (wait for named picks in flight, read any missing pick with released weight > 0.1, replace the rest), "
          "drop (as bounded, but the rest is left out: no substitute, released weights kept, no floor of experts in memory), "
-         "never (replace whatever has not landed: a speed bound); each may be followed by :w=W:mass=M:late=MS:bg=0|1 (the rule set)";
+         "never (replace whatever has not landed: a speed bound); each may be followed by :w=W:mass=M:late=MS:bg=0|1:floor=N "
+         "(the rule set; floor: the cold-cache floor of the replacing rules, 0 = never read on the spot for it)";
 }
 
 // ------------------------------------------------------------------------------------------------ setup
