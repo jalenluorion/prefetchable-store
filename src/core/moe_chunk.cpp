@@ -192,6 +192,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   C.eout.resize((size_t)n * R * H);
   const long now_s = (tok_clock + off) * steps + step;  // = now(step) for a chunk that starts the span
   cache.now_step = now_s;
+  if (!cache.floor_keys.empty()) cache.expire_floors();
   step_t0 = clk::now();
   if (cancel_stale) cache.cancel_stale(now_s - 1);
   Hook* nh = chunk_named ? hook : nullptr;  // names inside this verify

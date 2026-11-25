@@ -185,7 +185,17 @@ bool Readers::can_spec() const {
 }
 
 bool Readers::can_bg() const {
-  return !bg_.empty() && urgent_.empty() && normal_.empty() && inflight_[0] + inflight_[1] == 0 && inflight_[2] < max_bg;
+  return !bg_.empty() && urgent_.empty() && normal_.empty() && inflight_[0] == 0 && inflight_[1] <= bg_spec_gate && inflight_[2] < max_bg;
+}
+
+bool Readers::bg_open() {
+  std::lock_guard<std::mutex> lk(mu_);
+  return urgent_.empty() && normal_.empty() && inflight_[0] == 0 && inflight_[1] <= bg_spec_gate;
+}
+
+int Readers::bg_queued() {
+  std::lock_guard<std::mutex> lk(mu_);
+  return (int)bg_.size() + inflight_[2];
 }
 
 // Mem::FILE: are all pages of [p, p + n) resident? (mincore; n a multiple of the page size)
@@ -269,6 +279,7 @@ void Readers::loop() {
         done += (size_t)r;
       }
       bytes.fetch_add(j.n, std::memory_order_relaxed);
+      bytes_cls[cls].fetch_add(j.n, std::memory_order_relaxed);
       if (!j.dst && file_prefault) {  // map the cached pages here (soft faults), not in the compute threads
         const size_t pg = (size_t)getpagesize();
         uint64_t acc = 0;
@@ -403,6 +414,8 @@ void Cache::drop(int L, int slot, bool count_pf_unused) {
     ev_step[k] = now_step;
     ev_pf[k] = evict_pf_ctx;
     if (count_pf_unused && b.pf_unused) st.n_pf_unused_evicted++;
+    if (b.bg_unused) st.n_bg_unused_evicted++;
+    if (!floor_until.empty()) floor_until[k] = -1;  // (a later read of the record has no floor)
     if (mem == Mem::FILE && file_evict_hint == 1) madvise(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MADV_DONTNEED);
     else if (mem == Mem::FILE && file_evict_hint == 2) msync(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MS_INVALIDATE);
   }
@@ -677,8 +690,10 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
     }
   }
   (urgent ? st.bytes_urgent : st.bytes_pf) += S.rec;
+  if (bg_issue) st.bytes_bg += S.rec;
   if (skip_reads) return;  // timing without reads: the slot keeps whatever bytes it has
-  const size_t R = S.rec, piece = ((R / split) + 16383) & ~size_t(16383);
+  const int sp = bg_issue ? std::max(1, bg_split) : split;
+  const size_t R = S.rec, piece = ((R / sp) + 16383) & ~size_t(16383);
   const int parts = (int)((R + piece - 1) / piece);
   S.pending[slot].store(parts, std::memory_order_release);
   uint8_t* dst = mem == Mem::FILE ? nullptr : S.row(slot);
@@ -689,7 +704,7 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
     if (view) j.view = view + o;
     j.step = urgent ? 0 : step;
     j.pp = pp;
-    rd.submit_cls(j, urgent ? 0 : read_bg ? 2 : 1);
+    rd.submit_cls(j, urgent ? 0 : read_bg || bg_issue ? 2 : 1);
   }
 }
 
@@ -743,6 +758,10 @@ void Cache::use(int L, int slot, long t_use, long step) {
   x.key = std::log2(v + 1.0) + (double)t_use / half_life;
   x.last = step;
   x.pf_unused = false;
+  if (x.bg_unused) {
+    x.bg_unused = false;
+    st.n_bg_used++;
+  }
 }
 
 int Cache::name(int L, int e, long step, int reserve) {
@@ -767,6 +786,59 @@ int Cache::name(int L, int e, long step, int reserve) {
   S.s[v].pf_unused = true;
   st.n_pf_issued++;
   return v;
+}
+
+bool Cache::read_bg_value(int L, int e, double value, long until) {
+  const size_t k = (size_t)L * NE + e;
+  if (tab[k] >= 0 || !hazard_evict || rk.on || !lcap.empty() || mem == Mem::PURGEABLE) return false;
+  if (floor_v.empty()) {
+    floor_v.assign((size_t)NL * NE, 0.f);
+    floor_until.assign((size_t)NL * NE, -1);
+  }
+  SlotPool& S = pool(L);
+  int v;
+  if (!S.free_.empty()) {
+    v = S.free_.back();
+    S.free_.pop_back();
+  } else {
+    PolicyTimer pt(st.policy_ms);
+    hz_tick(tok_now);
+    v = hz_victim(L, false, 2 * K + extra_reserve[layer_pool[L]]);
+    if (v < 0) return false;
+    const Slot& x = S.s[v];
+    if (x.layer >= 0 && keep_score(x.layer, x.e, tok_now) >= value) {
+      st.n_bg_refused++;
+      return false;
+    }
+    evict_pf_ctx = true;
+    drop(L, v, true);
+    evict_pf_ctx = false;
+  }
+  if (floor_until[k] < now_step) floor_keys.push_back((int)k);
+  floor_v[k] = (float)value;
+  floor_until[k] = until;
+  bg_issue = true;
+  issue(L, v, e, false, until);
+  bg_issue = false;
+  S.s[v].pins = 0;
+  S.s[v].bg_unused = true;
+  if (!hzm_ok.empty()) hzm_ok[L] = 0;  // its score has the floor now
+  st.n_bg_issued++;
+  return true;
+}
+
+void Cache::expire_floors() {
+  size_t w = 0;
+  for (size_t i = 0; i < floor_keys.size(); i++) {
+    const int k = floor_keys[i];
+    if (floor_until[k] >= now_step) {
+      floor_keys[w++] = k;
+      continue;
+    }
+    floor_until[k] = -1;
+    if (!hzm_ok.empty()) hzm_ok[k / NE] = 0;
+  }
+  floor_keys.resize(w);
 }
 
 bool Cache::drop_name(int L, int slot, int e) {
@@ -1410,7 +1482,9 @@ double Cache::keep_score(int L, int e, long t) const {
   const size_t k = (size_t)L * NE + e;
   if (hazard_evict) {  // the estimate for the next token (the statistics are at t: victim() ticks first)
     const size_t b = (size_t)L * HZ_NB + hz_kb[k];
-    return hz_u[b] / hz_n[b] + hz_last[k] * 1e-9;
+    const double v = hz_u[b] / hz_n[b] + hz_last[k] * 1e-9;
+    // a background read's value until its step has run (read_bg_value)
+    return !floor_keys.empty() && floor_until[k] >= now_step ? std::max(v, (double)floor_v[k]) : v;
   }
   double v = lev_b;
   for (int h = 0; h < 3; h++) v += lev_w[h] * std::log2(lc[h][k] * std::exp2(-((double)t - lc_t[k]) / hl[h]) + 1e-3);

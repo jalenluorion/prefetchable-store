@@ -72,6 +72,10 @@ struct Readers {
   bool excl = false;         // start no speculative read while an urgent read is in flight
   int max_spec = 1 << 30;    // at most this many speculative reads in flight
   int max_bg = 1;            // at most this many background reads in flight
+  int bg_spec_gate = 0;      // a background read also starts while at most this many speculative reads are in flight
+                             // (never while an urgent read is queued or in flight, or a speculative one is queued)
+  bool bg_open();            // a background read queued now would start at once
+  int bg_queued();           // background reads queued or in flight (jobs)
   bool file_skip_resident = true;  // Mem::FILE: no pread for a piece whose pages are all resident (mincore)
   bool file_prefault = true;       // Mem::FILE: after the pread, touch one byte per page of the view (the reader takes
                                    // the soft faults that map the cached pages, not the compute threads)
@@ -79,6 +83,7 @@ struct Readers {
   bool io_low = false;             // the readers' disk I/O one tier below the threads' own (IOPOL_STANDARD); CoreOpts::reader_io_low
   // statistics (written by the readers)
   std::atomic<uint64_t> bytes{0}, jobs{0}, busy_ns{0};
+  std::atomic<uint64_t> bytes_cls[3] = {{0}, {0}, {0}};  // bytes read by class: urgent, speculative, background
   std::atomic<uint64_t> file_resident_skips{0}, file_bytes_skipped{0};  // Mem::FILE pieces found resident, not read
   std::atomic<uint64_t> q_ns[3], svc_ns[3], njobs[3], spec_inflight_at_urgent{0};  // [0] urgent, [1] speculative, [2] background
   std::atomic<uint64_t> bg_promoted{0};  // background reads a step needed before they started (moved to urgent)
@@ -115,6 +120,7 @@ struct Slot {
   int pins = 0;
   int pf_pins = 0;         // how many of the pins are early names (a miss may take such a slot when nothing else is free)
   bool pf_unused = false;  // landed by a name and not used since
+  bool bg_unused = false;  // landed by a background read and not used since
 };
 
 struct SlotPool {
@@ -144,6 +150,8 @@ struct CacheStats {
   uint64_t file_checks = 0, file_refaults = 0, bytes_refault = 0;  // Mem::FILE: held records checked on use / found gone
   double policy_ms = 0;                 // victim() and pre_use(): the eviction policy's own time
   uint64_t n_cap_borrow = 0;            // urgent slots a layer at its cap took from the pool (its own were all pinned)
+  // background reads (Cache::read_bg_value): issued, refused (the victim was valued higher), used by a pick, evicted unused
+  uint64_t n_bg_issued = 0, n_bg_refused = 0, n_bg_used = 0, n_bg_unused_evicted = 0, bytes_bg = 0;
 };
 
 struct Cache {
@@ -445,6 +453,18 @@ struct Cache {
   // started and nothing else pins the slot; true if the read was cancelled
   bool drop_name(int L, int slot, int e);
   int cancel_stale(long step);                                // drop queued speculative reads serving steps <= step
+  // A background read for the drive's idle time: record (L, e), judged likely to be used by step `until` with probability
+  // `value`. Read only if a free slot exists or the policy's victim has a keep-score below `value` (hazard: P(used at the
+  // next token)); then the record keeps max(its keep-score, value) as its keep-score until step `until` has run (or its
+  // first use), and is not pinned. Reads go to the readers' background class in bg_split pieces. Returns true if issued.
+  // Names only schedule reads: the outputs cannot change.
+  bool read_bg_value(int L, int e, double value, long until);
+  int bg_split = 2;  // pieces of a background read (one in flight: an urgent read shares the drive with at most half a record)
+  bool bg_issue = false;          // (issue: the read being issued is a background value read)
+  std::vector<float> floor_v;     // [NL * NE] the value a background read gave the record, while floor_until >= now_step
+  std::vector<long> floor_until;  // [NL * NE] (-1: none)
+  std::vector<int> floor_keys;    // records with a floor (expired at expire_floors)
+  void expire_floors();           // at a step's start: floors whose step has run go (their layers' minima recomputed)
   void learn_use(int L, const int32_t* picks, long t);
   void refresh_use_tab();
   int vbin(double key, long t) const {

@@ -141,6 +141,14 @@ struct Routers : Naming {
   void reset_stats() override;
   std::string stats_json(Core& c, int ntok) override;
   const int* names() const override { return nm.data(); }
+  // Background reads for the drive's idle time (off: bg_ranks = 0): while no urgent read is queued or in flight, the
+  // router's ranks m+1 .. bg_ranks of the steps already named (the nearest first) are read in the readers' background
+  // class, each valued by this run's own P(a pick | rank) (counted at every step), at most bg_queue records queued or in
+  // flight, and only over records the keep-score values less (Cache::read_bg_value). Reads only: the outputs cannot change.
+  int bg_ranks = 0, bg_queue = 2;
+  double bg_margin = 0;  // a candidate is read only if its value exceeds the victim's keep-score by this much
+  double rk_n[16] = {0}, rk_h[16] = {0};
+  void fill_bg(Core& c, int from, int to);
 };
 
 // Cross-token routers (trained, e.g. Inkling's ink_x_main xtok_s41): after the source step S of token t has issued its own

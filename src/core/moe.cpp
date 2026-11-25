@@ -696,6 +696,7 @@ void Core::log_picks(int p, int step, const int32_t* pk) {
 
 void Core::moe_step(int step, const float* x, float* y, const MoeView& v) {
   cache.now_step = now(step);
+  if (!cache.floor_keys.empty()) cache.expire_floors();  // background reads' values whose step has run
   step_t0 = clk::now();
   if (step == 0 && run_ahead) {  // a token starts: the last one's compute (wall - wait) into the budget's average
     if (ra_tok_t0.time_since_epoch().count()) {

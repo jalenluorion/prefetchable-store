@@ -38,6 +38,11 @@ struct Preset {
   bool ra_sat_skip = false;
   // (a profile's run_ahead may list "modes": on only in those; the phones: exact)
   int readers = 0;  // reader threads (0 = the front end's default; the phones: 8)
+  // background reads for the drive's idle time (Routers::bg_ranks; 0 = off): the routers' ranks up to `ranks` of the
+  // steps already named, started while at most `gate` speculative reads are in flight (off in every built-in profile:
+  // on Flash-Next, measured in one process token by token, they raised the drive's effective rate 4-8% and the bytes
+  // per token 2-8%, and the tokens did not get faster)
+  int bg_ranks = 0, bg_gate = 0;
   std::vector<std::string> notes;  // defaults that did not resolve, fallbacks taken
   std::string json() const;
 };
@@ -60,6 +65,7 @@ struct Resolved {
   int ra_max_tok = 0;
   bool ra_sat_skip = false;
   int readers = 0;
+  int bg_ranks = 0, bg_gate = 0;
   bool cache_auto = false;
   std::string json() const;
 };

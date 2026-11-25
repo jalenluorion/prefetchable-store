@@ -27,14 +27,26 @@ struct MemRule {
   double min_gb = 2.0;        // the least cache the watcher shrinks to
   double margin_gb = 0.3;     // the process's other memory: misc. margin
   double scratch_gb = 0.5;    // prefill scratch while a prefill runs
-  double headroom_gb = 3.0;   // the start also leaves this much of what is free now: macOS reports warn pressure / a free
-                              // level under 20% with ~2.5-3.4 GB left on a 16 GB Mac (measured), so the start does not press
-  int kv_positions = 16384;   // KV planned for (pos_bytes each)
+  double headroom_gb = 3.0;   // (the old start rule's: free now minus this; kept for --headroom-gb, not used by the rule)
+  // The start: the size that leaves the kernel's free level (kern.memorystatus_level) at `floor_pct` once the cache and
+  // the process's other memory still to come are resident: (level now - floor_pct) % of physical memory - still to come.
+  // Measured on the base M4 16 GB with Flash-Next (9.8 GB in all at a 3.5 GB cache): from a 42-44% level at start, 3.5
+  // GB ran with no swap growth and 4.5 GB grew swap by 130-400 MB with compute 13-55% slower (the level fell to ~9%, as
+  // this rule predicts: 8.5%); the 14% floor gives 3.5 GB from a 43% start level (0.62 GB of routers and 0.81 GB of
+  // scratch, margin and KV still to come)
+  int floor_pct = 14;
+  double later_gb = 0;        // memory the front end loads after sizing the cache (the router files), counted as to come
+  // never a size the OS will not lock: the wired memory the system allows (vm.global_user_wire_limit) minus what is
+  // wired now (kernel, every process, this one's resident weights) minus this margin (Flash-Next's 5.75 GB failed mlock)
+  double wire_margin_gb = 0.5;
+  int kv_positions = 16384;   // per-position state planned for at the start (pos_bytes each); the state's memory is
+                              // reserved virtually for the whole context and becomes resident as positions fill
 };
 
 struct MemSnap {
   double total_gb = 0, avail_gb = 0;  // physical; free + inactive + speculative + purgeable
   int level_pct = -1, pressure = -1;  // kern.memorystatus_level (free %), kern.memorystatus_vm_pressure_level (1/2/4)
+  double wired_gb = 0, wire_limit_gb = 0;  // the system's wired memory now; vm.global_user_wire_limit
   double footprint_gb = 0;            // this process
   std::string json() const;
 };
@@ -50,7 +62,7 @@ class MemWatch {
   MemWatch(Cache& c, double start_gb, double max_gb, double min_gb)
       : c_(c), max_b_((int64_t)(max_gb * 1e9)), min_b_((int64_t)(min_gb * 1e9)), start_b_((int64_t)(start_gb * 1e9)) {}
   ~MemWatch() { stop(); }
-  int low_pct = 20, high_pct = 35;
+  int low_pct = 12, high_pct = 35;  // below low_pct (before the ~9% where compute slows) the cache shrinks
   double step_gb = 1.0, period_s = 2.0, grow_after_s = 30.0;
   double retry_s = 600;  // a size that met pressure is not grown into again for this long (calm)
   std::function<void()> wake;                    // a budget was requested (the worker applies it when idle)
@@ -59,11 +71,24 @@ class MemWatch {
   void stop();
   int64_t target() const { return target_.load(); }
   double floor_gb() const { return min_b_ / 1e9; }  // after start(): the least budget the watcher sets
+  // the context: the per-position state grows with it, so the ceiling follows. kv_planned: the bytes the start planned
+  // for; set_positions (any thread; the worker, before a request with its positions + tokens to come, and after it): the
+  // ceiling is lowered by the state beyond the plan, and a budget above it shrinks at the next check (why "context")
+  void kv_plan(size_t pos_bytes, int planned_positions) {
+    pos_b_ = (int64_t)pos_bytes;
+    plan_b_ = (int64_t)pos_bytes * planned_positions;
+  }
+  void set_positions(int n) {
+    kv_extra_.store(std::max<int64_t>(0, pos_b_ * n - plan_b_));
+    kick_.store(true);
+  }
 
  private:
   Cache& c_;
   int64_t max_b_, min_b_, start_b_;
   std::atomic<int64_t> target_{0};
+  int64_t pos_b_ = 0, plan_b_ = 0;
+  std::atomic<int64_t> kv_extra_{0};
   std::atomic<bool> quit_{false}, kick_{false};
   std::thread th_;
   void* src_ = nullptr;  // dispatch source (memory pressure)

@@ -30,6 +30,8 @@
 #include <mach/mach.h>
 #include <unistd.h>
 
+#include <sys/stat.h>
+
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -88,6 +90,7 @@ static std::vector<int> read_ids_file(const std::string& f) {
 struct Args {
   std::string model, resident, family, routers;
   int threads = 8, readers = 4, ctx = 33792, m = 8;
+  int kv_plan = 4096;  // positions of per-position state the automatic cache plans for at start (--kv-plan)
   double cache_gb = 5;
   std::string mem = "mlock", res_mem = "mlock";
   int chunk = 512, span = 8192, stream = 3;
@@ -118,7 +121,7 @@ struct Args {
   bool cache_auto = false;    // --cache-gb auto: the size from the machine (src/serving/memwatch.h), then the watcher
   MemRule mr;                 // --reserve-gb, --cache-min-gb
   int mem_watch = -1;         // follow macOS memory pressure (default: on with --cache-gb auto)
-  int mem_low = 20, mem_high = 35;  // kern.memorystatus_level thresholds (shrink below low, grow back at or above high)
+  int mem_low = 12, mem_high = 35;  // kern.memorystatus_level thresholds (shrink below low, grow back at or above high)
   double mem_grow_s = 30, mem_retry_s = 600;
   std::string evict = "auto", xtok, layer_caps;
   double rt_tau = -1, xtok_tau = 0.5;
@@ -155,6 +158,8 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
   --print-defaults       print the resolved profile defaults as JSON and exit
 model and memory
   --resident F --family F --ctx N (33792) --threads N (8) --readers N (4) --mem plain|mlock --res-mem plain|mlock
+  --kv-plan N            positions of per-position state the automatic cache plans for at start (4096); past them the
+                         watcher lowers the cache as the context grows
   --cache-gb G|auto      default auto under a profile (5 with --profile none); --reserve-gb G (5.5) --cache-min-gb G
                          --headroom-gb G; the watcher: --mem-watch 0|1 --mem-low-pct N --mem-high-pct N
                          --mem-grow-after-s S --mem-retry-s S
@@ -377,6 +382,7 @@ int main(int argc, char** argv) {
     else if (k == "--xtok-tau") a.xtok_tau = std::stod(v());
     else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
     else if (k == "--ctx") a.ctx = std::stoi(v());
+    else if (k == "--kv-plan") a.kv_plan = std::stoi(v());
     else if (k == "--threads") a.threads = std::stoi(v());
     else if (k == "--readers") a.readers = std::stoi(v());
     else if (k == "--mem") a.mem = v();
@@ -516,6 +522,13 @@ int main(int argc, char** argv) {
       if (tmp) fb = M->fixed_bytes(*tmp);
     }
     const double ckpt_mem = std::max(a.s.ckpt_gb, a.s.ckpt_min * (double)fb / 1e9);  // the checkpoints' memory
+    // the per-position state for a start context only (its pages become resident as positions fill; the watcher lowers
+    // the ceiling as the context grows past the plan)
+    a.mr.kv_positions = std::min(a.ctx, a.kv_plan);
+    {
+      struct stat rs;
+      if (!a.routers.empty() && stat(a.routers.c_str(), &rs) == 0) a.mr.later_gb = rs.st_size / 1e9;  // loaded after this
+    }
     a.cache_gb = auto_cache_gb(a.mr, M->pos_bytes(), ckpt_mem, store_bytes_gb(a.model, mi0.layer_file, mi0.layers), cache_start, auto_why);
   }
   CoreOpts co;
@@ -703,6 +716,7 @@ int main(int argc, char** argv) {
     mw->grow_after_s = a.mem_grow_s;
     mw->retry_s = a.mem_retry_s;
     mw->wake = [&] { cv.notify_all(); };
+    mw->kv_plan(M->pos_bytes(), a.cache_auto ? std::min(a.ctx, a.kv_plan) : a.ctx);
     mw->note = [&](const std::string& j) { out("M 0 " + j.substr(0, j.size() - 1) + ",\"mem\":" + lm.mem_json() + "}"); };
     mw->start();
     out("M 0 {\"watcher\":\"on\",\"floor_gb\":" + std::to_string(mw->floor_gb()) + ",\"start_gb\":" + std::to_string(mw->target() / 1e9) +
@@ -826,6 +840,7 @@ int main(int argc, char** argv) {
     // the head this request needs: the argmax (greedy without drafting: verify passes keep the full head), the exact top
     // k (top-k sampling, k <= 64), or every logit (anything else)
     lm.set_head_k(!screened ? 0 : r.temp <= 0 ? (dr.on() ? 0 : 1) : r.top_k >= 1 && r.top_k <= 64 ? r.top_k : 0);
+    if (mw) mw->set_positions((int)r.ids.size() + std::max(0, r.max_new));  // the state this request will hold
     SyncResult sr = pc.sync(r.ids, r.marks, lg.data());
     double ttp = ms_since2(t0);
     if (dr.core && sr.source != "live" && sr.source != "checkpoint") {  // picks of restored positions never ran here

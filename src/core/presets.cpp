@@ -301,6 +301,10 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     }
   }
   if (const Json* rd = prof("readers"); rd && rd->kind == Json::NUM) p.readers = (int)rd->i(0);
+  if (const Json* bg = prof("background"); bg && bg->kind == Json::OBJ) {  // per profile only (the drive decides)
+    p.bg_ranks = (int)(*bg)["ranks"].i(0);
+    p.bg_gate = (int)(*bg)["gate"].i(0);
+  }
   return true;
 }
 
@@ -332,7 +336,8 @@ std::string Preset::json() const {
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
     << ",\"eviction\":" << q(evict) << ",\"layer_caps\":" << q(layer_caps) << ",\"drafts\":" << (drafts ? "true" : "false") << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
-    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers << ",\"notes\":[";
+    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
+    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"notes\":[";
   for (size_t i = 0; i < notes.size(); i++) o << (i ? "," : "") << q(notes[i]);
   o << "]}";
   return o.str();
@@ -358,7 +363,8 @@ std::string Resolved::json() const {
     << ",\"cross_token\":" << qq(xtok) << ",\"cache_gb\":" << cache_gb << ",\"cache_auto\":" << (cache_auto ? "true" : "false")
     << ",\"eviction\":" << qq(evict) << ",\"drafts\":" << drafts << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
-    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers << "}";
+    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
+    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "}}";
   return o.str();
 }
 }  // namespace dm

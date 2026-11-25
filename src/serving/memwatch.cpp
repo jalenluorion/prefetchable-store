@@ -35,13 +35,17 @@ MemSnap mem_snapshot() {
   task_vm_info_data_t v;
   mach_msg_type_number_t c2 = TASK_VM_INFO_COUNT;
   if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&v, &c2) == KERN_SUCCESS) s.footprint_gb = v.phys_footprint / 1e9;
+  s.wired_gb = (double)vm.wire_count * pg / 1e9;
+  uint64_t wl = 0;
+  n = sizeof wl;
+  if (sysctlbyname("vm.global_user_wire_limit", &wl, &n, nullptr, 0) == 0) s.wire_limit_gb = wl / 1e9;
   return s;
 }
 
 std::string MemSnap::json() const {
   char b[256];
-  snprintf(b, sizeof b, "{\"total_gb\":%.2f,\"avail_gb\":%.2f,\"free_level_pct\":%d,\"pressure\":%d,\"footprint_gb\":%.2f}", total_gb, avail_gb, level_pct,
-           pressure, footprint_gb);
+  snprintf(b, sizeof b, "{\"total_gb\":%.2f,\"avail_gb\":%.2f,\"free_level_pct\":%d,\"pressure\":%d,\"footprint_gb\":%.2f,\"wired_gb\":%.2f,\"wire_limit_gb\":%.2f}",
+           total_gb, avail_gb, level_pct, pressure, footprint_gb, wired_gb, wire_limit_gb);
   return b;
 }
 
@@ -59,21 +63,25 @@ double store_bytes_gb(const std::string& dir, const std::string& layer_file, int
 double auto_cache_gb(const MemRule& r, size_t pos_bytes, double ckpt_gb, double store_gb, double& start_gb, std::string& why) {
   const MemSnap s = mem_snapshot();
   const double kv = (double)pos_bytes * r.kv_positions / 1e9;
-  const double other = s.footprint_gb + kv + ckpt_gb + r.scratch_gb + r.margin_gb;
+  const double other = s.footprint_gb + kv + ckpt_gb + r.scratch_gb + r.margin_gb + r.later_gb;
   double c = s.total_gb - r.reserve_gb - other;
   const double raw = c;
   c = std::max(r.min_gb, c);
   if (store_gb > 0) c = std::min(c, store_gb);
-  // the start: what is free now (the resident weights are already counted in it), less the process's memory still to
-  // come and the headroom
-  const double start_raw = s.avail_gb - (other - s.footprint_gb) - r.headroom_gb;
-  start_gb = std::max(r.min_gb, std::min(c, start_raw));
+  // never more than the system will lock (the cache is the only memory still to be wired)
+  const double wire = s.wire_limit_gb > 0 ? s.wire_limit_gb - s.wired_gb - r.wire_margin_gb : 1e9;
+  c = std::min(c, std::max(0.0, wire));
+  // the start: the kernel's free level kept at floor_pct once the cache and the process's memory still to come are in
+  const double to_come = other - s.footprint_gb;
+  const double start_raw = s.level_pct >= 0 ? (s.level_pct - r.floor_pct) / 100.0 * s.total_gb - to_come
+                                            : s.avail_gb - to_come - r.headroom_gb;
+  start_gb = std::min(c, std::max(r.min_gb, start_raw));
   std::ostringstream o;
   o.setf(std::ios::fixed);
   o.precision(2);
   o << "{\"rule\":\"physical - reserve - other\",\"physical_gb\":" << s.total_gb << ",\"reserve_gb\":" << r.reserve_gb << ",\"other_gb\":" << other
-    << ",\"resident_now_gb\":" << s.footprint_gb << ",\"kv_gb\":" << kv << ",\"ckpt_gb\":" << ckpt_gb << ",\"scratch_gb\":" << r.scratch_gb
-    << ",\"margin_gb\":" << r.margin_gb << ",\"unclamped_gb\":" << raw << ",\"store_gb\":" << store_gb << ",\"ceiling_gb\":" << c << ",\"headroom_gb\":" << r.headroom_gb << ",\"start_unclamped_gb\":" << start_raw
+    << ",\"resident_now_gb\":" << s.footprint_gb << ",\"kv_gb\":" << kv << ",\"later_gb\":" << r.later_gb << ",\"ckpt_gb\":" << ckpt_gb << ",\"scratch_gb\":" << r.scratch_gb
+    << ",\"margin_gb\":" << r.margin_gb << ",\"wire_room_gb\":" << wire << ",\"floor_pct\":" << r.floor_pct << ",\"unclamped_gb\":" << raw << ",\"store_gb\":" << store_gb << ",\"ceiling_gb\":" << c << ",\"headroom_gb\":" << r.headroom_gb << ",\"start_unclamped_gb\":" << start_raw
     << ",\"start_gb\":" << start_gb << ",\"at_start\":" << s.json()
     << "}";
   why = o.str();
@@ -130,6 +138,7 @@ void MemWatch::loop() {
     const int64_t cur = target_.load();
     int64_t next = cur;
     std::string why;
+    const int64_t ceil_now = std::max(min_b_, max_b_ - kv_extra_.load());  // the context's state beyond the plan
     if (pressed) {
       limit = std::max(min_b_, std::min(limit, cur - step));
       pressed_at = clk::now();
@@ -140,8 +149,11 @@ void MemWatch::loop() {
     if (pressed && cur > min_b_) {
       next = std::max(min_b_, cur - step);
       why = s.pressure >= 2 ? "pressure" : "low_free_level";
-    } else if (calm && cur < limit && std::chrono::duration<double>(clk::now() - calm_since).count() >= grow_after_s) {
-      next = std::min(limit, cur + step);
+    } else if (cur > ceil_now) {
+      next = ceil_now;
+      why = "context";
+    } else if (calm && cur < std::min(limit, ceil_now) && std::chrono::duration<double>(clk::now() - calm_since).count() >= grow_after_s) {
+      next = std::min(std::min(limit, ceil_now), cur + step);
       why = "calm";
       calm_since = clk::now();  // one step per grow_after_s
     }

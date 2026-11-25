@@ -691,7 +691,11 @@ void Flash::qsa_head(int L, int h, const float* q, const float* gate, const std:
 // ------------------------------------------------------------------------------------------------ decode blocks
 void Flash::hc_step(const HCw& w, const float* hyper, float* mixed, float* inj_out) {
   const int N = c.N();
-  hc_norm(w, hyper, nrm.data());
+  const auto t0 = clk::now();
+  // the per-stream norms on the pool, one stream per task (each stream's arithmetic is the serial loop's)
+  parallel_for(*core->pool, c.HC, [&](int s) {
+    rmsnorm(hyper + (size_t)s * c.H, w.norm + (size_t)s * c.H, c.H, c.eps, nrm.data() + (size_t)s * c.H);
+  });
   float r[64];
   Job jb[2] = {{&w.down, &xin.q, nrm.data(), lo.data()}, {&w.inj, &xin.q, nrm.data(), r}};
   {
@@ -708,7 +712,21 @@ void Flash::hc_step(const HCw& w, const float* hyper, float* mixed, float* inj_o
     const int ks[1] = {c.LOW};
     run_rows_q(*core->pool, &ju, 1, 32, ref, &T->bytes_res, qs, xs, ks, 1);
   }
-  hc_mix(nrm.data(), up.data(), inj_out ? r : nullptr, mixed, inj_out);
+  // the mix on the pool in blocks of 256 outputs (every output's arithmetic is hc_mix's: the same bits)
+  const int H = c.H, nb = (H + 255) / 256;
+  const float* un = up.data();
+  const float* nn = nrm.data();
+  parallel_for(*core->pool, nb, [&](int b) {
+    const int i1 = std::min(H, (b + 1) * 256);
+    for (int i = b * 256; i < i1; i++) {
+      float acc = 0;
+      for (int s = 0; s < c.HC; s++) acc = __builtin_fmaf(sigm(un[(size_t)s * H + i]), nn[(size_t)s * H + i], acc);
+      mixed[i] = acc / (float)c.HC;
+    }
+  });
+  if (inj_out)
+    for (int s = 0; s < c.HC; s++) inj_out[s] = 2.f * sigm(r[s] / (float)c.HC);
+  T->msg += ms_since(t0);  // the hyper-connection mixers (norms, down / inject / up products): their own stage
 }
 
 void Flash::gdn_step(int L, const float* xh, float* y) {

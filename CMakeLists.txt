@@ -138,6 +138,11 @@ add_executable(bench_kmulti_nv tests/kernels/bench_kmulti_nv.cpp)
 target_link_libraries(bench_kmulti_nv PRIVATE dmengcore)
 target_compile_options(bench_kmulti_nv PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
 
+# the in-memory 8-bit matrices' decode fork-joins, Flash-Next's shapes beside the 35B's (tests/kernels/bench_mats.cpp)
+add_executable(bench_mats tests/kernels/bench_mats.cpp)
+target_link_libraries(bench_mats PRIVATE dmengcore)
+target_compile_options(bench_mats PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
+
 add_executable(bench_kmulti_sme4 tests/kernels/bench_kmulti_sme4.cpp)
 target_link_libraries(bench_kmulti_sme4 PRIVATE dmengcore)
 target_compile_options(bench_kmulti_sme4 PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)

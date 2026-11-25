@@ -503,11 +503,34 @@ void Routers::token_start(Core& c, int tok, const float* e) {
   }
   for (int t = 0; t < std::min(lag, nt); t++) finish(c, t, false);
   t_ms += ms_since(t0);
+  fill_bg(c, 0, std::min(lag, nt) - 1);
+}
+
+void Routers::fill_bg(Core& c, int from, int to) {
+  if (bg_ranks <= m || !active || tau >= 0) return;
+  Readers& rd = c.cache.rd;
+  const int per = std::max(1, c.cache.bg_split);
+  if (rd.bg_queued() >= bg_queue * per || !rd.bg_open()) return;
+  const int D = std::min(bg_ranks, 16);
+  to = std::min(to, nt - 1);
+  int tries = 0;
+  for (int t = std::max(0, from); t <= to; t++) {
+    const int* n = nm.data() + (size_t)t * 16;
+    if (n[0] < 0) continue;  // not named yet
+    const int L = c.mi.step_layer[t];
+    for (int r = m; r < D; r++) {
+      if (c.cache.slot_of(L, n[r]) >= 0) continue;
+      const double v = (rk_h[r] + 1.0) / (rk_n[r] + 2.0);
+      if (++tries > 32) return;
+      if (c.cache.read_bg_value(L, n[r], v - bg_margin, c.now(t)) && rd.bg_queued() >= bg_queue * per) return;
+    }
+  }
 }
 
 void Routers::before_moe(Core& c, int step, const float* x) {
   if (heavy) heavy->before_moe(c, step, x);
   std::memcpy(prev.data() + (size_t)step * H, x, sizeof(float) * H);  // for the next token (this token's pre rows are done)
+  fill_bg(c, step + 1, step + lag - 1);
 }
 
 void Routers::observe(Core& c, int step, const float* x) {
@@ -529,12 +552,18 @@ void Routers::after_router(Core& c, int step) {
   finish(c, pending, true);
   pending = -1;
   t_ms += ms_since(t0);
+  fill_bg(c, step + 1, step + lag);
 }
 
 void Routers::after_moe(Core& c, int step, const int32_t* pk, const float* w) {
   const int* n = nm.data() + (size_t)step * 16;
   if (n[0] < 0) return;
   const int K = c.K, g = step < lag ? 0 : 1;
+  for (int j = 0; j < 16; j++) {  // P(a pick | rank): the background reads' values
+    rk_n[j] += 1;
+    rk_h[j] += std::find(pk, pk + K, n[j]) != pk + K;
+  }
+  fill_bg(c, step + 1, step + lag);
   const int ms[3] = {8, 12, 16};
   for (int a = 0; a < 3; a++) {
     int hit = 0;

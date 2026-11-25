@@ -110,6 +110,10 @@ early address (lossless: names only schedule reads; the released router decides)
                                    --plan-budget 0|1|2, --plan-tau-long, --plan-tau, --plan-pin-p, --plan-revoke,
                                    --plan-revoke-p, --plan-maxcand, --plan-calib rank|q
   --evict auto|freq|pred|hazard  --rd-prio 0|1  --rd-excl 0|1  --spec-max N  --cancel 0|1
+  --bg-ranks D --bg-gate G --bg-split P --bg-queue Q --bg-max N   background reads for the drive's idle time: the routers' ranks
+                         m+1..D of the steps already named, while no urgent read and at most G speculative ones are in
+                         flight, in P pieces (N in flight), at most Q records queued (default: the profile's; Flash-Next mac 8, 2, 2, 2, 1;
+                         --bg-ranks 0 = off)
                          auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
                          EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
                          pick (35B below 2.26 GB), else one pool (results/cache-policy/POLICY.md); freq: the decayed use
@@ -197,6 +201,8 @@ struct Args {
   int n = 120, start_pos = 0, ctx = 16384, threads = 8, readers = 4, split = 1, m = 8, top_k = 0, dump_from = 0, stop_eos = -1, drop = -1;
   int rt_cand = 16, router_ecache = 0, fast_head = -1, run_ahead = 0, run_ahead_depth = 1, ra_max = 0, ra_sat = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1;
   int plan_budget = 1, plan_revoke = 1, plan_maxcand = 32;
+  int bg_ranks = 0, bg_gate = 0, bg_split = 2, bg_queue = 2, bg_max = 1;
+  double bg_margin = 0;  // background reads (the profile's; --bg-ranks 0 = off)
   int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1;
   double draft_margin = 0.05;
   double prefill_gpu_frac = 0, prefill_gpu_experts = 0;
@@ -419,6 +425,12 @@ int main(int argc, char** argv) {
     else if (k == "--rd-prio") a.rd_prio = std::stoi(v());
     else if (k == "--rd-excl") a.rd_excl = std::stoi(v());
     else if (k == "--spec-max") a.spec_max = std::stoi(v());
+    else if (k == "--bg-ranks") a.bg_ranks = std::stoi(v());
+    else if (k == "--bg-gate") a.bg_gate = std::stoi(v());
+    else if (k == "--bg-split") a.bg_split = std::stoi(v());
+    else if (k == "--bg-queue") a.bg_queue = std::stoi(v());
+    else if (k == "--bg-max") a.bg_max = std::stoi(v());
+    else if (k == "--bg-margin") a.bg_margin = std::stod(v());
     else if (k == "--cancel") a.cancel = std::stoi(v());
     else if (k == "--plan-routers") a.plan_routers = v();
     else if (k == "--plan-u") a.plan_u = std::stod(v());
@@ -531,6 +543,8 @@ int main(int argc, char** argv) {
     if (!has("--run-ahead-depth")) a.run_ahead_depth = P.run_ahead_depth;
     if (!has("--run-ahead-budget")) a.ra_budget = P.ra_budget;
     if (!has("--readers") && P.readers > 0) a.readers = P.readers;
+    if (!has("--bg-ranks")) a.bg_ranks = P.bg_ranks;
+    if (!has("--bg-gate")) a.bg_gate = P.bg_gate;
     if (!has("--run-ahead-max")) a.ra_max = P.ra_max_tok;
     if (!has("--run-ahead-sat-skip")) a.ra_sat = P.ra_sat_skip ? 1 : 0;
     if (!has("--verify-names")) a.verify_names = 0;
@@ -584,7 +598,16 @@ int main(int argc, char** argv) {
   if (a.cache_auto) {  // the serving worker's rule (src/serving/memwatch.h), the resident weights loaded: here the start size
     const ModelInfo& mi0 = M->info();
     double start = 0;
+    // the per-position state is reserved for the context (virtual) and its pages become resident as positions fill: the
+    // cache plans for the positions this run holds (the prompt + the tokens to generate), not the whole context
     a.mr.kv_positions = a.ctx;
+    {
+      const std::string src = !a.prompt_ids.empty() ? a.prompt_ids : !a.prompt_file.empty() ? slurp(a.prompt_file) : !a.teacher.empty() ? slurp(a.teacher) : "";
+      const int np = src.empty() ? -1 : (int)parse_ids(src).size();
+      if (np >= 0) a.mr.kv_positions = std::min(a.ctx, np + std::max(0, a.n) + 64);
+      struct stat rs;  // the router file is loaded after the cache is sized
+      if (a.prefetch == "router" && !a.routers.empty() && stat(a.routers.c_str(), &rs) == 0) a.mr.later_gb = rs.st_size / 1e9;
+    }
     a.cache_gb = auto_cache_gb(a.mr, M->pos_bytes(), 0, store_bytes_gb(a.model, mi0.layer_file, mi0.layers), start, auto_why);
     a.cache_gb = std::min(a.cache_gb, start);
     co.cache_gb = a.cache_gb;
@@ -683,6 +706,14 @@ int main(int argc, char** argv) {
   C.cache.rd.prio = a.rd_prio < 0 ? (plan || (C.ns.on && C.ns.prio)) : a.rd_prio != 0;
   C.cache.rd.excl = a.rd_excl != 0;
   if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;
+  if (a.bg_ranks > 0 && C.hook == &rts) {  // background reads: the routers' next ranks for the drive's idle time
+    rts.bg_ranks = a.bg_ranks;
+    rts.bg_queue = std::max(1, a.bg_queue);
+    rts.bg_margin = a.bg_margin;
+    C.cache.rd.bg_spec_gate = std::max(0, a.bg_gate);
+    C.cache.bg_split = std::max(1, a.bg_split);
+    C.cache.rd.max_bg = std::max(1, a.bg_max);
+  }
   C.cancel_stale = a.cancel < 0 ? (plan || (C.ns.on && C.ns.cancel)) : a.cancel != 0;
   C.chunk_names = a.verify_names != 0;
   if (!a.evict_policy.empty()) {  // the learned keep-score (router features from --prefetch router), or a ranker
@@ -791,7 +822,7 @@ int main(int argc, char** argv) {
   auto& CS = C.cache.st;
   auto& RD = C.cache.rd;
   uint64_t dt0[7] = {0};
-  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0;
+  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0;
   auto reset_stats = [&]() {
     C.reset_stats();
     M->reset_stats();
@@ -799,6 +830,7 @@ int main(int argc, char** argv) {
     rd_wall0 = RD.busy_wall();
     RD.depth_times(dt0);
     rd_bytes0 = RD.bytes.load();
+    rd_bg0 = RD.bytes_cls[2].load();
     sau0 = RD.spec_inflight_at_urgent.load();
     fskip0 = RD.file_resident_skips.load();
     fskipb0 = RD.file_bytes_skipped.load();
@@ -831,7 +863,24 @@ int main(int argc, char** argv) {
        << ",\"weight_mb_touched_per_token\":{\"resident\":" << per(T.bytes_res / 1e6) << ",\"experts\":" << per(T.bytes_exp / 1e6) << "}"
        << ",\"mb_read_per_token\":" << per((CS.bytes_urgent + CS.bytes_pf) / 1e6) << ",\"mb_read_urgent_per_token\":" << per(CS.bytes_urgent / 1e6)
        << ",\"mb_read_prefetch_per_token\":" << per(CS.bytes_pf / 1e6)
-       << ",\"read_gb_s_while_busy\":" << ((CS.bytes_urgent + CS.bytes_pf) / 1e9) / std::max(1e-9, (RD.busy_ns.load() - rd_busy0) / 1e9 / std::max(1, a.readers))
+       << ",\"read_gb_s_while_busy\":" << (RD.bytes.load() - rd_bytes0) / 1e9 / std::max(1e-9, (RD.busy_wall() - rd_wall0) / 1e9)
+       << [&] {  // the drive per token: wall time with no read in flight / exactly one; bytes over the loop's wall time
+            uint64_t d1[7];
+            RD.depth_times(d1);
+            const double rb = (double)(RD.bytes.load() - rd_bytes0);
+            std::ostringstream o;
+            o.setf(std::ios::fixed);
+            o.precision(4);
+            o << ",\"drive\":{\"idle_ms_per_token\":" << per((d1[0] - dt0[0] + d1[1] - dt0[1]) / 1e6)
+              << ",\"idle_nothing_queued_ms_per_token\":" << per((d1[0] - dt0[0]) / 1e6)
+              << ",\"one_read_ms_per_token\":" << per((d1[2] - dt0[2]) / 1e6) << ",\"effective_gb_s\":" << rb / 1e9 / std::max(1e-9, dec_s)
+              << ",\"gb_s_while_busy\":" << rb / 1e9 / std::max(1e-9, (RD.busy_wall() - rd_wall0) / 1e9)
+              << ",\"mb_background_per_token\":" << per((RD.bytes_cls[2].load() - rd_bg0) / 1e6)
+              << ",\"background\":{\"ranks\":" << rts.bg_ranks << ",\"gate\":" << RD.bg_spec_gate << ",\"split\":" << C.cache.bg_split
+              << ",\"issued_per_token\":" << per(CS.n_bg_issued) << ",\"refused_per_token\":" << per(CS.n_bg_refused)
+              << ",\"used_per_token\":" << per(CS.n_bg_used) << ",\"evicted_unused_per_token\":" << per(CS.n_bg_unused_evicted) << "}}";
+            return o.str();
+          }()
        << ",\"picks\":" << picks << ",\"hit_rate\":" << (double)CS.n_hit / std::max<uint64_t>(1, picks)
        << ",\"late_rate\":" << (double)CS.n_late / std::max<uint64_t>(1, picks) << ",\"miss_rate\":" << (double)CS.n_miss / std::max<uint64_t>(1, picks)
        << ",\"hit_rate_looped\":" << (double)CS.n_hit_r[0] / std::max<uint64_t>(1, CS.n_pick_r[0])
@@ -954,6 +1003,8 @@ int main(int argc, char** argv) {
             r.ra_max_tok = a.ra_max;
             r.ra_sat_skip = a.ra_sat != 0;
             r.readers = a.readers;
+            r.bg_ranks = rts.bg_ranks;
+            r.bg_gate = rts.bg_ranks > 0 ? a.bg_gate : 0;
             return r.json();
           }() << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
@@ -1188,6 +1239,11 @@ int main(int argc, char** argv) {
     std::vector<int> out{next_tok()};
     std::vector<double> step_ms, step_wait, step_mb, step_hit;
     double ra_ab_n[2] = {0, 0}, ra_ab_ms[2] = {0, 0}, ra_ab_wait[2] = {0, 0};  // (DMENG_RA_AB) tokens with run-ahead off / on
+    // (DMENG_BG_AB=1) background reads off / on, chosen per token at random in one process: tokens, ms, wait, MB read,
+    // drive idle ms, ms with one read in flight
+    double bg_ab[2][6] = {{0}};
+    double ab22[2][2][3] = {{{0}}};  // both: [run-ahead on][background on] tokens, ms, wait
+    const int bg_ranks0 = rts.bg_ranks;
     std::vector<int> step_n, step_acc;
     const bool drafting = a.draft != "none";
     if ((drafting || a.verify_check > 0) && fast) return die("draft", "the full head only (no --fast-head)");
@@ -1284,6 +1340,17 @@ int main(int argc, char** argv) {
       static const bool ra_ab = getenv("DMENG_RA_AB") && atoi(getenv("DMENG_RA_AB")) > 0 && C.run_ahead;
       static uint32_t ra_lcg = 12345;
       if (ra_ab) ra_lcg = ra_lcg * 1664525u + 1013904223u, C.ra_off = ((ra_lcg >> 16) & 1) == 0;
+      static const bool bgab = getenv("DMENG_BG_AB") && atoi(getenv("DMENG_BG_AB")) > 0 && bg_ranks0 > 0;
+      static uint32_t bg_lcg = 54321;
+      int bg_arm = -1;
+      uint64_t bgd0[7], bgb0 = 0;
+      if (bgab) {
+        bg_lcg = bg_lcg * 1664525u + 1013904223u;
+        bg_arm = (int)((bg_lcg >> 16) & 1);
+        rts.bg_ranks = bg_arm ? bg_ranks0 : 0;
+        RD.depth_times(bgd0);
+        bgb0 = RD.bytes.load();
+      }
       auto ts = clk::now();
       int n = 1, acc = 0;
       if (!drafting) {
@@ -1302,6 +1369,17 @@ int main(int argc, char** argv) {
       }
       step_ms.push_back(ms_since(ts));
       if (ra_ab) ra_ab_n[!C.ra_off] += 1, ra_ab_ms[!C.ra_off] += step_ms.back(), ra_ab_wait[!C.ra_off] += C.t.wait - w0;
+      if (bg_arm >= 0) {
+        uint64_t d1[7];
+        RD.depth_times(d1);
+        double* x = bg_ab[bg_arm];
+        x[0] += 1, x[1] += step_ms.back(), x[2] += C.t.wait - w0, x[3] += (RD.bytes.load() - bgb0) / 1e6;
+        x[4] += (d1[0] - bgd0[0] + d1[1] - bgd0[1]) / 1e6, x[5] += (d1[2] - bgd0[2]) / 1e6;
+        if (ra_ab) {
+          double* z = ab22[!C.ra_off][bg_arm];
+          z[0] += 1, z[1] += step_ms.back(), z[2] += C.t.wait - w0;
+        }
+      }
       step_wait.push_back(C.t.wait - w0);
       step_mb.push_back((C.cache.st.bytes_urgent + C.cache.st.bytes_pf - b0) / 1e6);
       step_hit.push_back((double)(C.cache.st.n_hit - h0));
@@ -1357,6 +1435,27 @@ int main(int argc, char** argv) {
       js << ",\"ra_ab\":{\"tokens_off\":" << ra_ab_n[0] << ",\"ms_off\":" << ra_ab_ms[0] / std::max(1.0, ra_ab_n[0]) << ",\"wait_off\":"
          << ra_ab_wait[0] / std::max(1.0, ra_ab_n[0]) << ",\"tokens_on\":" << ra_ab_n[1] << ",\"ms_on\":" << ra_ab_ms[1] / std::max(1.0, ra_ab_n[1])
          << ",\"wait_on\":" << ra_ab_wait[1] / std::max(1.0, ra_ab_n[1]) << "}";
+    if (bg_ab[0][0] + bg_ab[1][0] > 0) {
+      rts.bg_ranks = bg_ranks0;
+      js << ",\"bg_ab\":{";
+      for (int r = 0; r < 2; r++) {
+        const double* x = bg_ab[r];
+        const double n = std::max(1.0, x[0]);
+        js << (r ? ",\"on\":" : "\"off\":") << "{\"tokens\":" << x[0] << ",\"ms\":" << x[1] / n << ",\"wait\":" << x[2] / n << ",\"mb\":" << x[3] / n
+           << ",\"idle_ms\":" << x[4] / n << ",\"one_read_ms\":" << x[5] / n << ",\"effective_gb_s\":" << x[3] / std::max(1e-9, x[1]) << "}";
+      }
+      js << "}";
+    }
+    if (ab22[0][0][0] + ab22[1][1][0] > 0) {  // [ra][bg]: tokens, ms, wait
+      js << ",\"ra_bg_ab\":[";
+      for (int r = 0; r < 2; r++)
+        for (int b = 0; b < 2; b++) {
+          const double* z = ab22[r][b];
+          js << (r + b ? "," : "") << "{\"run_ahead\":" << r << ",\"background\":" << b << ",\"tokens\":" << z[0] << ",\"ms\":" << z[1] / std::max(1.0, z[0])
+             << ",\"wait\":" << z[2] / std::max(1.0, z[0]) << "}";
+        }
+      js << "]";
+    }
     if (a.prefill_chunk > 1) js << ",\"prefill_chunk\":" << a.prefill_chunk;
     if (a.prefill_chunk > 1 && (a.prefill_gpu_frac > 0 || a.prefill_gpu_experts > 0))
       js << ",\"prefill_gpu_frac\":" << a.prefill_gpu_frac << ",\"prefill_gpu_experts\":" << a.prefill_gpu_experts;

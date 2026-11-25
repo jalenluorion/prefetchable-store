@@ -53,6 +53,32 @@ class Sim:
         self.rng = np.random.default_rng(seed)
         self.look = None  # look:H:R = hazard + the next H tokens' uses known for a share R of them (a cross-token predictor)
         self.hl = 8.0
+        # named:D[:X] = hazard, with a floor for what the routers have named for the coming steps: a record among the lag
+        # router's top D for a step s+1 .. s+4 (steps 0-3 from the token's start) keeps at least P(a pick | its rank) (this
+        # trace's calibration); X = 1 adds the next token's steps 0-3 (an upper bound: that router does not exist)
+        self.floor = None
+        if policy.startswith("named:"):
+            f = policy.split(":")
+            self.floor = (int(f[1]), int(f[2]) if len(f) > 2 else 0)
+            pk = ri[:, :, :K]
+            self.prank = np.array([(ti[:, :, r : r + 1] == pk).any(-1).mean() for r in range(32)])
+            policy = self.policy = "hazard"
+        # hzr = hazard whose table also bins the record's rank in its layer's latest released row (top 5, 10, 16, 32,
+        # none): the routing just seen is the estimate of the next token's
+        self.nr = 1
+        self.redges = (5, 10, 16, 32)
+        self.r2 = False  # hzr2: the layer's two latest released rows (this token's and the one before)
+        if policy.startswith("hzr2"):
+            self.r2 = True
+            policy = "hzr" + policy[4:]
+        if policy.startswith("hzr"):
+            if policy.startswith("hzr:"):
+                self.redges = tuple(int(x) for x in policy.split(":")[1].split("-"))
+            self.nr = len(self.redges) + 1
+            self.nr1 = self.nr
+            if self.r2:
+                self.nr = self.nr1 * self.nr1
+            policy = self.policy = "hazard"
         if policy.startswith("look:"):
             _, h, r = policy.split(":")
             self.look = (int(h), float(r))
@@ -81,9 +107,10 @@ class Sim:
             self.fac = 2 ** (-1 / 8)
             self.last = np.full(N, -1.0)
             self.dec = np.zeros(N)
-            self.u = np.ones((NL, HZ_NA * HZ_NF))
-            self.n = np.full((NL, HZ_NA * HZ_NF), 2.0)
-            self.kb = np.full(N, self._bin(np.full(N, -1.0), np.zeros(N), 0))
+            self.u = np.ones((NL, HZ_NA * HZ_NF * self.nr))
+            self.n = np.full((NL, HZ_NA * HZ_NF * self.nr), 2.0)
+            self.rb = np.full(N, self.nr - 1, np.int64)
+            self.kb = self._bin(np.full(N, -1.0), np.zeros(N), 0, self.rb)
             self.b = np.zeros(N, np.int64)
             self.bok = False
             self.cur = np.zeros(N, bool)
@@ -102,12 +129,24 @@ class Sim:
             self.uses = {k: np.array(v) for k, v in uses.items()}
 
     # ---------------------------------------------------------------- hazard table (Cache::hz_bin / hz_tick / hz_touch)
-    @staticmethod
-    def _bin(last, dec, t):
+    def _bin(self, last, dec, t, rb=None):
         age = np.maximum(1, t - last)
         ab = np.where(last >= 0, np.minimum(np.floor(np.log2(age)), HZ_NA - 1), min(14, HZ_NA - 1))
         fb = np.minimum(np.floor(np.log2(1.0 + 4.0 * dec + 0.0)), HZ_NF - 1)
-        return (ab * HZ_NF + fb).astype(np.int64)
+        b = (ab * HZ_NF + fb).astype(np.int64)
+        return b * self.nr + (rb if rb is not None and self.nr > 1 else 0)
+
+    def see_released(self, p, s):
+        """hzr: layer s's released row of this token re-bins its records"""
+        rb = np.full(NE, self.nr1 - 1, np.int64)
+        for r, e in enumerate(self.ri[p, s, :32]):
+            rb[int(e)] = int(np.searchsorted(self.redges, r, side="right"))
+        sl = slice(s * NE, (s + 1) * NE)
+        if self.r2:
+            rb = rb * self.nr1 + self.rb[sl] // self.nr1
+        self.rb[sl] = rb
+        self.kb[sl] = self._bin(self.last[sl], self.dec[sl], self.t + 1, rb)
+        self.score[sl] = self.u[s, self.kb[sl]] / self.n[s, self.kb[sl]] + self.last[sl] * 1e-9
 
     def tick(self, t):
         if self.policy == "hazard":
@@ -116,7 +155,7 @@ class Sim:
                 self.b = self.kb.copy()
                 self.bok = True
             self.dec *= self.fac
-            self.kb = self._bin(self.last, self.dec, t + 1)
+            self.kb = self._bin(self.last, self.dec, t + 1, self.rb)
             self.cur[:] = False
             self.score = self.u[self.layer_of, self.kb] / self.n[self.layer_of, self.kb] + self.last * 1e-9
         elif self.policy == "freq":
@@ -140,7 +179,7 @@ class Sim:
                 self.u[k // NE, self.b[k]] += 1.0
             self.last[k] = self.t
             self.dec[k] += 1.0
-            self.kb[k] = self._bin(np.array([self.last[k]]), np.array([self.dec[k]]), self.t + 1)[0]
+            self.kb[k] = self._bin(np.array([self.last[k]]), np.array([self.dec[k]]), self.t + 1, self.rb[k : k + 1])[0]
             self.score[k] = self.u[k // NE, self.kb[k]] / self.n[k // NE, self.kb[k]] + self.last[k] * 1e-9
         elif self.policy == "freq":
             self.last[k] = self.t
@@ -166,7 +205,18 @@ class Sim:
             seen = (d <= H * NL) & (self.nuflag < R)
             sc = self.score + np.where(seen, 10.0 + 1.0 - d / (H * NL + 1.0), 0.0)
             return int(np.argmin(np.where(ok, sc, np.inf)))
-        cand = np.where(self.held & (self.pin < self.ev), self.score, np.inf)
+        sc = self.score
+        if self.floor:
+            D, X = self.floor
+            p, s = divmod(self.ev, NL)
+            sc = sc.copy()
+            tg = [(p, s2) for s2 in range(s + 1, min(s + LAG, NL - 1) + 1)]
+            if X and s >= NL - LAG and p + 1 < self.npos:
+                tg += [(p + 1, s2) for s2 in range(LAG)]
+            for p2, s2 in tg:
+                ks = s2 * NE + self.ti[p2, s2, :D]
+                sc[ks] = np.maximum(sc[ks], self.prank[:D] + 1.0 * 0)
+        cand = np.where(self.held & (self.pin < self.ev), sc, np.inf)
         return int(np.argmin(cand))
 
     def insert(self, k, pin_until, counted, L, by_name):
@@ -234,6 +284,8 @@ class Sim:
                 for k in keys:
                     self.touch(k)
                     self.pin[k] = max(self.pin[k], self.ev)
+                if self.policy == "hazard" and self.nr > 1:
+                    self.see_released(p, s)
                 miss = [(wts[j], keys[j]) for j in range(K) if not self.held[keys[j]]]
                 read = miss
                 left = []
