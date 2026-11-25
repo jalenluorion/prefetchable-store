@@ -51,6 +51,10 @@ struct PrefillOpts {
   // the rule would read), as the old runner ran its short prompts through its approximate decode; longer prompts, and
   // every prompt in exact mode, run lossless. 0: never (every family's default)
   int drop_upto = 0;
+  // a prompt apart from the decode's cache (Cache::apart_on; the hazard policy only): its uses do not count in the
+  // policy's statistics, its positions do not move the policy's clock, and its reads take the slots of its own earlier
+  // reads before any record held before it. Placement only. false: every family's default
+  bool apart = false;
   // the early names of a span of n positions (multi: several sub-chunks): 0 none, 1 whole next layer, 2 router picks
   int names_for(int n, bool multi) const {
     if (stream != 3) return stream;

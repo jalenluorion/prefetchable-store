@@ -156,7 +156,8 @@ std::string ModelLM::stats_json() {
   o << "{\"steps\":" << dec_steps_ << ",\"ms_per_step\":{" << T.stages_json(n)
     << "},\"hit\":" << (double)S.n_hit / std::max<uint64_t>(1, picks) << ",\"late\":" << (double)S.n_late / std::max<uint64_t>(1, picks)
     << ",\"mb_read_per_step\":" << (S.bytes_urgent + S.bytes_pf) / MB / n << ",\"routers\":" << (c_.hook ? "true" : "false")
-    << ",\"pf_issued_per_step\":" << S.n_pf_issued / n << ",\"model\":" << m_.stats_json((int)dec_steps_) << "}";
+    << ",\"pf_issued_per_step\":" << S.n_pf_issued / n << ",\"pf_unused_evicted_per_step\":" << S.n_pf_unused_evicted / n
+    << ",\"urgent_mb_per_step\":" << S.bytes_urgent / MB / n << ",\"model\":" << m_.stats_json((int)dec_steps_) << "}";
   return o.str();
 }
 

@@ -443,7 +443,7 @@ struct PolicyTimer {  // adds the scope's wall time to a counter (ms)
 }  // namespace
 
 void Cache::pre_use(int L, const int32_t* picks, int n, long t) {
-  if (!hazard_evict) return;
+  if (!hazard_evict || apart_on) return;
   PolicyTimer pt(st.policy_ms);
   for (int j = 0; j < n; j++) hz_touch(L, picks[j], t);
 }
@@ -468,6 +468,10 @@ int Cache::victim_in(int L, int reserve, bool capped) {
     int v = S.free_.back();
     S.free_.pop_back();
     return v;
+  }
+  if (apart_on && !capped) {  // a prompt apart: its own earlier reads go first
+    const int v = apart_victim(L, reserve);
+    if (v >= 0) return v;
   }
   int best = -1, unpinned = 0;
   double bs = 0;
@@ -683,6 +687,8 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
   x.e = e;
   x.key = -1e300;
   x.last = -1;
+  x.apart = apart_on && !bg_issue;
+  if (x.apart) apart_q[layer_pool[L]].push_back(slot);
   tab[(size_t)L * NE + e] = slot;
   if (!lheld.empty()) lheld[L]++;
   if (hazard_evict && hzm_ok[L] && slot < S.cap) {  // the layer's minimum, with the new record
@@ -748,10 +754,11 @@ void Cache::wait(int L, int slot) {
 void Cache::use(int L, int slot, long t_use, long step) {
   Slot& x = pool(L).s[slot];
   const long t = chunk_t >= 0 ? chunk_t : t_use;  // the time-ordered statistics' clock
-  if (hazard_evict && x.layer >= 0) {
+  if (hazard_evict && x.layer >= 0 && !apart_on) {
     if (chunk_t >= 0) chunk_touch.push_back({step, x.layer, x.e, t_use});  // replayed in time order at the pass's end
     else hz_touch(x.layer, x.e, t);
   }
+  if (!apart_on) x.apart = false;  // a decode step's record now
   if (learned_evict && x.layer >= 0) {  // the policy's use statistics (decayed counts at three half-lives, last use)
     static const double hl[3] = {2.0, 8.0, 32.0};
     const size_t k = (size_t)x.layer * NE + x.e;
@@ -1454,6 +1461,51 @@ void Cache::uniform_layer_caps() {
       if (x.layer >= 0) lheld[x.layer]++;
 }
 
+void Cache::apart_begin() {
+  apart_on = true;
+  apart_q.assign(npools, {});
+}
+
+void Cache::apart_end(long positions) {
+  if (!apart_on) return;
+  apart_on = false;
+  for (int p = 0; p < npools; p++)
+    for (auto& x : P[p].s) x.apart = false;
+  apart_q.clear();
+  hz_off += std::max(0L, positions);
+  hz_dirty_all();
+}
+
+// the oldest unpinned, landed slot the running prompt read (and that is still its record); -1 if none, or when a name
+// (reserve > 0) would leave no more than `reserve` unpinned slots in the pool
+int Cache::apart_victim(int L, int reserve) {
+  const int p = layer_pool[L];
+  SlotPool& S = P[p];
+  std::deque<int>& q = apart_q[p];
+  for (auto it = q.begin(); it != q.end();) {
+    const int s = *it;
+    if (s >= S.cap || !S.s[s].apart) {  // reused since, or past a lowered budget (the ordinary path gives it back)
+      it = q.erase(it);
+      continue;
+    }
+    if (S.s[s].pins > 0 || S.pending[s].load(std::memory_order_relaxed) != 0) {
+      ++it;
+      continue;
+    }
+    if (reserve > 0) {
+      int unpinned = 0;
+      for (int i = 0; i < S.cap && unpinned <= reserve; i++)
+        if (S.s[i].pins == 0 && S.pending[i].load(std::memory_order_relaxed) == 0) unpinned++;
+      if (unpinned <= reserve) return -1;
+    }
+    q.erase(it);
+    drop(L, s, true);
+    n_apart_taken++;
+    return s;
+  }
+  return -1;
+}
+
 namespace {
 // (int)std::log2(x) for x >= 1 from the exponent bits; std::log2 is called only just below a power of two, where it may
 // round up to the next integer (so the result is the libm one exactly)
@@ -1479,8 +1531,9 @@ int Cache::hz_bin(double last, double dec, long t) const {
 }
 
 void Cache::hz_tick(long t) {
+  t -= hz_off;            // (a prompt apart did not move the policy's clock)
   if (t <= hz_t) return;  // the clock never goes back (an older position's touch counts at the current token)
-  if (chunk_t >= 0 && !hz_replay) return;  // inside a multi-position pass: the table moves when the pass ends
+  if ((chunk_t >= 0 || apart_on) && !hz_replay) return;  // inside a multi-position pass: the table moves when the pass ends
   // learn: every record's state at this token is one trial of its bucket. For the next token (g = 1) that bucket is
   // hz_kb, which always holds hz_bin(last, dec, hz_t + 1) (set here and at each touch); after a gap it is recomputed.
   const bool learn = hz_t >= 0;
@@ -1521,6 +1574,7 @@ void Cache::chunk_done() {
 
 void Cache::hz_touch(int L, int e, long t) {
   hz_tick(t);
+  t -= hz_off;
   if (t < hz_t) t = hz_t;
   const size_t k = (size_t)L * NE + e;
   if (hz_cur[k]) return;

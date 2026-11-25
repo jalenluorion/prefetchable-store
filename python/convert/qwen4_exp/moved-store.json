@@ -786,7 +786,8 @@
   "short_names": "router",
   "scratch_mb": 768,
   "fast": 1,
-  "drop_upto": 64
+  "drop_upto": 64,
+  "apart": 1
  },
  "drafting": {
   "cost_prior": null,

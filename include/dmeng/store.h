@@ -122,6 +122,7 @@ struct Slot {
   int pf_pins = 0;         // how many of the pins are early names (a miss may take such a slot when nothing else is free)
   bool pf_unused = false;  // landed by a name and not used since
   bool bg_unused = false;  // landed by a background read and not used since
+  bool apart = false;      // read by the prompt running now (Cache::apart_on), not used by a decode step since
 };
 
 struct SlotPool {
@@ -272,6 +273,21 @@ struct Cache {
   };
   std::vector<HzTouch> chunk_touch;
   void chunk_done();
+  // A prompt apart from the decode's cache (PrefillOpts::apart; hazard only): while a prompt runs (prefill_spans), its
+  // uses are not counted in the hazard statistics and its positions do not move the policy's clock (hz_off: the clock
+  // the statistics see is tok_now - hz_off, so the decode step after the prompt is one token after the one before it),
+  // and a slot the prompt needs is taken first from the records the prompt itself read and no longer pins (oldest read
+  // first), before any record held when it started; at its end those records are ordinary ones, valued by the decode's
+  // statistics like any other. A prompt's reads then displace at most what it pins at once (about one layer's union),
+  // not the decode's working set, and the decode's statistics are the decode's own. Placement only: exact outputs never
+  // depend on it.
+  bool apart_on = false;
+  long hz_off = 0;
+  std::vector<std::deque<int>> apart_q;  // [npools] slots the running prompt read, in read order
+  uint64_t n_apart_taken = 0;            // slots a prompt took from its own earlier reads
+  void apart_begin();
+  void apart_end(long positions);
+  int apart_victim(int L, int reserve);
   struct ChunkClock {
     Cache& c;
     long prev_t;

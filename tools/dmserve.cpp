@@ -909,6 +909,10 @@ int main(int argc, char** argv) {
       dr.pick = nullptr;
     std::vector<int32_t> hist;
     std::vector<int> got, gen;
+    // MB read per decode step (the decode's own reads, in order: a cold cache after the prompt shows as its first steps)
+    std::vector<float> mb_tok;
+    auto rd_bytes = [&] { return C.cache.st.bytes_urgent + C.cache.st.bytes_pf; };
+    uint64_t rb0 = rd_bytes();
     size_t gi = 0;  // got[gi..] are produced and not yet emitted (all but the last already in the state)
     if (drafting) {
       hist.assign(pc.live().begin(), pc.live().end());
@@ -944,6 +948,9 @@ int main(int argc, char** argv) {
       }
       if (!drafting) {
         pc.step(t, lg.data());
+        const uint64_t rb = rd_bytes();
+        mb_tok.push_back((float)((rb - rb0) / 1e6));
+        rb0 = rb;
         continue;
       }
       // decode step through the drafter: t fed, plus whatever drafts the controller runs; produces 1 + accepted tokens
@@ -969,7 +976,11 @@ int main(int argc, char** argv) {
     std::ostringstream s;
     s << "E " << r.rid << " " << reason << " {\"tokens\":" << ntok << ",\"ms_first_token\":" << first_ms << ",\"ms_decode\":" << dec_ms
       << ",\"decode_tok_s\":" << (ntok > 1 ? (ntok - 1) / (dec_ms / 1e3) : 0) << ",\"sample_ms_per_token\":" << samp_ms / std::max(1, ntok) << ",\"emit_ms_per_token\":" << out_ms / std::max(1, ntok)
-      << ",\"decode\":" << lm.stats_json() << ",\"draft\":" << (drafting ? dr.stats_json() : std::string("{}")) << ",\"decode_first50\":" << first50 << ",\"mem\":" << lm.mem_json() << ",\"live\":" << pc.live().size() << ",\"session\":" << pc.stats_json() << "}";
+      << ",\"decode\":" << lm.stats_json() << ",\"draft\":" << (drafting ? dr.stats_json() : std::string("{}")) << ",\"decode_first50\":" << first50 << ",\"mb_by_step\":[" << [&] {
+           std::ostringstream q;
+           for (size_t i = 0; i < mb_tok.size(); i++) q << (i ? "," : "") << (int)(mb_tok[i] + 0.5f);
+           return q.str();
+         }() << "],\"mem\":" << lm.mem_json() << ",\"live\":" << pc.live().size() << ",\"session\":" << pc.stats_json() << "}";
     out(s.str());
     cur.store(-1);
   }

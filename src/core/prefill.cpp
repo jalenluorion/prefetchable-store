@@ -133,6 +133,17 @@ bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std
     explicit InPrefill(Core& x) : c(x) { c.chunk_prefill = true; }
     ~InPrefill() { c.chunk_prefill = false; }
   } in_prefill(core);
+  struct Apart {  // the prompt apart from the decode's cache (PrefillOpts::apart)
+    Core& c;
+    const bool on;
+    const long t0;
+    Apart(Core& x, bool want) : c(x), on(want && x.cache.hazard_evict && !x.cache.apart_on), t0(x.tok_clock) {
+      if (on) c.cache.apart_begin();
+    }
+    ~Apart() {
+      if (on) c.cache.apart_end(c.tok_clock - t0);
+    }
+  } apart(core, o.apart);
   std::vector<int> caps(capture);
   std::sort(caps.begin(), caps.end());
   caps.erase(std::unique(caps.begin(), caps.end()), caps.end());
