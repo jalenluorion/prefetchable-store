@@ -682,10 +682,116 @@ void Flash::qsa_head(int L, int h, const float* q, const float* gate, const std:
 }
 
 // ------------------------------------------------------------------------------------------------ decode blocks
+namespace {
+// The mixer in two fork-joins. A: the per-stream norms folded into the input's quantisation blocks (each block scales
+// its 64 values by its stream's factor, computed before the fork-join from the stream's sum of squares, then quantises
+// them), then the injection rows (one per claim, first: their bf16 rows are the slowest per byte) and the down rows. B:
+// the up rows claimed by output block, all streams' rows of the block, then the mix of those outputs by the thread that
+// computed them. Every value is rmsnorm's, run_rows' and the mix loop's: the same expressions on the same inputs.
+struct HcA {
+  const float *hyper, *nw, *rs;
+  float* nrm;
+  XQ* xq;
+  const Weight *down, *inj;
+  float *lo, *rinj;
+  int H, nblk, qcl, ninj, du, dnb, total;
+  alignas(128) std::atomic<int> next{0};
+  alignas(128) std::atomic<int> qleft{0};
+};
+constexpr int HC_QB = 4;  // quantisation blocks per claim
+void phase_hc_a(void* p, int, int) {
+  HcA& X = *(HcA*)p;
+  for (int ch; (ch = X.next.fetch_add(1, std::memory_order_relaxed)) < X.total;) {
+    if (ch < X.qcl) {
+      const int b0 = ch * HC_QB, b1 = std::min(X.nblk, b0 + HC_QB);
+      for (int b = b0; b < b1; b++) {
+        const float r = X.rs[(b * XB) / X.H];
+        const float *x = X.hyper + (size_t)b * XB, *w = X.nw + (size_t)b * XB;
+        float* o = X.nrm + (size_t)b * XB;
+        for (int i = 0; i < XB; i++) o[i] = x[i] * r * w[i];
+        xq_block(*X.xq, b, o);
+      }
+      X.qleft.fetch_sub(b1 - b0, std::memory_order_release);
+      continue;
+    }
+    while (X.qleft.load(std::memory_order_acquire) > 0) __builtin_arm_yield();
+    if (rows_stop()) break;
+    int c2 = ch - X.qcl;
+    if (c2 < X.ninj) {
+      mv(*X.inj, c2, c2 + 1, X.xq, X.nrm, X.rinj + c2);
+      continue;
+    }
+    c2 -= X.ninj;
+    const int u0 = c2 < X.dnb ? 4 * c2 : 4 * X.dnb + (c2 - X.dnb), u1 = c2 < X.dnb ? u0 + 4 : u0 + 1;
+    const int r0 = u0 * 4, r1 = std::min(X.down->rows, u1 * 4);
+    mv(*X.down, r0, r1, X.xq, X.nrm, X.lo + r0);
+  }
+}
+struct HcB {
+  const Weight* up;
+  const XQ* xq;
+  float *u, *mixed;
+  const float* nrm;
+  int H, HC, ob, ncl;
+  alignas(128) std::atomic<int> next{0};
+};
+void phase_hc_b(void* p, int, int) {
+  HcB& X = *(HcB*)p;
+  const int H = X.H;
+  for (int ch; (ch = X.next.fetch_add(1, std::memory_order_relaxed)) < X.ncl;) {
+    if (rows_stop()) break;
+    const int i0 = ch * X.ob, i1 = std::min(H, i0 + X.ob);
+    for (int s = 0; s < X.HC; s++) mv(*X.up, s * H + i0, s * H + i1, X.xq, nullptr, X.u + (size_t)s * H + i0);
+    for (int i = i0; i < i1; i++) {
+      float acc = 0;
+      for (int s = 0; s < X.HC; s++) acc = __builtin_fmaf(sigm(X.u[(size_t)s * H + i]), X.nrm[(size_t)s * H + i], acc);
+      X.mixed[i] = acc / (float)X.HC;
+    }
+  }
+}
+}  // namespace
+
 void Flash::hc_step(const HCw& w, const float* hyper, float* mixed, float* inj_out) {
   const int N = c.N();
   const auto t0 = clk::now();
-  // the per-stream norms on the pool, one stream per task (each stream's arithmetic is the serial loop's)
+  if (!ref) {  // (the reference path: below, its inputs in fp32)
+    const int H = c.H;
+    float rs[64];
+    {  // rmsnorm's factor per stream: the sum of squares in double, in order (the streams' chains side by side)
+      double ss[64];
+      for (int s = 0; s < c.HC; s++) ss[s] = 0;
+      for (int i = 0; i < H; i++)
+        for (int s = 0; s < c.HC; s++) ss[s] += (double)hyper[(size_t)s * H + i] * hyper[(size_t)s * H + i];
+      for (int s = 0; s < c.HC; s++) rs[s] = 1.f / std::sqrt((float)(ss[s] / H) + c.eps);
+    }
+    float r[64];
+    HcA A;
+    A.hyper = hyper, A.nw = w.norm, A.rs = rs, A.nrm = nrm.data(), A.xq = &xin.q, A.down = &w.down, A.inj = &w.inj, A.lo = lo.data(), A.rinj = r;
+    A.H = H;
+    A.nblk = N / XB;
+    A.qcl = (A.nblk + HC_QB - 1) / HC_QB;
+    A.ninj = inj_out ? w.inj.rows : 0;
+    A.du = (w.down.rows + 3) / 4;
+    const int tail = 4 * core->pool->size();
+    A.dnb = A.du > tail ? (A.du - tail) / 4 : 0;
+    A.total = A.qcl + A.ninj + A.dnb + (A.du - 4 * A.dnb);
+    xin.reset(N);
+    A.qleft.store(A.nblk, std::memory_order_relaxed);
+    T->bytes_res += (double)w.down.bytes() + (inj_out ? (double)w.inj.bytes() : 0.0);
+    core->pool->run_any(phase_hc_a, &A);
+    hc_lo(lo.data());
+    xlo.prep(lo.data(), c.LOW);
+    HcB B;
+    B.up = &w.up, B.xq = &xlo.q, B.u = up.data(), B.mixed = mixed, B.nrm = nrm.data();
+    B.H = H, B.HC = c.HC, B.ob = 32, B.ncl = (H + 31) / 32;
+    T->bytes_res += (double)w.up.bytes();
+    core->pool->run_any(phase_hc_b, &B);
+    if (inj_out)
+      for (int s = 0; s < c.HC; s++) inj_out[s] = 2.f * sigm(r[s] / (float)c.HC);
+    T->msg += ms_since(t0);
+    return;
+  }
+  // the reference path: the per-stream norms on the pool, one stream per task (each stream's arithmetic is the serial loop's)
   parallel_for(*core->pool, c.HC, [&](int s) {
     rmsnorm(hyper + (size_t)s * c.H, w.norm + (size_t)s * c.H, c.H, c.eps, nrm.data() + (size_t)s * c.H);
   });
