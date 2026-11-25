@@ -1768,7 +1768,8 @@
  },
  "defaults": {
   "routers": [
-   "linear_k2"
+   "linear_k2",
+   "mlp_k2_h512"
   ],
   "names": {
    "rule": "confidence",

@@ -20,21 +20,46 @@ namespace dm {
 
 using ms::Json;
 
-// The built-in values, used for every key a manifest leaves out: one table for every model. What differs between models
-// is declared in each one's manifest (modes, profiles, defaults); what is left here is a property of the device class
-// each profile stands for, measured with the models of the weight repos (results/ios/p3-gpu/GPU-PREFILL.md: the Mac's
-// GPU share of the prefill; results/parity/PARITY.md: run-ahead at depth 1; the phones: 8 readers, run-ahead limited to
-// 0.2 of the token's compute, off while the readers are saturated, exact mode only). The run-ahead names a step's
-// top_k picks ("top_k": the manifest's experts.top_k) unless a profile says otherwise.
+// Where a key a folder's manifest leaves out comes from, in this order: the published manifest of the same family
+// (published_defaults.inc, generated from python/convert/<family>/moved-store.json: an older manifest without
+// `profiles`, or a folder without one run with --profile, resolves as the published one does), then the built-in values
+// below, one table for every model. What differs between models is declared in the manifests (modes, profiles,
+// defaults, drafting); what is left here is a property of the device class each profile stands for, measured with the
+// models of the weight repos (results/ios/p3-gpu/GPU-PREFILL.md: the Mac's GPU share of the prefill;
+// results/parity/PARITY.md: run-ahead at depth 1; the phones: 8 readers, run-ahead limited to 0.2 of the token's compute,
+// off while the readers are saturated, exact mode only; phone-small: the 4-bit resident in fast mode with the confidence
+// names rule, results/ios). The run-ahead names a step's top_k picks ("top_k": the manifest's experts.top_k) unless a
+// profile says otherwise.
+#include "published_defaults.inc"
 static const char* BUILTIN = R"({
  "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
  "profiles": {
-  "mac": {"resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4}, "run_ahead": {"picks": "top_k", "depth": 1}},
-  "phone": {"resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+  "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
+          "run_ahead": {"picks": "top_k", "depth": 1}},
+  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
             "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
-  "phone-small": {"resident": "resident_q4", "cache": "slab", "readers": 8,
-                  "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
+  "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
+                  "readers": 8, "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
  "defaults": {"routers": [], "names": {"rule": "top", "m": 8}, "cross_token": null, "eviction": "auto", "drafts": false}})";
+
+// the published declarations of `family` (null: none, an unknown family)
+static const Json* published(const std::string& family) {
+  static Json all;
+  static bool parsed = false;
+  if (!parsed) {
+    std::string e;
+    if (!ms::json_parse(PUBLISHED_DEFAULTS, all, e)) fprintf(stderr, "dmeng: published defaults: %s\n", e.c_str());
+    parsed = true;
+  }
+  return all.kind == Json::OBJ ? all.get(family) : nullptr;
+}
+
+// the family of a folder without a manifest: config.json's model_type ("" if none)
+static std::string config_family(const std::string& dir) {
+  Json cfg;
+  std::string e;
+  return ms::json_load(dir + "/config.json", cfg, e) ? cfg["model_type"].str_or("") : "";
+}
 
 static bool exists(const std::string& p) {
   struct stat st;
@@ -115,6 +140,16 @@ static std::string router_file(const ms::Manifest* m, const std::string& dir, co
 
 static const Json* member(const Json* o, const std::string& k) { return o && o->kind == Json::OBJ ? o->get(k) : nullptr; }
 
+// experts.top_k of the folder: its manifest's, else config.json's (a folder without a manifest)
+static int top_k_of(const ms::Manifest* m, const std::string& dir) {
+  if (m) return (int)m->top_k;
+  Json cfg;
+  std::string e;
+  if (!ms::json_load(dir + "/config.json", cfg, e)) return 0;
+  const Json& tc = cfg["text_config"].kind == Json::OBJ ? cfg["text_config"] : cfg;
+  return (int)tc["num_experts_per_tok"].i(0);
+}
+
 bool resolve_preset(const std::string& dir, const std::string& profile_req, const std::string& mode_req, const std::string& derived_dir,
                     int64_t avail, Preset& p, std::string& err) {
   p = Preset();
@@ -135,9 +170,13 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.engine_mode = engine_mode_of(p.mode);
     return true;
   }
-  if (!m) {  // a profile is declared in the manifest: a folder without one has none
-    err = "profile " + profile_req + ": the folder has no moved-store.json (profiles are declared there; --profile none runs without one)";
-    return false;
+  if (!m) {  // a named profile on a folder without a manifest: the family from config.json, its published declarations
+    p.family = config_family(dir);
+    if (!published(p.family)) {
+      err = "profile " + profile_req + ": no moved-store.json and no known model_type in config.json (--profile none runs without one)";
+      return false;
+    }
+    p.cache_dir = dir + "/.dmeng";
   }
   Json bi;
   std::string jerr;
@@ -147,10 +186,12 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   }
   static const Json none;
   const Json& raw = m ? m->raw : none;
+  const Json* pub = published(p.family);  // the family's published declarations (the second source of every key)
   // the profile
   const std::string want = profile_req == "auto" ? "" : profile_req;
   if (want.empty()) {
     const Json* mg = member(member(member(&raw, "profiles"), "phone"), "min_available_gb");
+    if (!mg) mg = member(member(member(pub, "profiles"), "phone"), "min_available_gb");
     if (!mg) mg = member(member(member(&bi, "profiles"), "phone"), "min_available_gb");
     p.profile = device_profile(avail, mg ? mg->f(5.0) : 5.0, p.profile_why);
   } else {
@@ -158,25 +199,31 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.profile_why = "chosen (--profile)";
   }
   const Json* mp = member(member(&raw, "profiles"), p.profile);
+  const Json* fp = member(member(pub, "profiles"), p.profile);
   const Json* bp = member(member(&bi, "profiles"), p.profile);
-  if (!mp) {
-    std::string have;
-    for (auto& kv : member(&raw, "profiles") ? member(&raw, "profiles")->obj : std::vector<std::pair<std::string, Json>>{}) have += (have.empty() ? "" : ", ") + kv.first;
-    err = "profile " + p.profile + ": not declared in the manifest's profiles (" + have + ")";
+  if (!mp && !fp && !bp) {
+    err = "profile " + p.profile + ": not declared in the manifest's profiles (mac, phone, phone-small)";
     return false;
   }
   const Json* md = member(&raw, "defaults");
+  const Json* fd = member(pub, "defaults");
   const Json* bd = member(&bi, "defaults");
-  auto prof = [&](const char* k) { const Json* v = member(mp, k); return v ? v : member(bp, k); };
-  auto dflt = [&](const char* k) {  // a profile's own value, then the manifest's defaults, then the built-in ones
+  auto prof = [&](const char* k) {  // the folder's profile, the published one, the built-in one
+    const Json* v = member(mp, k);
+    if (!v) v = member(fp, k);
+    return v ? v : member(bp, k);
+  };
+  auto dflt = [&](const char* k) {  // a profile's own value, then the defaults (the folder's, the published, the built-in)
     const Json* v = prof(k);
     if (!v) v = member(md, k);
+    if (!v) v = member(fd, k);
     return v ? v : member(bd, k);
   };
   // the mode
   const Json* pm = prof("mode");
   p.mode = !mode_req.empty() ? mode_req : pm ? pm->str_or("exact") : "exact";
   const Json* me = member(member(member(&raw, "modes"), p.mode), "engine");
+  if (!me) me = member(member(member(pub, "modes"), p.mode), "engine");
   if (!me) me = member(member(member(&bi, "modes"), p.mode), "engine");
   p.engine_mode = me ? me->str_or(engine_mode_of(p.mode)) : engine_mode_of(p.mode);
   // the in-memory weights
@@ -251,17 +298,13 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   if (const Json* pg = prof("prefill_gpu"); pg && pg->kind == Json::OBJ) {  // per profile only (the device decides)
     p.gpu_frac = (*pg)["projections"].f(0);
     p.gpu_experts = (*pg)["experts"].f(0);
-    if (p.family != "qwen3_5_moe" && p.family != "inkling2_loop" && p.family != "qwen4_exp" && (p.gpu_frac > 0 || p.gpu_experts > 0)) {
-      p.notes.push_back("prefill_gpu: this model's prefill has no GPU split, CPU only");
-      p.gpu_frac = p.gpu_experts = 0;
-    }
 #ifndef DM_METAL
     if (p.gpu_frac > 0 || p.gpu_experts > 0) p.notes.push_back("prefill_gpu: a build without Metal, CPU only");
     p.gpu_frac = p.gpu_experts = 0;
 #endif
   }
   if (const Json* ra = prof("run_ahead"); ra && ra->kind == Json::OBJ) {  // per profile only (measured per device)
-    p.run_ahead = (*ra)["picks"].kind == Json::STR && (*ra)["picks"].s() == "top_k" ? (int)m->top_k : (int)(*ra)["picks"].i(0);
+    p.run_ahead = (*ra)["picks"].kind == Json::STR && (*ra)["picks"].s() == "top_k" ? top_k_of(m, dir) : (int)(*ra)["picks"].i(0);
     p.run_ahead_depth = (int)(*ra)["depth"].i(1);
     p.ra_budget = (*ra)["budget"].f(0);
     p.ra_max_tok = (int)(*ra)["max_tok"].i(0);
@@ -344,11 +387,15 @@ std::string Resolved::json() const {
 
 std::vector<double> draft_cost_prior(const std::string& dir) {
   std::vector<double> v;
-  if (!exists(dir + "/moved-store.json")) return v;
   ms::Manifest m;
   std::string err;
-  if (!m.load(dir, err)) return v;
-  const Json& cp = m.raw["drafting"]["cost_prior"];
+  const bool has = exists(dir + "/moved-store.json") && m.load(dir, err);
+  // the folder's manifest, else the family's published one (a manifest without the key: the published prior)
+  const Json* pub = published(has ? m.family : config_family(dir));
+  const Json* cpp = has ? member(member(&m.raw, "drafting"), "cost_prior") : nullptr;
+  if (!cpp) cpp = member(member(pub, "drafting"), "cost_prior");
+  static const Json none;
+  const Json& cp = cpp ? *cpp : none;
   // a prior that states where it comes from: "measured" (step costs of passes) or "estimated" (from measured parts)
   if (cp.kind != Json::OBJ || (cp["measured"].kind != Json::STR && cp["estimated"].kind != Json::STR)) return v;
   for (auto& x : cp["pass_ms_over_step_ms"].arr) v.push_back(x.f(0));

@@ -178,6 +178,9 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   QosScope qs(e->qos);
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
   e->avail_open = (int64_t)os_proc_available_memory();  // before anything is loaded
+#else
+  // tests only (tests/resolve_compare.py): the iPhone's sizing rules on a Mac, as if iOS gave the app this many bytes
+  if (const char* t = getenv("DMENG_TEST_AVAIL_OPEN")) e->avail_open = (int64_t)atoll(t);
 #endif
   std::string err, family;
   LoadOpts lo;

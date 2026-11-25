@@ -42,6 +42,11 @@ generators and references), `MLX_PY` one with mlx and mlx-lm with the Inkling 2 
 | cache | the automatic cache rule under one machine state (`DMENG_TEST_MEMSNAP`) in dmeng, dmserve and the C API: the start rule the manifest declares (`profiles.mac.cache_start`, else the built-in headroom rule), the printed ceiling and start recomputed from the printed inputs |
 | counters | the stages sum to the token's time within 1%, compute = time - wait - run-ahead, and the server's MB per token equals dmeng's |
 
+`tests/resolve_compare.py TINY_MODEL PUBLISHED_MANIFEST OUT --a BUILD_A --b BUILD_B`: two builds (e.g. `origin/main` and a
+branch) resolve a family's published manifest, the same manifest without `profiles`, and a folder without a manifest to
+the same settings in dmeng, the C API (also as on an iPhone: `DMENG_TEST_AVAIL_OPEN`) and dmserve, for every profile and
+mode; one line per difference.
+
 `tests/fingerprint.py MODEL OUT.json [--against OLD.json]`: sha256 of the logits and ids of eleven fixed runs (every
 setting explicit), to prove a change moves no bit (two builds, or before and after a refactor).
 

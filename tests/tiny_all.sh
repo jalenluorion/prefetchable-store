@@ -24,6 +24,8 @@ mkdir -p $O
 typeset -A PY
 PY=(qwen3_5_moe $TP inkling2_loop $MP qwen4_exp $TP)
 fail=0
+# the engine's fallback for keys a folder's manifest leaves out is generated from the published manifests: it must be current
+python3 $R/python/convert/published_defaults.py --check || fail=1
 for f in ${=FAMILIES:-qwen3_5_moe inkling2_loop qwen4_exp}; do
   py=${PY[$f]}
   log=$O/$f.log
