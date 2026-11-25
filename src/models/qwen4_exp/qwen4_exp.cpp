@@ -266,7 +266,6 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
   mi.pool_share = {1.0};
   mi.layer_file = c.layer_file;
   mi.has_ref_path = true;
-  mi.union_batches = true;  // every multi-position MoE goes through Core::moe_chunk
   mi.has_verify = true;     // the multi-position verify pass (prefill.cpp: the span's layer-major pass with rollback)
   mi.chunk_aff4 = true;     // ... with the packed 4-bit kernels and the GPU's share of the experts
   views.resize(c.NL);
@@ -855,7 +854,7 @@ void Flash::gdn_step(int L, const float* xh, float* y) {
   X.S = S->ls[L].S.data();
   X.qkv = qkv, X.z = z, X.bb = bb, X.aa = aa, X.cv = cv, X.o = att.data();
   X.xq = &xatt.q;
-  X.quant_heads = !ref && c.DV % XB == 0;
+  X.quant_heads = !ref && c.DV % XB == 0 && !ab(3);  // (DMENG_AB=3: arm 1 the output projection after the heads)
   for (int j = 0; j < c.NKH; j++) X.qk_done[j].store(0, std::memory_order_relaxed);
   xatt.reset(ZD);
   if (X.quant_heads) gdn::fuse_out(X, &W.o, y, core->pool->size());  // the output projection in the heads' fork-join

@@ -554,7 +554,6 @@ bool Inkling::load(const LoadOpts& op, std::string& err) {
   mi.layer_paths = c.layer_paths;
   mi.eos = c.eos;
   mi.has_ref_path = true;
-  mi.union_batches = true;  // prefill spans and verify passes use Core::moe_chunk only
   views.resize(c.NL);
   for (int L = 0; L < c.NL; L++) {
     MoeView& v = views[L];

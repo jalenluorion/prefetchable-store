@@ -66,7 +66,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          the profile's (off)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
   --print-defaults       print the resolved profile defaults as JSON and exit
-  --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: union_batches, chunk_aff4, prefill_*)
+  --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)
   --chat --reasoning-effort E   with --prompt: the chat template (python/run.py)
 
 model and memory

@@ -34,7 +34,8 @@ void xqb_set(XQB& q, int i, const float* x);
 void xqb_pad(XQB& q);
 
 // Y[(i - p0) * ldy + (r - r0)] = W[r] . x_i for rows r in [r0, r1) and positions i in [p0, p1). r0, r1 multiples of 4;
-// p0 even; K a multiple of 256. Loops position tiles outside, row tiles inside: call it on row blocks of ~32-128 rows
+// p0 even; K a multiple of 64 (whole fours of 64-input groups in four lanes, then 1-3 groups as the one-vector kernels'
+// scalar tail). Loops position tiles outside, row tiles inside: call it on row blocks of ~32-128 rows
 // (one block per thread job) so a block's weights stay in L1/L2 while the positions stream past them.
 void gemm_aff8_i16(const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int r0, int r1, const XQB& x,
                    int p0, int p1, float* Y, size_t ldy);

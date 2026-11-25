@@ -367,7 +367,9 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
     S.free_.clear();
     for (int i = S.n - 1; i >= 0; i--) S.free_.push_back(i);
     S.cap = S.n;
-    S.min_cap = std::min(S.n, 2 * NE + 2 * K + 2);  // a prefill layer's union + the next layer's names
+    // the pools' run-time floor, one rule for every family: one step's pins (2K + 2). Every multi-position MoE runs through
+    // Core::moe_chunk, which runs a union larger than the free slots in batches, and early names are only asked for
+    S.min_cap = std::min(S.n, 2 * K + 2);
   }
   tab.assign((size_t)NL * NE, -1);
   ev_step.assign((size_t)NL * NE, -1);
