@@ -93,7 +93,35 @@ enum SelfCheck {
         let states = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app").appendingPathComponent("dmeng-prefix")
         for d in (try? fm.contentsOfDirectory(at: states, includingPropertiesForKeys: nil)) ?? [] {
-            for u in (try? fm.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? [] where u.lastPathComponent.hasSuffix(".tmp") { rm(u) }
+            for u in (try? fm.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? [] {
+                let size = ((try? fm.attributesOfItem(atPath: u.path))?[.size] as? NSNumber)?.int64Value ?? -1
+                if u.lastPathComponent.hasSuffix(".tmp") || (u.lastPathComponent.hasSuffix(".bin") && size == 0) { rm(u) }
+            }
+        }
+        return removed
+    }
+
+    /// The saved chat states (not the pinned system-prompt states) in the app's state folders, by path.
+    static func chatStates() -> Set<String> {
+        let fm = FileManager.default
+        let states = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app").appendingPathComponent("dmeng-prefix")
+        var r = Set<String>()
+        for d in (try? fm.contentsOfDirectory(at: states, includingPropertiesForKeys: nil)) ?? [] {
+            for u in (try? fm.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? []
+                where u.lastPathComponent.hasSuffix(".bin") && !u.lastPathComponent.hasSuffix(".pin.bin") { r.insert(u.path) }
+        }
+        return r
+    }
+    /// The chat states this run's chat left (its conversation is deleted, so they can never be used): removed, logged.
+    static func removeStates(_ paths: Set<String>) -> [[String: Any]] {
+        var removed: [[String: Any]] = []
+        for p in paths.sorted() {
+            let n = ((try? FileManager.default.attributesOfItem(atPath: p))?[.size] as? NSNumber)?.int64Value ?? -1
+            if (try? FileManager.default.removeItem(atPath: p)) != nil {
+                removed.append(["path": (p as NSString).lastPathComponent, "bytes": n])
+                log("SELFCHECK removed the self-check chat's state \((p as NSString).lastPathComponent) (\(n) bytes)")
+            }
         }
         return removed
     }
@@ -173,6 +201,7 @@ enum SelfCheck {
         if model.engineState == .ready {
             out["resolved_default"] = resolved((model.engine as? DmengChatEngine)?.selfCheckStats ?? "")
             try? await Task.sleep(nanoseconds: 10_000_000_000)
+            let statesBefore = chatStates()
             var th = thermal()
             let r1 = await model.reply(to: chatPrompt, maxNew: 160)
             let id = model.conversations.first { $0.messages.contains { $0.role == .user && $0.content == chatPrompt } }?.id
@@ -182,6 +211,9 @@ enum SelfCheck {
             let r2 = await model.reply(to: followPrompt, maxNew: 160)
             out["chat_followup"] = chatRow(r2, thermal0: th)
             if let id { model.delete(id) }
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await (model.engine as? DmengChatEngine)?.waitIdle()  // the chat's warm-up after the reply has written its state
+            out["chat_states_removed"] = removeStates(chatStates().subtracting(statesBefore))
             out["mem_after_chat"] = mem("after chat")
         }
         out["conversations_after"] = ConversationStore.loadAll().count
