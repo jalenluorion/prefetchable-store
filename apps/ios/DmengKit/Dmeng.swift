@@ -36,7 +36,7 @@ public struct DmengOptions: Sendable {
   public var fileMinBytes: Int64 = 0       // 0: 1e9
   public var fileCoreBytes: Int64 = 0      // 0: no locked core
   public var embeddings: String? = nil     // nil: the manifest's file, else <model>/embeddings.safetensors
-  // phone stage (P2): eviction policy, per-layer caps, the read planner, the readers' QoS
+  // eviction policy, per-layer caps, the read planner, the readers' QoS
   public var evict: String? = nil          // nil: the core default (auto = hazard); "hazard", "freq"
   public var layerCaps = 0                 // 0 the core default (auto), 1 uniform per-layer caps, 2 one pool
   public var plan = 0                      // 0: fixed top routerM; 1: planner, marginal-cost rule; 2: planner, byte bucket

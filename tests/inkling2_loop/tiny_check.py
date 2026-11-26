@@ -5,7 +5,7 @@ teacher-forced over 40 random tokens (and a 300-token long case), token by token
   TINY=<OUT of make_tiny.py> python tests/inkling2_loop/tiny_check.py     (python: mlx, mlx-lm with the PR, numpy)
   (DMENG_BIN, TINY_OUT override the binary and the output folder; INK_RES0 / INK_RES8 other resident files; by default
   the bf16 resident is derived here by python/derive/inkling2_loop.py --bits 0 and the 8-bit one is the engine's own,
-  MODEL/.dmeng/resident_q8.*; DMENG_OLD_FLAGS=1 drives a binary with the research tree's flag names)
+  MODEL/.dmeng/resident_q8.*; DMENG_OLD_FLAGS=1 passes the cases' older flag spellings unchanged)
 
 Tolerances are test_run.py's: on DIFFERENT code paths in float32 the PR's own 1e-4; the same arithmetic must be exact.
   A. dmeng --prec f32 (fp32 activations, scalar reference kernels), resident as released  vs  PR float32         tol 1e-4
@@ -68,7 +68,7 @@ def pr_logits(m, ids):
 
 
 def new_flags(flags):
-    """the merged binary's names: --mx-frac F -> --pool-share 1-F,F; --ns 1 [--ns-late none] [--ns-read-w W] [--ns-read-mass M]
+    """the current flag names: --mx-frac F -> --pool-share 1-F,F; --ns 1 [--ns-late none] [--ns-read-w W] [--ns-read-mass M]
     -> --mode approx:drop:w=W[:mass=M][:late=-1] (the leave-out rule; w 2 unless given: every missing pick left out)"""
     out, f, i, ns = [], list(flags), 0, None
     while i < len(f):

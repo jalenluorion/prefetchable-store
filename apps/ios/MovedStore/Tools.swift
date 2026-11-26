@@ -1331,7 +1331,7 @@ enum Passages {
 
 // MARK: search pre-check
 
-/// A deterministic check on the user's message (docs/TOOLS.md "Search decision"): a message about live or changing facts
+/// A deterministic check on the user's message: a message about live or changing facts
 /// (weather, news, prices, scores, office holders, "right now" / today / latest ...) gets a one-line hint appended in the
 /// engine's copy of the user turn, "(Use web_search.)", so the model calls the tool instead of answering from memory. The
 /// displayed message and the conversation file are unchanged; the hint is a pure function of the message text, so every

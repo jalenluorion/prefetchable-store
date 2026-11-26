@@ -673,8 +673,8 @@ void run_rows_n(Pool& pool, const JobN* jobs, int nj, int chunk, bool ref, doubl
 
 // ---------------------------------------------------------------------------------------------- numerics
 // The arithmetic is written out, so it does not depend on where the compiler inlines or vectorises this function: 16 at
-// a time with fused multiply-adds into four accumulators; then the tail, as the research engines' out-of-line build
-// computed it: products rounded and added in order for whole groups of 4, fused multiply-adds for the last 0-3.
+// a time with fused multiply-adds into four accumulators; then the tail, as the engine's reference out-of-line build
+// computes it: products rounded and added in order for whole groups of 4, fused multiply-adds for the last 0-3.
 float dot_bf16(const uint16_t* w, const float* x, int n) {
 #pragma clang fp contract(off)
   float32x4_t a0 = vdupq_n_f32(0), a1 = a0, a2 = a0, a3 = a0;

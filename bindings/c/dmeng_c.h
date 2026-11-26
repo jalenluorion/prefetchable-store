@@ -1,9 +1,9 @@
-/* dmeng C API (P1 of the iOS port, 2026-11-22).
+/* dmeng C API.
  *
  * The one boundary an app links against: a C header over include/dmeng/lm.h (dm::LM, dm::ModelLM),
  * include/dmeng/session.h (dm::PrefixCache) and the model loader (include/dmeng/model.h), so Swift (the iPhone app),
  * Kotlin/JNI or Python ctypes need no C++. Token ids in, logits out: the tokenizer and the chat template stay in the
- * app, as in python/dmserve.py.
+ * app, as in python/serve/dmserve.py.
  *
  * Threads. Every call on an engine is made from one caller thread at a time (the thread becomes thread 0 of the compute
  * pool while dm_sync / dm_step run; their QoS is set to the open options' class for the call). Exceptions, callable
@@ -67,14 +67,14 @@ typedef struct dm_open_opts {
                               (profiles.mac.cache_start and the ceiling, as dmeng and dmserve), else 3.3e9; on iOS (not DM_MEM_FILE) a slab
                               sized once at open by the profile's cache_slab rule (presets.h SlabRule): "available" =
                               os_proc_available_memory() - resident file - router file - 0.3 GB (state, scratch) - 0.9 GB
-                              (margin) (P2: at 4.27 GB available a 1.0 GB slab drew no warning, 1.3 GB did), or
+                              (margin) (iPhone 15 Plus: at 4.27 GB available a 1.0 GB slab drew no warning, 1.3 GB did), or
                               "footprint_target" = the device class's footprint target - the model's non-cache footprint
                               (phone-small: 2.96 GB less 1.54 / 1.26 GB for the 35B / Inkling); clamped to [0.6, 8.0] GB */
-  int memory_mode;         /* DM_MEM_* of the expert cache; default DM_MEM_MLOCK on both (iOS since P2: the FILE tier
+  int memory_mode;         /* DM_MEM_* of the expert cache; default DM_MEM_MLOCK on both (on the iPhone 15 Plus the FILE tier
                               read at 0.56 GB/s against 0.74 for a locked slab, and the OS kept 0.85 GB of it) */
   int res_memory_mode;     /* resident weights: DM_MEM_MLOCK, DM_MEM_PLAIN, or DM_MEM_FILE (mapped read-only from the
                               resident file: clean file-backed pages, not charged as dirty memory); default MLOCK
-                              (iOS too since P2: an unlocked resident is compressed by the OS under read pressure and
+                              (iOS too: an unlocked resident is compressed by the OS under read pressure and
                               every token decompresses it, 0.47 tok/s; mapped it is re-read from flash every token) */
   const char* routers_id;  /* early naming in decode by a trained router of the manifest: NULL or "" = the profile's
                               (profile "none": no routers), "none" = no routers, "default" = the manifest's default, or an id: "linear_k2",
@@ -101,10 +101,10 @@ typedef struct dm_open_opts {
                               cache_bytes is the start and the max. Default 0 (1 on iOS) */
   int64_t file_min_bytes;  /* DM_MEM_FILE adaptive floor; 0 = 1e9 */
   int64_t file_core_bytes; /* DM_MEM_FILE: a locked core of the hottest records (mlock), served from memory; 0 = none */
-  /* phone stage (P2, 2026-11-22): the eviction policy, the read planner, the reader QoS. Zero keeps the defaults. */
+  /* the eviction policy, the read planner, the reader QoS. Zero keeps the defaults. */
   const char* evict;       /* keep-score: NULL / "" = the core's default "auto" (the hazard table, with layer_caps 0:
                               uniform per-layer caps only while the cache holds fewer than 4 x K x layers slots),
-                              "hazard", "freq" (the decayed use count of the engines before), "pred" */
+                              "hazard", "freq" (the decayed use count, one pool), "pred" */
   int layer_caps;          /* 0 = the core's default (auto with hazard), 1 = uniform per-layer caps, 2 = one pool */
   int plan;                /* early naming by the read planner over the router (routers / routers_id) instead of a fixed
                               top router_m: 0 = off (default: fixed top router_m), 1 = names allowed by the marginal-cost
@@ -125,7 +125,7 @@ typedef struct dm_open_opts {
                               `ms_derive resident DIR --bits 4`; for memory-limited devices: tokens differ from 8-bit).
                               The file opened is reported in dm_stats_json: policy.resident_bits / policy.resident and
                               resolved.resident_bits / resolved.resident (8 | 4; 0 and "" for another file given) */
-  int prefill_threads;     /* compute threads during dm_sync (the prompt's prefill); 0 = threads (P2: 6 measured slower
+  int prefill_threads;     /* compute threads during dm_sync (the prompt's prefill); 0 = threads (6 measured slower
                               than 4 on the 15 Plus for a 472-token prompt with the 4-bit resident) */
   int disk_min;            /* prefix cache: write a disk copy for a marked prefix of at least this many positions;
                               0 = 1024 (iOS: 16, so a chat's prefix is kept across launches) */

@@ -1,6 +1,5 @@
-"""The MLX reference of Inkling's draft head, for the C++ port check (dmeng --draft-check). (The file name ends in mlx_run.py
-so the machine's run guards count it as a model process and do not start another beside it.) The arithmetic is engine/ink/mtp_accept.py's
-(the research tree's acceptance measurement, itself sglang PR 51926's DSpark drafter), unchanged; only the output differs:
+"""The MLX reference of Inkling's draft head, for the C++ port check (dmeng --draft-check). The arithmetic is that of
+sglang PR 51926's DSpark drafter, unchanged; only the output differs:
 per committed position p, the 7 drafts after t[p+1] (each conditioned on the previous draft), their top-1 probabilities, and
 draft 1's logits for the first N positions, in dmeng --draft-check's record format.
 

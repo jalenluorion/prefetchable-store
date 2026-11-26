@@ -44,7 +44,7 @@ struct LoadOpts {
 // derived_dir (non-empty): the cache folder to use instead of <dir>/.dmeng.
 // emb_file (non-empty): read the embedding rows from this safetensors file (relative to dir, or absolute) instead of
 // the manifest's (resident.safetensors): it must hold the manifest's embedding tensor, same name, dtype and shape (e.g.
-// embeddings.safetensors, the table alone: phone-store make_embeddings.py). Empty: the manifest's file, or, when that
+// embeddings.safetensors, the table alone, as the weight repos ship it). Empty: the manifest's file, or, when that
 // file is absent, <dir>/embeddings.safetensors if present (the phone layout, without the 4.9 GB bf16 resident).
 bool resolve_model(const std::string& dir, const std::string& resident, Mem res_mem, LoadOpts& lo, std::string& family,
                    std::string& err, const std::string& derived_dir = "", const std::string& emb_file = "",

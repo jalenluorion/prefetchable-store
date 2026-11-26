@@ -124,7 +124,7 @@ early address (lossless: names only schedule reads; the released router decides)
                          auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
                          EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
                          pick (35B below 2.26 GB), else one pool (results/cache-policy/POLICY.md); freq: the decayed use
-                         count of the engines before (one pool); hazard: the table, caps as --layer-caps says
+                         count (one pool); hazard: the table, caps as --layer-caps says
   --layer-caps auto|uniform|none   per-layer slot caps (each layer evicts its own records at its cap); auto: the rule
                          (CAPS:fit: a name leaves min(2K + holds, cap - names per step) free in a capped layer, not 2K + holds)
   --router-heavy F       a heavy-pick head (router file of the same format) beside --routers: its positives are named first

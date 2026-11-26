@@ -6,7 +6,7 @@
 // summed pairwise at the end. Here the integer group dots come from i8mm (SMMLA / USMMLA: 2 rows x 2 positions x 8 inputs
 // per instruction), which gives the same exact integers in any order, and the float part per (row, position) is the very
 // same sequence of IEEE operations as mv_aff8 / mv_aff4. So prefill through these kernels and decode through mv give the
-// same bits, and the engine's lossless guarantee carries over (checked by bench/bench_batch.cpp and the prefill check).
+// same bits, and the engine's lossless guarantee carries over (checked by tests/prefill_check.sh and tests/family_check.py's prefill check).
 #pragma once
 #include <cstddef>
 #include <cstdint>

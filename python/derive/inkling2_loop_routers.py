@@ -1,4 +1,4 @@
-"""Trained Inkling early routers (jobs/ink_router.py "full" variants, fetched by jobs/ink_xfer.sh as fp16 npz)
+"""Trained Inkling early routers (the router trainer's "full" variants, exported as fp16 npz)
 -> the engine's router file (DMENGRES1, like q36's .dmr): one per lag, 8-bit (default) or 4-bit affine group 64.
 
   python python/derive/inkling2_loop_routers.py RUN --dir MODEL_DIR/routers [--bits 8|4]

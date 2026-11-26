@@ -37,8 +37,7 @@ struct MemRule {
   //    start, 3.5 GB ran with no swap growth and 4.5 GB grew swap by 130-400 MB with compute 13-55% slower (the level
   //    fell to ~9%, as this rule predicts: 8.5%); the 14% floor gives 3.5 GB from a 43% start level (0.62 GB of routers
   //    and 0.81 GB of scratch, margin and KV still to come). Flash-Next's manifest declares it.
-  // No single rule reproduced all three models' measured sizes (engine/CONSISTENCY-AUDIT item 1; FINISH.md, the
-  // integration record): the rule is a declared per-model value until the two smaller models are measured under it.
+  // No single rule reproduced all three models' measured sizes: the rule is a declared per-model value until the two smaller models are measured under it.
   std::string start_rule = "headroom";
   double headroom_gb = 3.0;
   int floor_pct = 14;

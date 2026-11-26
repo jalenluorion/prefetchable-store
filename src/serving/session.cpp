@@ -389,7 +389,7 @@ void PrefixCache::persist(int p) {
   h.fb = m_.info().fixed_bytes;
   h.pb = m_.info().pos_bytes;
   // the end and the pinned (system boundary) states only: a restore resumes at the end, an edit near the start from the
-  // boundary (P2: every checkpoint <= p was 63 MB each and 3.9 s of flash writes per reply on the phone)
+  // boundary (on the iPhone 15 Plus every checkpoint <= p was 63 MB each and 3.9 s of flash writes per reply on the phone)
   std::vector<const Ckpt*> cs;
   for (auto& c : ck_)
     if (c->pos <= p && (c->pos == p || c->pinned)) {

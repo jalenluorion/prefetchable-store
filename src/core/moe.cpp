@@ -124,7 +124,7 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
   if (cache.defer_lock) cache.lock_start((int64_t)(o.cache_start_gb * 1e9));
   cache.half_life = o.half_life;
   if (o.evict == "pred") {
-    cache.pred_evict = cache.learn_on = true;  // measured worse than freq (Stage 3)
+    cache.pred_evict = cache.learn_on = true;  // measured worse than freq
   } else if (o.evict == "hazard" || o.evict == "auto") {
     cache.enable_hazard();
   } else if (o.evict != "freq") {

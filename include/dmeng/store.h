@@ -8,7 +8,7 @@
 // running now, from early names, and from the loop hold. Reads go through pread + F_NOCACHE on dedicated threads, an
 // urgent queue (a pick the released router made that is not in memory) ahead of a speculative one (names).
 //
-// Mem::FILE (the phone's tier, results/ios/p0/P0.md section 2): each layer file is mapped read-only once and a held
+// Mem::FILE (a phone tier, results/ios/p0/P0.md section 2): each layer file is mapped read-only once and a held
 // record is a view into the mapping (records are page aligned), not a copy in a slot. A slot is then bookkeeping only:
 // which records the policy believes resident, sized by a byte count that may exceed the app's memory, because clean
 // file pages are not charged to it. A miss is filled by a buffered pread of the record into the reader thread's
@@ -277,7 +277,7 @@ struct Cache {
   std::vector<size_t> fmap_bytes;
   int file_check = 1;            // check a held record on use: 0 never, 1 first and last page, 2 every page
   // on a dropped record's range: 0 nothing (default: pages are left to the OS), 1 MADV_DONTNEED (measured: no effect on
-  // iOS or macOS), 2 msync(MS_INVALIDATE) (iOS, P2: the clean pages leave the file cache at once, so the policy, not the
+  // iOS or macOS), 2 msync(MS_INVALIDATE) (iOS: the clean pages leave the file cache at once, so the policy, not the
   // OS's LRU, decides what stays)
   int file_evict_hint = 0;
   // spare memory, the probation tier (header comment): file_under and prob_bytes set before init (on only with both, and
@@ -392,7 +392,7 @@ struct Cache {
   std::vector<long> ev_step;     // [NL * NE] step at which (L, e) was last evicted (-1: never)
   std::vector<uint32_t> n_reads;  // [NL * NE] reads issued per record since start (the prompt path's re-read count)
   std::vector<uint8_t> ev_pf;    // ... and whether a speculative read evicted it
-  // estimate-aware eviction (Stage 3): a slot's value = a planner's probability that its layer's next pass uses it
+  // estimate-aware eviction (--evict pred): a slot's value = a planner's probability that its layer's next pass uses it
   // (pred >= 0), else P(used at its layer's next pass | decayed use count), learned online
   bool pred_evict = false, learn_on = false;
   std::vector<float> pred;       // [NL * NE], -1 = none
@@ -455,8 +455,7 @@ struct Cache {
   bool load_policy(const std::string& path, std::string& err);
   double keep_score(int L, int e, long t) const;
   void router_probs(int L, const float* z);  // a router's logits for physical layer L this token (NE values)
-  // hazard keep-score (phone-store Store.swift Evict(kind: .hazard) = docs/evict_runs/evict_sim.py hazard_h128; the
-  // phone-size study results/ios/evict/EVICT.md): per physical layer an online table of P(used at the next token |
+  // hazard keep-score (results/ios/evict/EVICT.md, the phone-size study's hazard_h128): per physical layer an online table of P(used at the next token |
   // floor(log2 tokens since last use), floor(log2(1 + 4 x use count decayed with a 128-token half-life))), learned from
   // this session's own uses; keep_score = the estimate for the next token (+ 1e-9 x last use), the lowest is evicted
   // (ties: the lower record id). The statistics move in pre_use() / use() (one touch per record per
@@ -477,7 +476,7 @@ struct Cache {
   // wherever the cap is at least 2K + holds + the names per step + the layer's hold. Names only.
   bool cap_fit = false;
   std::vector<int> layer_hold;  // [NL] slots a layer's loop holds can pin (K per holding step of the layer, as extra_reserve)
-  // P2: a batched prefill pass names the next layer's whole union, which a layer at its cap refuses (names never
+  // A batched prefill pass names the next layer's whole union, which a layer at its cap refuses (names never
   // borrow), so the reads run in series with compute. suspend lifts the caps for the pass; resume puts them back and
   // recounts what each layer holds (a layer over its cap then evicts its own records first). Placement only.
   void caps_suspend();

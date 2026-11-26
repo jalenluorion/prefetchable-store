@@ -1,5 +1,5 @@
 // swift-tools-version: 5.9
-// The engine as a Swift package for the iPhone app (apps/ios, P1 of the iOS port): the core, the model families, the
+// The engine as a Swift package for the iPhone app (apps/ios): the core, the model families, the
 // serving layer and the C API (bindings/c/dmeng_c.h) built from this repo's sources, plus a thin Swift wrapper
 // (apps/ios/DmengKit). CMake (CMakeLists.txt) stays the build for the Mac tools; this file only adds the package view.
 //

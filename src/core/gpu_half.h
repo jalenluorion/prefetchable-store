@@ -2,7 +2,7 @@
 // stored (8- and 4-bit affine records, groups of 64 along the input) dequantised to half inside the kernel, the inputs
 // rounded to half, the products accumulated in fp32 on the matrix units. This is MLX's standard (its
 // quantised matmul in fp16), not the CPU's bits: a prompt computed this way leaves a state close to exact prefill's, and
-// fast mode's decode from it is checked against exact prefill's (tests and bench/prefill/fast_quality.sh).
+// fast mode's decode from it is checked against exact prefill's (by teacher forcing after a long prompt: Flash-Next's manifest, prefill.notes).
 //
 // Two kinds of work, each one GPU command buffer, synchronous for the caller:
 //   gemm sets  begin(); input() the fp32 rows of each input once; add() products (rows [0, R) of a wrapped matrix against

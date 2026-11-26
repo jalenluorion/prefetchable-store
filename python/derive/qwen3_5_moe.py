@@ -1,7 +1,7 @@
-"""dmeng's own resident file (and router file), produced once from the q36 model folder.
+"""dmeng's own resident file (and router file) for Qwen3.6-35B-A3B, the reference for tools/ms_derive.
 
-  .venv/bin/python python/convert.py resident MODEL_DIR            # -> MODEL_DIR/dmeng_resident.bin
-  .venv/bin/python python/convert.py router   MODEL_DIR ROUTER.npz # -> ROUTER.dmr (8-bit, same quantiser)
+  python python/derive/qwen3_5_moe.py resident MODEL_DIR            # -> MODEL_DIR/dmeng_resident.bin
+  python python/derive/qwen3_5_moe.py router   MODEL_DIR ROUTER.npz # -> ROUTER.dmr (8-bit, same quantiser)
 
 The resident file (dmeng_resident.bin):
   bytes 0..: a text header in a reserved region of the stated size (1 MiB); tensor offsets count from its end:
@@ -74,7 +74,7 @@ class Writer:
 
     def q4(self, name, w):
         """w: an mx array [R, C] -> NAME.q (codes [R, C/2], MLX's 4-bit packing: element 2i in the low nibble of byte i)
-        /.s/.b with MLX's affine 4-bit quantiser, group 64, on the fp16 cast (Stage 3c: 4-bit router weights)."""
+        /.s/.b with MLX's affine 4-bit quantiser, group 64, on the fp16 cast (4-bit router weights)."""
         wq, s, b = mx.quantize(w.astype(mx.float16), group_size=64, bits=4)
         mx.eval(wq, s, b)
         R, C = w.shape
@@ -174,7 +174,7 @@ def resident(model_dir):
 
 
 def router(model_dir, npz, bits=8, split=False):
-    """bits 4: every router matrix 4-bit (Stage 3c); split: "pre" written as "pre_e" (embedding columns) and "pre_p"
+    """bits 4: every router matrix 4-bit; split: "pre" written as "pre_e" (embedding columns) and "pre_p"
     (previous-token columns), so the engine can keep the embedding part's output per token id. The split is at a multiple
     of 64, so the 8-bit codes equal those of the whole matrix."""
     blob = np.load(npz)

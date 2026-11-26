@@ -1,8 +1,8 @@
 // The narrow interface between a model and the serving layer (prefix cache, batched-prefill driver, server worker).
 //
-// Nothing above this header knows which model it runs: the server front end (python/dmserve.py) owns the tokenizer and
+// Nothing above this header knows which model it runs: the server front end (python/serve/dmserve.py) owns the tokenizer and
 // the chat template of the model folder and talks token ids; the worker (tools/dmserve.cpp) owns one LM and one
-// PrefixCache (include/dmeng/session.h). A model implements LM once (src/q36_lm.cpp for Qwen3.6-35B-A3B).
+// PrefixCache (include/dmeng/session.h). Every family implements LM once, through ModelLM (src/core/model_lm.cpp).
 //
 // State model. A model's state at position p is split in two:
 //   - the positional part (attention KV): one entry per position, append-only, so the entries of positions < p stay

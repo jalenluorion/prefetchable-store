@@ -191,7 +191,7 @@ void dm_default_opts(dm_open_opts* o) {
   o->qos = DM_QOS_USER_INTERACTIVE;
   o->core_class = DM_CORES_ANY;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-  o->memory_mode = DM_MEM_MLOCK;  // P2 (results/ios/p2/P2.md section 0b): a locked slab, the resident locked
+  o->memory_mode = DM_MEM_MLOCK;  // a locked slab, the resident locked (results/ios/p2/P2.md section 0b)
   o->res_memory_mode = DM_MEM_MLOCK;
 #else
   o->memory_mode = DM_MEM_MLOCK;
@@ -319,7 +319,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   const std::string mode = ro.mode;
   std::string res_file = o.resident ? o.resident : "";
   if (res_file.empty() && o.resident_bits == 0) res_file = ro.resident;
-  if (res_file.empty() && o.resident_bits == 4) {  // the 4-bit derived variant (P2), by the engine's derived naming
+  if (res_file.empty() && o.resident_bits == 4) {  // the 4-bit derived variant, by the engine's derived naming
     ms::Manifest mf;
     if (!mf.load(model_dir, err)) {
       g_err = "load: " + err;
@@ -359,7 +359,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   e->routers_path = ro.routers;
   CoreOpts co;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-  co.threads = 4;  // P0: 4 threads for the 8-bit resident on 2 P + 4 E cores (6 for a 4-bit resident)
+  co.threads = 4;  // 4 threads for the 8-bit resident on 2 P + 4 E cores (6 for a 4-bit resident)
 #else
   co.threads = 8;
 #endif
@@ -569,11 +569,11 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   }
   int pt = o.prefill_threads;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-  // (P2: 6 prefill threads with the 4-bit resident measured slower on the phone, 33.3 vs 30.3 s for 472 tokens: off)
+  // (6 prefill threads with the 4-bit resident measured slower on the iPhone 15 Plus, 33.3 vs 30.3 s for 472 tokens: off)
 #endif
   if (pt > 0 && pt != e->C->o.threads) e->prefill_pool.reset(new Pool(pt, -1, (int)e->qos));
   {  // the model's own options ("name=value;..."); iOS default: free the batched prefill's scratch after each prompt
-     // (P2: a 357-token prompt left ~0.35 GB of footprint behind for the rest of the session)
+     // (on the iPhone 15 Plus a 357-token prompt left ~0.35 GB of footprint behind for the rest of the session)
     std::string mo = model_opts;  // (the run: entries were read above)
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
     if (mo.find("prefill_release") == std::string::npos) mo = "prefill_release=1" + std::string(mo.empty() ? "" : ";") + mo;
@@ -610,12 +610,12 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   so.park_gb = 0.3;
 #endif
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-  so.disk_min = 16;  // P2: short chats get a disk copy (a chat continued after a relaunch restores it)
+  so.disk_min = 16;  // short chats get a disk copy (a chat continued after a relaunch restores it)
   so.disk_gain = 16;  // ... and a restore of it pays from 16 positions (the 256 default never fires for a short chat)
 #endif
   if (o.disk_min > 0) so.disk_min = o.disk_min;
   so.preload_experts = o.preload_experts != 0;
-  so.refresh_pinned = so.preload_experts;  // P2: the preload of a new chat brings the last turn's experts
+  so.refresh_pinned = so.preload_experts;  // the preload of a new chat brings the last turn's experts
   if (o.ckpt_gb > 0) so.ckpt_gb = o.ckpt_gb;
   if (o.park_gb > 0) so.park_gb = o.park_gb;
   e->pc = std::make_unique<PrefixCache>(*e->lm, so);
@@ -1037,7 +1037,7 @@ const char* dm_stats_json(dm_engine* e) {
     << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode;
   if (e->dr) s << ",\"draft\":\"" << e->res.draft << "\",\"draft_max\":" << e->dr->o.max << ",\"draft_early\":" << e->dr->o.early;  // (with drafting only)
   s << "}";
-  {  // P2 levers: the reads since the last stats call (urgent = read when needed, named = issued ahead by the router;
+  {  // the reads since the last stats call (urgent = read when needed, named = issued ahead by the router;
      // named unused = named records evicted before any use; the cache counters are reset by every stats call, the
      // readers' are not), drive busy (wall time with a read in flight) and rate
     Cache& Cm = e->C->cache;

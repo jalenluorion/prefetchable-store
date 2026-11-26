@@ -354,7 +354,7 @@ void Readers::loop() {
   }
   pthread_set_qos_class_self_np((qos_class_t)q, 0);
   // io_low (CoreOpts::reader_io_low; default on iOS only): the readers' disk I/O one tier below the threads' own
-  // (IOPOL_STANDARD; the CPU QoS above is kept). iOS (P2): at the app's tier, the main thread's page-ins waited behind the
+  // (IOPOL_STANDARD; the CPU QoS above is kept). iOS (iPhone 15 Plus): at the app's tier, the main thread's page-ins waited behind the
   // queued 1.77 MB records for seconds. Off on the Mac: there the readers are the critical path, and a lower tier is
   // throttled whenever another process touches the drive.
   if (io_low) setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_THREAD, IOPOL_STANDARD);

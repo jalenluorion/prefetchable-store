@@ -10,8 +10,8 @@ endif()
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
 # The kernels use dotprod, i8mm (usdot) and fp16fml; the default targets Apple M4.
 set(DM_ARCH "-mcpu=apple-m4" CACHE STRING "CPU flags for the kernels")
-# Floating-point contraction: the token ids of the research engines were produced with -ffp-contract=fast; changing it
-# changes logits (see the regression gate). Kept as the reference until every exactness-relevant step is explicit.
+# Floating-point contraction: the engine's token ids are defined with -ffp-contract=fast; changing it changes logits
+# (tests/fingerprint.py shows it). Kept as the reference until every exactness-relevant step is explicit.
 set(DM_CONTRACT "-ffp-contract=fast" CACHE STRING "floating-point contraction flag")
 
 # The weight-repo format: manifest and JSON reader, safetensors / DMENGRES1 files, the MLX-exact quantiser and the
@@ -104,17 +104,17 @@ foreach(t manifest_dump ms_derive)
   target_link_libraries(${t} PRIVATE msfmt)
 endforeach()
 
-# The C API (bindings/c/dmeng_c.h): the boundary the iPhone app (apps/ios, P1) links against
+# The C API (bindings/c/dmeng_c.h): the boundary the iPhone app (apps/ios) links against
 add_library(dmeng_c STATIC bindings/c/dmeng_c.cpp)
 target_include_directories(dmeng_c PUBLIC bindings/c include PRIVATE src/format)
 target_link_libraries(dmeng_c PUBLIC dmengserve dmengcore)
 target_compile_options(dmeng_c PRIVATE ${DM_ARCH} -Wall)
-# The spare tier's mechanics on a small store of known bytes, no model (tests/spare_tier/spare_tier_check.cpp)
+# Spare memory's mechanics on a small store of known bytes, no model (tests/spare_tier/spare_tier_check.cpp)
 add_executable(spare_tier_check tests/spare_tier/spare_tier_check.cpp)
 target_link_libraries(spare_tier_check PRIVATE dmengcore)
-add_executable(spare_tier_bench tests/spare_tier/spare_tier_bench.cpp)  # the tier's cost to the compute, synthetic store
+add_executable(spare_tier_bench tests/spare_tier/spare_tier_bench.cpp)  # spare memory's cost to the compute, synthetic store
 target_link_libraries(spare_tier_bench PRIVATE dmengcore)
-# The P1 gate through the C API only (tests/c_api/dm_gate.c)
+# The C API's gate: ids through the C API only (tests/c_api/dm_gate.c)
 enable_language(C)
 add_executable(dm_gate tests/c_api/dm_gate.c)
 target_link_libraries(dm_gate PRIVATE dmeng_c)

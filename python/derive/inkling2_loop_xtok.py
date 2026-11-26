@@ -1,4 +1,4 @@
-"""Cross-token routers (jobs/ink_router.py "xtok" variants, fetched as fp16 npz) -> the engine's router file (DMENGRES1),
+"""Cross-token routers (the router trainer's "xtok" variants, exported as fp16 npz) -> the engine's router file (DMENGRES1),
 kind ink_xtok, read by Xtok::load in src/core/address.cpp (dmeng --xtok FILE).
 
   python python/derive/inkling2_loop_xtok.py RUN VARIANT --dir MODEL_DIR/routers [--targets 0-5] [--bits 8|4]

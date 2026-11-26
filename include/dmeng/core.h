@@ -145,8 +145,8 @@ struct CoreOpts {
   bool loop_hold = true;     // looped layers: what an earlier pass of the token used stays pinned until its last pass
   std::vector<double> pool_share;  // empty: the model's default
   // the eviction policy (results/cache-policy/POLICY.md): auto = the hazard keep-score, with uniform per-layer caps
-  // while the cache holds fewer than 4 records per layer per pick (Cache::caps_rule); freq = the decayed use count of
-  // the engines before (one pool), pred = Stage 3's estimate-aware order, hazard = hazard with caps as layer_caps says
+  // while the cache holds fewer than 4 records per layer per pick (Cache::caps_rule); freq = the decayed use count
+  // (one pool), pred = the planner's estimate-aware order, hazard = hazard with caps as layer_caps says
   std::string evict = "auto";
   std::string layer_caps = "auto";  // auto (the rule above; hazard only) | uniform | none
 };

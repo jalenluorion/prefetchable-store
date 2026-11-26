@@ -209,7 +209,7 @@ struct Xtok : Naming {
   const int* names() const override { return inner ? inner->names() : nullptr; }
 };
 
-// The read planner (Stage 3). One or more trained router sets (a cascade: every set names every step it can, the longest
+// The read planner. One or more trained router sets (a cascade: every set names every step it can, the longest
 // lag first, shorter lags refine); scores calibrated online to P(in the released top-K); a speculative read is issued
 // only for a record not held, in order of probability, while the marginal-cost threshold from the law tokens/s =
 // bandwidth / bytes per token allows (or a per-token byte budget), and (with estimate-aware eviction) only if it is

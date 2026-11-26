@@ -1,4 +1,4 @@
-/* The P1 gate through the C API only (bindings/c/dmeng_c.h): open a model folder, dm_sync a prompt (token ids), decode
+/* The C API's gate, through the C API only (bindings/c/dmeng_c.h): open a model folder, dm_sync a prompt (token ids), decode
  * greedily with dm_step + dm_argmax, write the ids. Optional: change the cache budget mid-decode (--resize-at T --resize-gb
  * G; lossless, so the ids must not change), and a cancel check (--cancel-test: a dm_sync stopped from another thread
  * returns DM_ECANCELLED with a consistent state, and the next dm_sync of the same prompt gives the uncancelled logits).
