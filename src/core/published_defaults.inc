@@ -135,8 +135,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "drafts": false,
    "eviction": "auto",
    "names": {
-    "m": 8,
-    "rule": "top"
+    "candidates": 16,
+    "rule": "confidence",
+    "tau": 0.5
    },
    "priority_reads": true,
    "routers": [
@@ -191,8 +192,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "cache": "auto",
     "mode": "exact",
     "names": {
-     "m": 8,
-     "rule": "top"
+     "candidates": 16,
+     "rule": "confidence",
+     "tau": 0.5
     },
     "prefill_gpu": {
      "experts": 0.4,
@@ -209,8 +211,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "min_available_gb": 5.0,
     "mode": "exact",
     "names": {
-     "m": 8,
-     "rule": "top"
+     "candidates": 16,
+     "rule": "confidence",
+     "tau": 0.5
     },
     "readers": 8,
     "resident": "resident_q8",

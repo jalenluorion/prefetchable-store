@@ -1113,8 +1113,9 @@
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
    "names": {
-    "rule": "top",
-    "m": 8
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
    },
    "cache": "auto",
    "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
@@ -1383,8 +1384,9 @@
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
    "names": {
-    "rule": "top",
-    "m": 8
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
    },
    "cache": "slab",
    "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
@@ -1929,8 +1931,9 @@
    "linear_k2"
   ],
   "names": {
-   "rule": "top",
-   "m": 8
+   "rule": "confidence",
+   "tau": 0.5,
+   "candidates": 16
   },
   "cross_token": null,
   "eviction": "auto",
@@ -1939,7 +1942,7 @@
   "priority_reads": true,
   "notes": {
    "routers": "linear_k2 names experts 2 layers early; its engine file is derived/router.linear_k2.q8...bin",
-   "names": "top 8 on mac and phone; phone-small overrides it with the confidence rule (tau 0.5, 16 candidates)",
+   "names": "the confidence rule (tau 0.5 of 16 candidates) on every profile, as Inkling: measured on the base M4 (5.0 GB cache, exact, the code prompt and 200 tokens, two alternating pairs, AC, other processes 200-400% CPU): 128.5 / 128.7 MB per token, 8.14 / 13.23 tok/s, wait 11.9 / 13.8 ms against a top 8 143.4 / 143.5 MB, 9.13 / 11.16 tok/s, 14.7 / 13.9 ms: 10% fewer bytes, speed within the runs' spread",
    "cross_token": "none yet",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
    "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only)",
