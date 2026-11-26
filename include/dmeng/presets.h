@@ -108,7 +108,9 @@ struct Resolved {
   int readers = 0;
   int bg_ranks = 0, bg_gate = 0;
   bool cache_auto = false;
-  std::string cache_start;  // the automatic cache's start rule (Preset::cache_start)
+  // the automatic cache's start rule (Preset::cache_start); "slab:RULE" where the C API sized a slab on iOS by that rule
+  // (sized once at open, no watcher: only dm_set_cache_bytes moves the budget)
+  std::string cache_start;
   // the slab's sizing rule and its declared inputs (SlabRule::json), written only when the cache is a slab (a phone
   // profile's, or the C API's slab on iOS): the block is unchanged otherwise
   std::string slab;

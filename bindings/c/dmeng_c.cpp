@@ -361,6 +361,9 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.cache_bytes <= 0 && e->avail_open > 0 && co.mem != Mem::FILE) {  // iOS: the slab, by the profile's rule (presets.h SlabRule)
     ro.cache = "slab";
     ro.slab_on = true;
+    // the start rule in force is the slab's own (no automatic start rule is applied here and no watcher runs in the C
+    // API: the slab keeps this size; only the caller's dm_set_cache_bytes moves the budget, the app's memory-warning cut)
+    ro.cache_start = "slab:" + ro.slab.rule;
     struct stat st;
     const int64_t res = stat(lo.resident.c_str(), &st) == 0 ? (int64_t)st.st_size : (int64_t)2.1e9;
     const int64_t rt = !e->routers_path.empty() && stat(e->routers_path.c_str(), &st) == 0 ? (int64_t)st.st_size : 0;

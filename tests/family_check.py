@@ -501,7 +501,8 @@ if wanted("presets"):
             clamp = lambda x: min(e["max_gb"], max(e["min_gb"], x))
             want_gb = clamp(e["target_gb"] - e["non_cache_gb"]) if e["rule"] == "footprint_target" else \
                 clamp(sr.get("available_gb", -9) - sr.get("resident_gb", 9) - sr.get("router_gb", 9) - e["state_gb"] - e["margin_gb"])
-            errs = sub(e, sr) + sub(e, rs.get("slab"))
+            # the start rule printed is the slab's own (the C API applies no automatic start rule and runs no watcher)
+            errs = sub(e, sr) + sub(e, rs.get("slab")) + sub("slab:" + e["rule"], rs.get("cache_start"))
             # (slab_rule.gb and resolved.cache_gb are printed to 6 digits, dm_stats_json's slab_auto_gb to 3)
             for k, g, tol in (("policy.slab_rule.gb", sr.get("gb"), 1e-4), ("resolved.cache_gb", rs.get("cache_gb"), 1e-4),
                               ("policy.slab_auto_gb", st["policy"].get("slab_auto_gb"), 5e-3)):
