@@ -17,15 +17,15 @@ layer per pick (`slots < 4 x K x layers`), else one pool per record format. As s
 | Inkling | 3.8 GB and up (768 slots): 4 / 6 / 7.8 | `--evict auto` = `--evict hazard --layer-caps none` | hazard, one pool per format |
 
 `--evict freq --layer-caps none` gives the old default exactly. The learned ranker (`--evict-policy` with
-`babel/q36_d_evict3_policy.json` or `babel/ink_d_evict3_policy.json`) is optional, not a default: it needs its lag-2
+`q36_d_evict3_policy.json` or `ink_d_evict3_policy.json`) is optional, not a default: it needs its lag-2
 router running every token (2.2-4.1 ms/token of router compute and 200-230 MB/token of router weights read from
 memory, measured on a loaded Mac) and costs 0.7-1.4 ms/token of policy time as built, for 1-2.3 % fewer bytes than hazard
 on 35B and 2.2-4.9 % on Inkling (study means). At the Mac's 3.4 GB/s that is about 0.4-0.6 ms/token of reads on 35B
 and 1.4-2.0 ms on Inkling, less than the router alone. It can pay only where the same router already runs for naming,
 and then only on Inkling; the timing cells below decide that.
 
-Where the rule comes from (the design study, babel `design_table.py`, mean MB/token over five domains, 32 windows of
-1,024 tokens each; `babel/q36_d_evict3.json`, `babel/ink_d_evict3.json`):
+Where the rule comes from (the design study, `design_table.py`, mean MB/token over five domains, 32 windows of
+1,024 tokens each; `q36_d_evict3.json`, `ink_d_evict3.json`):
 
 | model | GB | decay (old default) | hazard, one pool | hazard, caps | ranker v3, one pool | ranker v3, caps | Belady | rule picks | rule vs old default | best v3 vs rule |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -46,7 +46,7 @@ point is the rule's, not a measurement.
 ## 1. In the engine: reads match the simulator, ids identical
 
 Each run records its routing (`--record`) and the released and early router rows (`--evict-trace`); the study's
-simulator core (`babel/eviction_v3.py simulate()`, unchanged, driven by `engine/sim_trace.py`) replays the same
+simulator core (`eviction_v3.py simulate()`, unchanged, driven by `sim_trace.py`) replays the same
 routing. The ranker's shortlist is taken in (hazard score, record id) order there (`--det`), as the engine does (numpy's
 argpartition breaks ties arbitrarily; without `--det` the simulator differs by 5 hits of 100,844 at 35B 3.3 GB). Text: the
 Pittsburgh prompt, 400 generated tokens on 35B (399 counted), 160 on Inkling (159 counted), lossless, `--temp 0`.
@@ -78,7 +78,7 @@ Pittsburgh prompt, 400 generated tokens on 35B (399 counted), 160 on Inkling (15
 | Inkling | 7.8 | 1389 + 189 | hazard, one pool (auto) | replay * | 0.9640 / 0.9640 | 71.51 / 71.51 |
 | Inkling | 7.8 | 1389 + 189 | ranker v3 | replay * | 0.9670 / 0.9670 | 65.21 / 65.21 |
 
-References: 35B `engine/results/stage4/runs/r_r8_pitt_gb3.3_r1.ids`, Inkling `engine/results/inkling_draft/runs/
+References: 35B `r_r8_pitt_gb3.3_r1.ids`, Inkling `
 pitt_one_gb6_r1.ids` (the old engine); the routing of every run of a model is byte-identical to its first run's.
 \* Inkling 7.8 GB: no model run (memory); the 6 GB run's routing and router rows replayed through `dm::Cache` at the
 7.8 GB slot counts (`tests/evict_check/evict_replay`, which reproduces every engine run above exactly) and through the
@@ -115,15 +115,15 @@ the router's lag against the file.
 ### Timing cells (for the clean campaign)
 
 Common: `dmeng --ctx 16384 --temp 0 --mem mlock --prompt-ids $(cat pitt_ids) --n 400` (35B adds `--prec i16`; Inkling
-uses its own pitt ids, `engine/results/inkling_draft/pitt_ids.txt`). Per cell, three arms:
+uses its own pitt ids, `pitt_ids.txt`). Per cell, three arms:
 
     35B   G in 3.3 5 6.6:   --model $Q36 --cache-gb G --evict freq --layer-caps none            # old default
                             --model $Q36 --cache-gb G                                           # auto (hazard)
-                            --model $Q36 --cache-gb G --evict-policy results/cache-policy/babel/q36_d_evict3_policy.json \
+                            --model $Q36 --cache-gb G --evict-policy q36_d_evict3_policy.json \
                               --routers $Q36/routers/q36_router_full_k2_h512.dmr --router-stats --layer-caps none
     Inkling G in 4 6 7.8:   --model $INK --cache-gb G --evict freq --layer-caps none
                             --model $INK --cache-gb G
-                            --model $INK --cache-gb G --evict-policy results/cache-policy/babel/ink_d_evict3_policy.json \
+                            --model $INK --cache-gb G --evict-policy ink_d_evict3_policy.json \
                               --routers $INK/routers/ink_r_best/ink_router_full_k2_h512_b8.dmr --router-stats --layer-caps none
     with naming (where the ranker can pay): the same three with --prefetch router --routers <the k2 file> in all arms
 
@@ -160,7 +160,7 @@ had not started when their step came and were promoted.
 ### Timing cells
 
 Common: `dmeng --model $INK --cache-gb G --ctx 16384 --temp 0 --mem mlock --prompt-ids $(cat
-engine/results/inkling_draft/pitt_ids.txt) --n 200 --steps-out F.steps --json F.json`, G in 6 and 7.8, with
+pitt_ids.txt) --n 200 --steps-out F.steps --json F.json`, G in 6 and 7.8, with
 `A = --prefetch router --routers $INK/routers/ink_r_fast/ink_router_full_k2_h512_b8.dmr --rt-tau 0.5`:
 
     routers alone:            A
@@ -178,7 +178,7 @@ per application in `wait_ms_by_step`), with `misses_by_step` and `read_queue.bg_
 **The sizing says it does not pay; nothing was built.** From the 6 GB run's recorded routing (hazard, one pool, cache
 only: 5.9 misses per token in applications 42-47) and each lead's names, dumped from the routers in
 the model folder's `routers/ink_r_best` (`--router-stats --dump-names`, the same text, ids identical), by
-`engine/names_size.py` (output `engine/names_size.txt`), per token:
+`names_size.py` (output `names_size.txt`), per token:
 
 | app | misses | recall@8 k1 / k2 / k4 / k8 / k16 | misses named in the top 8, k1 / k2 / k4 / k8 / k16 | wasted name reads top 8, MB, k2 / k16 |
 |---|---|---|---|---|
@@ -205,9 +205,8 @@ what the background class in section 2 addresses.)
 
 ## Files
 
-`babel/`: the study's policy files, results and simulator (copied from babel, personal paths removed).
-`engine/`: `sim_trace.py` (an engine run through the simulator), `summary.py` (the table of section 1),
-`cmp_replay_sim.sh`, `run_ident.sh` (old scan vs incremental), `caps_rule_test.cpp`, `names_size.py`, the run scripts.
+The design study's policy files, results and simulator, and the scripts of the runs above (`sim_trace.py`,
+`summary.py`, `caps_rule_test.cpp`, `names_size.py`), are in this repository's history, not in the tree.
 Code: `src/core/store.cpp` (`hz_victim`, `load_ranker`, `rk_victim`, `released_top` / `router_top` / `step_end`,
 `caps_rule`, the readers' background class), `src/core/moe.cpp` (`CoreOpts::evict` / `layer_caps`, released rows),
 `src/core/address.cpp` (router rows, `Xtok::background`), `tools/dmeng.cpp` (`--evict auto`, `--evict-trace`,

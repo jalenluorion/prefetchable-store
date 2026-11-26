@@ -4,12 +4,8 @@ __pycache__/
 *.pyc
 build/
 build-*/
+build_dev/
 .build/
 .DS_Store
-results/drafts/runs/
-results/drafts/*.log
-build_dev/
-results/drafts/ctl_runs/
-results/drafts/*.log
-build/
-results/drafts/runs2/
+results/ink_draft/runs/**/*.log
+results/ink_draft/runs/*.log

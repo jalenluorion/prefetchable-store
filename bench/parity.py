@@ -32,8 +32,8 @@ STAGES = [
     ("output head", ["head"], ["head"]),
     ("other", ["other", "span_copies"], ["post_mlp"]),
 ]
-# weight MB per decode token and format, per model (35B: results/q36_speed; Inkling:
-# results/ink_speed/INK-SPEED.md "Bytes per token by stage"); "routers" adds the run's router_weight_mb_per_token
+# weight MB per decode token and format, per model (measured per model on the base M4,
+# bytes per token by stage); "routers" adds the run's router_weight_mb_per_token
 BYTES = {
     "q36": {"attention projections": (1007, "AFF8"), "attention core (+ fused output projection)": (267 + 126, "AFF8 + fp32 state"),
             "attention output projection": (89, "AFF8"), "routers: the model's + ours (lag rows, token start, naming)": (42, "bf16 + ours 8-bit"),

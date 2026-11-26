@@ -35,7 +35,7 @@ of weights (0.73 GB with its reserved state at 16K context).
   when no draft passes the threshold, its draft is not chosen, or none of it is kept; then the head is not run for 32
   tokens, doubling to 256 on further losses, reset on a win.
 - **Checks**: `dmeng --draft-check TAPS` (the head on recorded features, no decoding), the MLX reference
-  `tests/inkling2_loop/draft_ref_mlx_run.py` (engine/ink/mtp_accept.py's arithmetic, unchanged), `draft_compare.py`;
+  `tests/inkling2_loop/draft_ref_mlx_run.py` (sglang PR 51926's arithmetic, unchanged), `draft_compare.py`;
   `dmeng --draft-bench R` (the block's products on synthetic weights). Campaign: `bench/ink_draft/run.py`.
 
 **Memory**: weights 0.533 GB resident (3 layers + RNN + norms, bf16; `markov_w1`, 103 MB, stays in the file: one 512-byte
@@ -47,7 +47,7 @@ features per position not yet projected. In a decoding run at 16K context the mo
 ## Gate 1: the C++ head equals the MLX reference on the same features
 
 Features: the engine's recorded taps of the Pittsburgh generation (prompt + 400 greedy tokens) and of the coding chat
-answer (462-token prompt + 400 greedy tokens) (`engine/results/inkling_mtp/taps_*_seq.bin`); every committed position after
+answer (462-token prompt + 400 greedy tokens) (`FEATS/taps_*_seq.bin`); every committed position after
 the prompt (399 per text), all 7 drafts per position without a threshold. The reference script reproduces mtp_accept.py's
 own saved draft-1 rows exactly (399 / 399 on both texts, probability difference 0.0). Draft j is compared where drafts
 1..j-1 agreed (each side conditions on its own previous drafts). Logits: draft 1's, over the full vocabulary, first 200

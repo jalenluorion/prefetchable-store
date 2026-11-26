@@ -1,3 +1,0 @@
-# guard logs carry machine paths; the JSON summaries are kept
-runs/**/*.log
-runs/*.log

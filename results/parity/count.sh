@@ -4,7 +4,7 @@
 W=${0:A:h}/../..
 DM=${W:A}/../../..
 M=${DM:A}/q36/model; I=${DM:A}/inkling/model
-G=(python3 ${DM:A}/../engine/bench/guard.py)
+G=(python3 ${DM_GUARD:?set DM_GUARD to your guard script (bench/README.md)})
 T=$1; B=$2
 O=$W/results/parity/logs; mkdir -p $O
 FQ=(--model $M --cache-gb 6.6 --ctx 16384 --mem mlock --prefetch router --routers $M/routers/lin/q36_router_lin_k2.dmr --m 8)

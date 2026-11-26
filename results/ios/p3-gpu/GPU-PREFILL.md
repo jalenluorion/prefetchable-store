@@ -155,7 +155,7 @@ the drive rate (readers, `split` pieces per record, reader QoS) or fewer bytes. 
 
 ### The 35B's cold prefill of the recorded OpenCode request (7,571 tokens)
 
-As `engine/unify/work/chain4.sh` runs it: `dmserve --prefill-bench engine/results/agentic/replay/s2_clean/ids/002.txt
+As the run script runs it: `dmserve --prefill-bench <recorded session>/ids/002.txt
 --cache-gb 5 --mem mlock --ctx 8192 --chunk 512 --span 8192 --stream 1 --gen 4 --rep 2` (8-bit resident, the Mac's
 defaults), this branch's build, one process per cell (its two prefills are the two runs; the second starts with the
 slab as the first left it), every run through the guard. "Integer kernel, projections 0.38" is today's setting (the
