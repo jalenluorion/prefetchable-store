@@ -414,6 +414,20 @@ if wanted("presets"):
 
         bad, ncell, cross = [], 0, []
         FRONT_SPECIFIC = set()  # (the prompt's sub-chunk is the model's declared one in all three: printed as 0)
+
+        def slab_rule(prof):
+            """The slab rule a profile resolves to, from the manifest (presets.h SlabRule): its cache_slab, else the
+            built-in available rule."""
+            sl = man["profiles"][prof].get("cache_slab") or {"rule": "available"}
+            e = {"rule": sl["rule"], "min_gb": sl.get("min_gb", 0.6), "max_gb": sl.get("max_gb", 8.0)}
+            if sl["rule"] == "footprint_target":
+                e.update(target_gb=sl["target_gb"], non_cache_gb=sl["non_cache_gb"])
+            else:
+                e.update(state_gb=sl.get("state_gb", 0.3), margin_gb=sl.get("margin_gb", 0.9))
+            return e
+
+        def slab_exp(prof):  # as resolved.slab prints it: only when the profile's cache is a slab
+            return slab_rule(prof) if man["profiles"][prof].get("cache") == "slab" else None
         for prof in man["profiles"]:
             r = run([DMENG, "--model", M, "--profile", prof, "--print-defaults"])
             P = json.loads(r.stdout)
@@ -426,12 +440,13 @@ if wanted("presets"):
             # the profile's declared drafting (the C API has none: off there, below); the tiny folders' profiles declare it
             # as the published manifests do (a family without what it needs would fail at open: the drafting check)
             exp_default["drafts"] = P["drafts"]
+            exp_default["slab"] = slab_exp(prof)  # (the mac profile: not printed, the block unchanged)
             gpu = P["prefill_gpu"]
             cells = [("default", [], exp_default),
                      ("mode fast", ["--mode", "fast"], {"mode": json.loads(run([DMENG, "--model", M, "--profile", prof, "--mode", "fast", "--print-defaults"]).stdout)["engine_mode"]}),
                      ("top m 4", ["--m", "4"], {"names": {"rule": "top", "m": 4}} if P["routers"] else {"names": None}),
                      ("names off", ["--routers", "none"], {"routers": "", "names": None}),
-                     ("cache 0.05", ["--cache-gb", "0.05"], {"cache_gb": 0.05, "cache_auto": False}),
+                     ("cache 0.05", ["--cache-gb", "0.05"], {"cache_gb": 0.05, "cache_auto": False, "slab": None}),
                      ("evict freq", ["--evict", "freq"], {"eviction": "freq"}),
                      ("gpu 0.2", ["--gpu", "0.2"], {"prefill_gpu": {"projections": 0.2, "experts": gpu["experts"]}}),
                      ("gpu off", ["--gpu-off"], {"prefill_gpu": {"projections": 0, "experts": 0}}),
@@ -458,6 +473,36 @@ if wanted("presets"):
                     keys = set().union(*[g.keys() for g in got.values()]) - FRONT_SPECIFIC
                     cross.append(f"{prof} {nm}: " + ", ".join(f"{k} {{{', '.join(f'{fe} {json.dumps(got[fe].get(k))}' for fe in got)}}}" for k in sorted(keys)
                                                              if len({json.dumps(got[fe].get(k)) for fe in got}) > 1))
+        # the slab on iOS (the C API as on an iPhone, DMENG_TEST_AVAIL_OPEN: 4.0 GB available at open), every profile: the
+        # profile's declared rule (cache_slab), else the built-in available rule (the mac profile too, as the C API sizes
+        # a slab wherever iOS reports the memory): policy.slab_rule prints the rule, its inputs and the slab, and the
+        # slab follows from them; resolved.slab is the rule, resolved.cache_gb the slab
+        AV = 4.0e9
+        for prof in man["profiles"]:
+            if os.path.exists(j := os.path.join(T, "pr.json")):
+                os.remove(j)
+            r = run([DMGATE, "--model", M, "--profile", prof, "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j],
+                    env={"DMENG_TEST_AVAIL_OPEN": str(int(AV))})
+            st = json.load(open(j))["stats"] if r.returncode == 0 else None
+            if not st:
+                bad.append(f"{prof} capi iOS slab: rc {r.returncode} {r.stderr[-200:]}")
+                continue
+            sr, rs = st["policy"].get("slab_rule") or {}, st["resolved"]
+            e = slab_rule(prof)
+            clamp = lambda x: min(e["max_gb"], max(e["min_gb"], x))
+            want_gb = clamp(e["target_gb"] - e["non_cache_gb"]) if e["rule"] == "footprint_target" else \
+                clamp(sr.get("available_gb", -9) - sr.get("resident_gb", 9) - sr.get("router_gb", 9) - e["state_gb"] - e["margin_gb"])
+            errs = sub(e, sr) + sub(e, rs.get("slab"))
+            # (slab_rule.gb and resolved.cache_gb are printed to 6 digits, dm_stats_json's slab_auto_gb to 3)
+            for k, g, tol in (("policy.slab_rule.gb", sr.get("gb"), 1e-4), ("resolved.cache_gb", rs.get("cache_gb"), 1e-4),
+                              ("policy.slab_auto_gb", st["policy"].get("slab_auto_gb"), 5e-3)):
+                if g is None or abs(g - want_gb) > tol:
+                    errs.append(f"{k}: {g!r} != {want_gb:.6f}")
+            if e["rule"] == "available":
+                errs += sub(AV / 1e9, sr.get("available_gb")) + ([] if sr.get("resident_gb", 0) > 0 else ["resident_gb not > 0"])
+            if errs:
+                bad.append(f"{prof} capi iOS slab: {'; '.join(errs)}")
+            ncell += 1
         # the C API has no drafting: a profile's declared drafts are left off with a note, an explicit request is refused
         FD = declared("pd", {"lookup": True, "head": False})
         j = os.path.join(T, "pr.json")

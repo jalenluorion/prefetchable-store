@@ -119,6 +119,11 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone-small": {
     "cache": "slab",
+    "cache_slab": {
+     "non_cache_gb": 1.26,
+     "rule": "footprint_target",
+     "target_gb": 2.96
+    },
     "drafts": {
      "head": false,
      "lookup": false
@@ -253,6 +258,11 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone-small": {
     "cache": "slab",
+    "cache_slab": {
+     "non_cache_gb": 1.54,
+     "rule": "footprint_target",
+     "target_gb": 2.96
+    },
     "drafts": {
      "head": false,
      "lookup": false

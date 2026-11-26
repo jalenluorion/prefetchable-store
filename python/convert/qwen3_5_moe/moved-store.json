@@ -1038,7 +1038,7 @@
  "unknown": [],
  "generated": {
   "by": "moved-store release tools, from the manifest of 2026-11-21 plus the new parts",
-  "date": "2026-11-22"
+  "date": "2026-11-26"
  },
  "modes": {
   "exact": {
@@ -1711,7 +1711,16 @@
     "candidates": 16
    },
    "cache": "slab",
-   "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
+   "cache_rule": "locked slab sized at open by cache_slab: the 2.96 GB app footprint target of the 6 GB class less this model's footprint beside the cache, clamped to 0.6-8 GB",
+   "cache_slab": {
+    "rule": "footprint_target",
+    "target_gb": 2.96,
+    "non_cache_gb": 1.54,
+    "calibration": {
+     "measured": "iPhone 15 Plus (6 GB), phone-small, flash-last / release builds, 2026-11-26: the app footprint beside the expert cache in decode, 1.54 GB (4-bit in-memory weights, router, state, checkpoints); footprint 2.93-2.95 GB in decode at the 1.42 GB slab (results/ios/p2/P2.md)",
+     "reason": "sized for an app footprint of 2.96 GB on the 6 GB class (the old app's footprint on this phone, the equal-footprint comparison of results/ios/p2/P2.md) instead of from the memory iOS reports at open; the target belongs to the device class, the non-cache footprint to the model: 2.96 - 1.54 = 1.42 GB"
+    }
+   },
    "parts": [
     {
      "path": "config.json",

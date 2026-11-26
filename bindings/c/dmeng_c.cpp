@@ -68,6 +68,7 @@ struct dm_engine {
   std::mutex busy;                     // held by dm_sync / dm_step (dm_set_cache_bytes applies at once when free)
   std::atomic<bool> cancel_req{false};
   int64_t avail_open = 0, slab_auto = 0;  // iOS: os_proc_available_memory at open, the slab the sizing rule chose
+  std::string slab_json = "null";         // that rule, its inputs and the slab (dm_stats_json policy.slab_rule)
   int64_t steps = 0;
   uint64_t step_ns = 0;  // wall time inside dm_step, summed (dm_counters step_ns)
   int64_t rs_steps_dt = 0;
@@ -355,16 +356,31 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     co.cache_gb = std::min(ceil, start);
     e->cache_why = why;
   }
-  if (o.cache_bytes <= 0 && e->avail_open > 0 && co.mem != Mem::FILE) {  // iOS: the slab from the memory the app has
+  if (o.cache_bytes <= 0 && e->avail_open > 0 && co.mem != Mem::FILE) {  // iOS: the slab, by the profile's rule (presets.h SlabRule)
     ro.cache = "slab";
+    ro.slab_on = true;
     struct stat st;
     const int64_t res = stat(lo.resident.c_str(), &st) == 0 ? (int64_t)st.st_size : (int64_t)2.1e9;
     const int64_t rt = !e->routers_path.empty() && stat(e->routers_path.c_str(), &st) == 0 ? (int64_t)st.st_size : 0;
-    const int64_t slab = std::min<int64_t>((int64_t)8.0e9, std::max<int64_t>((int64_t)0.6e9, e->avail_open - res - rt - (int64_t)0.3e9 - (int64_t)0.9e9));  // follows what iOS makes available: phones with more memory get a larger cache
+    // available: follows what iOS makes available (phones with more memory get a larger cache); footprint_target: the
+    // device class's app footprint less the model's measured footprint beside the cache
+    const int64_t slab = ro.slab.bytes(e->avail_open, res, rt);
     e->slab_auto = slab;
     co.cache_gb = slab / 1e9;
-    fprintf(stderr, "dmeng: expert slab %.2f GB = available %.2f - resident %.2f - router %.2f - state 0.30 - margin 0.90 GB\n",
-            slab / 1e9, e->avail_open / 1e9, res / 1e9, rt / 1e9);
+    char b[400];
+    if (ro.slab.rule == "footprint_target")
+      snprintf(b, sizeof b, "{\"rule\":\"footprint_target\",\"target_gb\":%g,\"non_cache_gb\":%g,\"min_gb\":%g,\"max_gb\":%g,\"gb\":%g}",
+               ro.slab.target_gb, ro.slab.non_cache_gb, ro.slab.min_gb, ro.slab.max_gb, slab / 1e9);
+    else
+      snprintf(b, sizeof b, "{\"rule\":\"available\",\"available_gb\":%g,\"resident_gb\":%g,\"router_gb\":%g,\"state_gb\":%g,\"margin_gb\":%g,\"min_gb\":%g,\"max_gb\":%g,\"gb\":%g}",
+               e->avail_open / 1e9, res / 1e9, rt / 1e9, ro.slab.state_gb, ro.slab.margin_gb, ro.slab.min_gb, ro.slab.max_gb, slab / 1e9);
+    e->slab_json = b;
+    if (ro.slab.rule == "footprint_target")
+      fprintf(stderr, "dmeng: expert slab %.2f GB = footprint target %.2f - the model's non-cache footprint %.2f GB (available %.2f GB)\n", slab / 1e9,
+              ro.slab.target_gb, ro.slab.non_cache_gb, e->avail_open / 1e9);
+    else
+      fprintf(stderr, "dmeng: expert slab %.2f GB = available %.2f - resident %.2f - router %.2f - state %.2f - margin %.2f GB\n", slab / 1e9,
+              e->avail_open / 1e9, res / 1e9, rt / 1e9, ro.slab.state_gb, ro.slab.margin_gb);
   }
   if (o.split > 0) co.split = o.split;
   // the eviction policy: the core's own default (auto: hazard, uniform per-layer caps below 4 x K x layers slots)
@@ -816,7 +832,7 @@ const char* dm_stats_json(dm_engine* e) {
     << ",\"plan\":" << e->o.plan << ",\"routers\":\"" << e->routers_path << "\",\"router_m\":" << (e->R ? e->R->m : 0)
     << ",\"mode\":\"" << (e->C->ns.on ? "approx" : "lossless") << "\",\"preset\":" << e->preset_json << ",\"prefill_declared\":" << e->prefill_json << ",\"xtok\":" << (e->X ? "true" : "false") << ",\"router_tau\":" << (e->R ? e->R->tau : 0) << ",\"split\":" << e->C->o.split
     << ",\"prefill_threads\":" << (e->prefill_pool ? e->prefill_pool->size() : e->C->o.threads)
-    << ",\"resident_bits\":" << (e->o.resident_bits == 4 ? 4 : 8) << ",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9
+    << ",\"resident_bits\":" << (e->o.resident_bits == 4 ? 4 : 8) << ",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9 << ",\"slab_rule\":" << e->slab_json
     << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode << "}";
   {  // P2 levers: the reads since the last stats call (urgent = read when needed, named = issued ahead by the router;
      // named unused = named records evicted before any use; the cache counters are reset by every stats call, the
