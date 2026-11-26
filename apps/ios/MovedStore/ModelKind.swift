@@ -40,9 +40,8 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     var modeKey: String { self == .qwen36 ? "engine.mode" : "engine.mode.inkling" }
     /// Fast on both phone profiles (phone, phone-small), for both models; Exact elsewhere (the manifests' profiles agree).
     func defaultMode(profile: String) -> String { profile == "phone" || profile == "phone-small" ? "fast" : "exact" }
-    /// The engine's mode string for the app's Fast: "fast", the manifest's own definition for both models (the threshold
-    /// is the manifest's to set: the 35B's 0.08 measured with the calibrated 4-bit in-memory weights is staged for its
-    /// phone-small profile, ModelKind's staged values).
+    /// The engine's mode string for the app's Fast: "fast", the manifest's own definition for both models (modes.fast,
+    /// or a profile's own modes.fast where one declares it; the threshold is the manifest's to set).
     var fastEngineMode: String { "fast" }
     /// The download's size before the manifest is in (the Hub manifest's profile bytes).
     func approxBytes(profile: String) -> Int64 {
