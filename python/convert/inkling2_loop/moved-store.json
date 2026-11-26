@@ -37,8 +37,8 @@
   },
   {
    "path": "README.md",
-   "bytes": 13883,
-   "sha256": "0688de57314dbe2e0f7af79e11d1d93dce0f2b6f7a41849070f9359b5013eb17",
+   "bytes": 16640,
+   "sha256": "2a5cf4662abac096e4df95327821bc60098ce723800c153a5af566b0158a32fb",
    "role": "card",
    "precision": "text"
   },
@@ -1727,9 +1727,19 @@
    "precision": "4-bit",
    "precision_detail": "4-bit affine, groups of 64, calibrated (resident_q4); experts' layers 20-23 as NVFP4",
    "names": {
-    "rule": "confidence",
-    "tau": 0.5,
-    "candidates": 16
+    "exact": {
+     "rule": "confidence",
+     "tau": 0.5,
+     "candidates": 16
+    },
+    "fast": {
+     "rule": "top",
+     "m": 3
+    },
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, fast = approx:drop:w=0.15, one launch from a nominal start, each arm twice in mixed order, 200 tokens per arm: top 3 5.05 and 4.53 tok/s; the confidence rule 0.5 of 16 4.71 and 4.12 tok/s; names off 4.78 and 4.98 tok/s. Position by position in the launch, top 3 is 7 to 10% ahead of the confidence rule. Top choice equal to the phone's own exact on the same 600 agent-text positions: confidence 573, top 3 570, names off 569. Exact, steady decode, cooled start: the confidence rule 1.54 and 1.52 tok/s at 571 MB per token",
+     "reason": "fast: top 3 is ahead of the confidence rule at the same agreement, and on the Mac names off loses quality on prose where top 3 does not (profiles.mac.names.calibration); exact keeps the confidence rule, the only rule measured in exact on the phone"
+    }
    },
    "cache": "slab",
    "cache_rule": "locked slab sized at open by cache_slab: the 2.96 GB app footprint target of the 6 GB class less this model's footprint beside the cache, clamped to 0.6-8 GB",

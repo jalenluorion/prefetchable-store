@@ -40,7 +40,7 @@ manifest beside the value). The table lists what still differs.
 | | 35B | Inkling | Flash-Next | reason |
 |---|---|---|---|---|
 | trained routers | linear, 2 early | linear, 2 early (the MLP `mlp_k2_h512` is the fallback when the linear file is missing) | MLP, 4 early | what was trained per model (no linear routers were trained for Flash-Next) |
-| names rule | confidence 0.5 / 16 (`phone-small` fast: top 3) | confidence 0.5 / 16 (`mac` fast: top 3) | top 4 | measured: on the 35B the confidence rule read 10% fewer MB per token than a top 8 at the same speed (its manifest's `defaults.notes.names`); on Flash-Next it read 785-918 MB per token at 2.0 GB, more than the top 4 (below) |
+| names rule | confidence 0.5 / 16 (`phone-small` fast: top 3) | confidence 0.5 / 16 (`mac` and `phone-small` fast: top 3) | top 4 | measured: on the 35B the confidence rule read 10% fewer MB per token than a top 8 at the same speed (its manifest's `defaults.notes.names`); on Flash-Next it read 785-918 MB per token at 2.0 GB, more than the top 4 (below) |
 | cross-token names | none | on | none | the machinery (`Xtok`) is any family's; routers trained for Inkling only |
 | per-layer caps | auto | auto | none | one rule (`auto`) for the two small models; Flash-Next: caps refused its names (below). `:fit` measured worse at a 2.0 GB cache where caps are on (exact, code prompt, alternating pairs): the 35B 9.20 / 5.48 against 10.34 / 6.39 tok/s at the same MB per token (302); Inkling 954 / 961 against 813 / 823 MB per token, 3.02 / 3.40 against 3.13 / 4.00 tok/s; available to all, off |
 | fast mode | weight 0.15, wait for reads in flight | weight 0.15, wait for reads in flight | at most 0.13 of the weight left out, never wait | the 35B: 0.15 on every profile, in Inkling's form; on the iPhone 7.39-7.88 against 5.83-5.86 tok/s at 0.10, agreement 0.968 against 0.985 over 600 positions (Flash-Next's capped leave-out rule measured worse on the iPhone, 3.57 against 4.1 tok/s, and 0.08 read 159 against 112 MB per token at 0.10): `modes.fast.calibration`; Inkling: 0.15 in the form the iPhone measured (3.15 tok/s, agreement 0.960 against 2.06-2.27 tok/s, 0.987 at 0.10), one rule on the Mac and the phones: `modes.fast.calibration` |
@@ -209,7 +209,7 @@ the npz in place and derives its 8-bit file from it (step 4 below), the same byt
 
 The built-in `defaults`, used for any key the manifest leaves out, are the same for every model: no routers, a top 8,
 no cross-token routers, eviction `auto`, no drafting (the profiles declare `drafts`). The names rule is a per-profile value each manifest declares:
-the 35B and Inkling use the confidence rule (0.5 of 16) in exact mode on every profile, and in fast mode on all but the 35B's `phone-small` and Inkling's `mac` (a top 3), Flash-Next a top 4 (measured, above).
+the 35B and Inkling use the confidence rule (0.5 of 16) in exact mode on every profile, and in fast mode on all but the 35B's `phone-small` and Inkling's `mac` and `phone-small` (a top 3), Flash-Next a top 4 (measured, above).
 
 ## How an id becomes a file
 
