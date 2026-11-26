@@ -387,8 +387,6 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         progress("tokenizer + chat template from \(DmengLaunch.modelDir.lastPathComponent)/ (\(kind.displayName))")
         let c = try await TextCodec.load(dir: dir)
         log("DMENG model \(kind.rawValue) (\(kind.displayName)): family \(c.family.isEmpty ? "unknown" : c.family), front end \(c.isInkling ? "InklingChat (stop ids \(c.stopIds.sorted()))" : "the chat template (Jinja)")")
-        let exact = DmengLaunch.engineMode == nil
-        let q = kind == .qwen36
         var o = DmengOptions()
         o.cacheBytes = Int64(DmengLaunch.cacheGB * 1e9)
         // both models take their profile's routers (naming one here would turn the profile's names rule, cross-token router
@@ -485,13 +483,13 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
             o.modelOptions = [o.modelOptions, "run:spare-mem=\(on ? 1 : 0)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ";")
         }
         // run-ahead (while a step waits on a read, the next layer's router runs on the experts in memory and its reads are
-        // issued; the real pass recomputes exactly): the 35B in Exact 8 picks, depth 1, speculative work <= 0.2 x compute,
-        // none while every reader is busy; off in Fast; Inkling: the profile's (0)
-        o.runAhead = q ? (exact ? 8 : -1) : 0
-        o.runAheadDepth = 1
-        o.runAheadBudget = q ? (exact ? 0.2 : -1) : 0
-        o.runAheadMax = -1
-        o.runAheadSatSkip = q && exact
+        // issued; the real pass recomputes exactly): the profile's, both models (phone and phone-small: 8 picks, depth 1,
+        // speculative work <= 0.2 x compute, none while every reader is busy, in Exact only)
+        o.runAhead = 0
+        o.runAheadDepth = 0
+        o.runAheadBudget = 0
+        o.runAheadMax = 0
+        o.runAheadSatSkip = false
         o.runAheadAB = false
         progress("opening \(dir) (in-memory weights, routers \(o.routersFile.map { ($0 as NSString).lastPathComponent } ?? o.routersId ?? "the profile's"), cache \(DmengLaunch.cacheGB) GB)")
         let t0 = Date()
