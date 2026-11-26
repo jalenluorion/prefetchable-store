@@ -10,7 +10,7 @@ checked):
   invariance  exact mode: logits and greedy ids identical, bit for bit, with every expert held / few slots (evictions and
               re-reads), 1 / 4 / 5 compute threads, the folder's router naming, run-ahead, and an oracle replaying the
               recorded routing at leads 1 and one token; names + run-ahead with the names' reads held in flight
-              (DMENG_TEST_SPEC_READ_US: a miss finds every free slot still being read); the spare tier on (--spare-mem 1:
+              (DMENG_TEST_SPEC_READ_US: a miss finds every free slot still being read); spare memory on (--spare-mem 1:
               probation budgets that overflow and that hold every record, 1 thread, every reuse promoted, names +
               run-ahead, names in flight, greedy ids), each run checked to have served reuses from the file cache (the
               every-reuse arm: to have promoted records)
@@ -166,16 +166,16 @@ if wanted("invariance"):
             variants += [("few slots, router names", FEW + RT), ("few slots, router names + run-ahead", FEW + RT + ["--run-ahead", str(K)])]
         variants += [("oracle lead 1", FEW + ["--prefetch", "oracle", "--oracle", rec, "--lead", "1"]),
                      ("oracle lead token", ["--cache-gb", f"{TOK_GB:.6f}", "--prefetch", "oracle", "--oracle", rec, "--lead", "token"])]
-        # the spare tier on (store.h): reads land in probation, reuse promotes into the slab; a probation budget the
+        # spare memory on (store.h): reads land in probation, reuse promotes into the slab; a probation budget the
         # reads overflow (the oldest dropped) and one that holds every record the slab does not
         SPARE_LO = ["--spare-mem", "1", "--spare-gb", f"{0.2 * sum(rb) * meta['experts'] / 1e9:.6f}"]
         SPARE_HI = ["--spare-mem", "1", "--spare-gb", f"{0.8 * sum(rb) * meta['experts'] / 1e9:.6f}"]
         ALL_PROMOTED = ["--spare-uses", "2", "--spare-margin", "-1"]  # every reuse promoted (the copy and the move every token)
-        spare = [("few slots, spare tier (small budget)", FEW + SPARE_LO), ("few slots, spare tier (every record)", FEW + SPARE_HI),
-                 ("few slots, spare tier, 1 thread", FEW + SPARE_LO + ["--threads", "1"]),
-                 ("few slots, spare tier, every reuse promoted", FEW + SPARE_LO + ALL_PROMOTED)]
+        spare = [("few slots, spare memory (small budget)", FEW + SPARE_LO), ("few slots, spare memory (every record)", FEW + SPARE_HI),
+                 ("few slots, spare memory, 1 thread", FEW + SPARE_LO + ["--threads", "1"]),
+                 ("few slots, spare memory, every reuse promoted", FEW + SPARE_LO + ALL_PROMOTED)]
         if RT:
-            spare += [("few slots, spare tier, router names + run-ahead", FEW + SPARE_LO + RT + ["--run-ahead", str(K)])]
+            spare += [("few slots, spare memory, router names + run-ahead", FEW + SPARE_LO + RT + ["--run-ahead", str(K)])]
         variants += spare
         bad, reads, tier, pageins = [], [], [], []
         for nm, fl in variants:
@@ -183,13 +183,13 @@ if wanted("invariance"):
             reads.append(js.get("reads", 0))
             if g != base:
                 bad.append(nm)
-            if "--spare-mem" in fl:  # the tier must have run: reuses served from the file cache, the promotion gate tested
+            if "--spare-mem" in fl:  # spare memory must have run: reuses served from the file cache, the promotion gate tested
                 sm = js.get("spare_memory") or {}
                 tier.append(sm.get("promotions_per_token", 0))
                 pageins.append(round(js.get("compute_pageins_per_token", -1), 2))
                 # (the default rule may promote nothing on a tiny model: the every-reuse arm must promote)
                 if not (sm.get("reuses_per_token", 0) > 0 and (sm.get("promotions_per_token", 0) > 0 or "--spare-margin" not in fl)):
-                    bad.append(f"{nm}: the tier did not run as expected ({json.dumps(sm)[:300]})")
+                    bad.append(f"{nm}: spare memory did not run as expected ({json.dumps(sm)[:300]})")
         if RT:  # names' reads held 3 ms in flight (one reader), as on a busy machine: a miss waits for one to land
             b40, _ = logits("base40", 40, "--cache-gb", f"{ALL_GB:.6f}")
             g, _ = logits("v40", 40, *FEW, *RT, "--run-ahead", str(K), "--readers", "1", env={"DMENG_TEST_SPEC_READ_US": "3000"})
@@ -197,18 +197,18 @@ if wanted("invariance"):
                 bad.append("few slots, router names + run-ahead, names' reads held in flight (40 positions)")
             g, _ = logits("v40s", 40, *FEW, *SPARE_LO, *RT, "--run-ahead", str(K), "--readers", "1", env={"DMENG_TEST_SPEC_READ_US": "3000"})
             if g != b40:
-                bad.append("few slots, spare tier, router names + run-ahead, names' reads held in flight (40 positions)")
+                bad.append("few slots, spare memory, router names + run-ahead, names' reads held in flight (40 positions)")
         g0, _ = greedy("g0", "--cache-gb", f"{ALL_GB:.6f}")
         g1, _ = greedy("g1", *FEW, *RT, "--threads", "1")
         if g0 != g1:
             bad.append("greedy ids, few slots / names / 1 thread")
         g2, _ = greedy("g2", *FEW, *SPARE_LO, *RT)
         if g0 != g2:
-            bad.append("greedy ids, few slots / spare tier / names")
+            bad.append("greedy ids, few slots / spare memory / names")
         verdict("invariance", "FAIL" if bad else "PASS",
                 (f"differ: {', '.join(bad)}" if bad else f"{len(variants) + 1} runs identical (300 positions; reads per run {min(reads)}-{max(reads)})"
                            + ("; names' reads held in flight: identical (40 positions)" if RT else "")
-                           + f"; spare tier on in {len(tier)} (promotions per token {min(tier):.2f}-{max(tier):.2f}, compute page-ins per token {min(pageins)}-{max(pageins)}) and the greedy ids")
+                           + f"; spare memory on in {len(tier)} (promotions per token {min(tier):.2f}-{max(tier):.2f}, compute page-ins per token {min(pageins)}-{max(pageins)}) and the greedy ids")
                 + ("" if RT else "; the folder has no router file"))
     except Exception as e:
         verdict("invariance", "FAIL", str(e)[-400:])
@@ -934,11 +934,24 @@ if wanted("caps"):
             bad = []
             if len({v[0] for v in got.values()}) != 1:
                 bad.append("ids differ between cap settings")
-            # (a slot whose read is still in flight cannot be given: timing leaves a few refusals, under 1% of the names)
-            if got["uniform:fit"][1] > 0.01 * got["none"][2]:
-                bad.append(f"fit still refuses {got['uniform:fit'][1]:.2f} names per token")
+            # A slot whose read is still in flight cannot be given, so with real reads fit's refusals depend on timing (on a
+            # tiny model a step computes faster than a read lands: 0 to 13 per token on one machine, by its load). The
+            # rule itself is checked without that race: with --skip-reads no read is ever in flight (the slots keep
+            # whatever bytes they have, so these ids mean nothing), and fit must then refuse no name at all while the
+            # fixed reserve still refuses. With real reads, fit must refuse fewer names than the fixed reserve.
+            dry = {}
+            for caps in ("uniform", "uniform:fit"):
+                _, js = greedy("caps_dry_" + caps.replace(":", "_"), "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K), "--layer-caps", caps,
+                               "--skip-reads", n=64)
+                dry[caps] = js["pf_dropped_per_token"]
+            if dry["uniform:fit"] != 0:
+                bad.append(f"with no read in flight fit still refuses {dry['uniform:fit']:.2f} names per token")
+            if dry["uniform"] <= 0:
+                bad.append("with no read in flight the fixed reserve refuses nothing: the caps do not bind in this check")
+            if got["uniform:fit"][1] >= got["uniform"][1]:
+                bad.append(f"fit refuses {got['uniform:fit'][1]:.2f} names per token, the fixed reserve {got['uniform'][1]:.2f}")
             verdict("caps", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") + "names refused / issued per token at 2K + 4 slots per layer: " +
-                    ", ".join(f"{k} {v[1]:.2f} / {v[2]:.2f}" for k, v in got.items()) + "; ids identical")
+                    ", ".join(f"{k} {v[1]:.2f} / {v[2]:.2f}" for k, v in got.items()) + f"; with no read in flight: uniform {dry['uniform']:.2f}, uniform:fit {dry['uniform:fit']:.2f} refused; ids identical")
         except Exception as e:
             verdict("caps", "FAIL", str(e)[-400:])
 
