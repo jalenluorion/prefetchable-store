@@ -263,6 +263,9 @@ void Readers::loop() {
       tick_(t0);
     }
     q_ns[cls].fetch_add((uint64_t)std::max<int64_t>(0, t0 - j.t_sub), std::memory_order_relaxed);
+    // tests: DMENG_TEST_SPEC_READ_US holds every speculative read (a name's) that long in flight, as a busy machine does
+    static const int spec_us = getenv("DMENG_TEST_SPEC_READ_US") ? atoi(getenv("DMENG_TEST_SPEC_READ_US")) : 0;
+    if (spec_us > 0 && cls != 0) std::this_thread::sleep_for(std::chrono::microseconds(spec_us));
     bool skip_piece = skip_;
     if (!skip_piece && !j.dst && file_skip_resident && all_resident(j.view, j.n)) {
       skip_piece = true;
@@ -677,6 +680,22 @@ int Cache::steal(int L) {
   drop(L, best, false);
   st.n_pf_stolen++;
   return best;
+}
+
+// A miss that finds no landed slot to evict or steal: the slots not pinned by a step may still be reads in flight, the
+// names' (a run-ahead's names are unpinned at their step, a router's or an oracle's stay pinned by the name only). Once one
+// lands, victim or steal can take it: wait for the first such read (promoted to urgent). Which slot a miss gets never
+// changes the outputs, so waiting is always correct; only a pool whose every slot a step itself pins has none.
+bool Cache::wait_name_read(int L) {
+  SlotPool& S = pool(L);
+  for (int i = 0; i < S.cap; i++) {
+    const Slot& x = S.s[i];
+    if (x.pins == x.pf_pins && S.pending[i].load(std::memory_order_acquire) != 0) {
+      wait(L, i);
+      return true;
+    }
+  }
+  return false;
 }
 
 void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {

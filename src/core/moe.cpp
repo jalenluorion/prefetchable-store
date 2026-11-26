@@ -713,6 +713,7 @@ int Core::take_slot(int L, int e, int step) {
     return x2;
   };
   int x = grab();
+  while (x < 0 && cache.wait_name_read(L)) x = grab();  // names' reads in flight: one lands, its slot is taken
   if (x < 0) {  // phone sizes: the loop hold's pins go before an abort (pins only: the outputs cannot change), as in
                 // Core::moe_chunk; never reached while the pool holds the hold's worst case (12 x 2 x 8 + 8 on Inkling)
     bool any = false;

@@ -475,6 +475,7 @@ struct Cache {
   int pick_victim(int L, int reserve, double* val) const;     // value-ordered choice, no side effects; -1 if none
   void evict(int L, int slot);                                // take a slot chosen by pick_victim
   int steal(int L);                                           // a miss with every slot pinned: a slot held only by names
+  bool wait_name_read(int L);  // none to steal either: wait for a name's read in flight (false: no such read)
   void issue(int L, int slot, int e, bool urgent, long step = 0, float pp = 0.f);
   void wait(int L, int slot);
   // a wait longer than park_us (DMENG_WAIT_PARK_US; < 0 never) calls on_long_wait once (the core parks its pool's idle

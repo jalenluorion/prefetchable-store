@@ -366,6 +366,11 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
     if (x2 < 0) x2 = cache.steal(L);
     return x2;
   };
+  auto grab_wait = [&]() {  // = Core::take_slot's: names' reads in flight land first
+    int x2 = grab();
+    while (x2 < 0 && cache.wait_name_read(L)) x2 = grab();
+    return x2;
+  };
   // Batches (phone sizes): a union larger than the free slots is not an abort. The misses that find no slot after the
   // fallback below are deferred (slot -2) and run after the first batch in later batches, each batch's pins released
   // before the next takes slots (section "batches" below). Every (position, pick) row of C.eout is computed from the same
@@ -824,7 +829,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
         if (s >= 0) {
           cache.slot(L, s).pins++;
         } else {
-          s = grab();
+          s = run.empty() ? grab_wait() : grab();
           if (s < 0) break;  // the pool is full of this batch's pins
           if (cache.mem == Mem::PURGEABLE) cache.touch_nonvolatile(L, s);
           cache.issue(L, s, E.e, true, now_s);

@@ -30,7 +30,7 @@ generators and references), `MLX_PY` one with mlx and mlx-lm with the Inkling 2 
 | check | what it compares |
 |---|---|
 | reference | exact decode against an independent reference: `tests/<family>/tiny_check.py` (transformers' model for the 35B and Flash-Next, the PR's MLX model for Inkling, each given exactly the engine's weights): the fp32 reference path within 1e-4 of max \|logit\| where the family has one, the speed path's agreement |
-| invariance | exact mode: logits (300 positions) and greedy ids bit-identical with every expert held / few slots, 1 / 4 / 5 threads, router names, run-ahead, oracle replays |
+| invariance | exact mode: logits (300 positions) and greedy ids bit-identical with every expert held / few slots, 1 / 4 / 5 threads, router names, run-ahead, oracle replays; names + run-ahead with the names' reads held in flight (`DMENG_TEST_SPEC_READ_US`: a miss whose free slots are all still being read waits for one) |
 | prefill | batched prefill == single steps (dmserve --check: logits, fixed state, KV, greedy continuation; CPU, sub-chunks, GPU share, few slots) and dmeng's ids batched == token by token |
 | checkpoint | dmserve --check-ckpt (long / identical / diverging requests, each equal to a cold computation) and dmeng --state-check |
 | server | the server worker's greedy and sampled ids equal dmeng's |

@@ -9,7 +9,8 @@ checked):
   reference   exact decode against the independent reference: tests/<family>/tiny_check.py (its own python, --ref-python)
   invariance  exact mode: logits and greedy ids identical, bit for bit, with every expert held / few slots (evictions and
               re-reads), 1 / 4 / 5 compute threads, the folder's router naming, run-ahead, and an oracle replaying the
-              recorded routing at leads 1 and one token
+              recorded routing at leads 1 and one token; names + run-ahead with the names' reads held in flight
+              (DMENG_TEST_SPEC_READ_US: a miss finds every free slot still being read)
   prefill     the batched prefill equals single steps: dmserve --check (logits, fixed state, KV, greedy continuation; CPU,
               and the GPU's share on a Metal build), and dmeng's ids after a batched and a token-by-token prompt
   checkpoint  dmserve --check-ckpt (a long request, the same again, one diverging at 60%, each equal to a cold computation)
@@ -93,16 +94,16 @@ routers = sorted(os.path.join(M, ".dmeng", f) for f in os.listdir(os.path.join(M
 RT = ["--routers", routers[0], "--m", str(K)] if routers else []
 
 
-def dmeng(*flags, name="r"):
-    r = run([DMENG, "--model", M, *BASE, *flags])
+def dmeng(*flags, name="r", env=None):
+    r = run([DMENG, "--model", M, *BASE, *flags], env=env)
     if r.returncode:
         raise RuntimeError(f"dmeng {' '.join(flags)}: {(r.stdout + r.stderr)[-600:]}")
     return last_json(r)
 
 
-def logits(name, n, *flags):
+def logits(name, n, *flags, env=None):
     lp = os.path.join(T, name + ".f32")
-    js = dmeng("--teacher", os.path.join(T, f"ids{n}.txt"), "--dump-logits", lp, *flags)
+    js = dmeng("--teacher", os.path.join(T, f"ids{n}.txt"), "--dump-logits", lp, *flags, env=env)
     return open(lp, "rb").read(), js
 
 
@@ -156,12 +157,18 @@ if wanted("invariance"):
             reads.append(js.get("reads", 0))
             if g != base:
                 bad.append(nm)
+        if RT:  # names' reads held 3 ms in flight (one reader), as on a busy machine: a miss waits for one to land
+            b40, _ = logits("base40", 40, "--cache-gb", f"{ALL_GB:.6f}")
+            g, _ = logits("v40", 40, *FEW, *RT, "--run-ahead", str(K), "--readers", "1", env={"DMENG_TEST_SPEC_READ_US": "3000"})
+            if g != b40:
+                bad.append("few slots, router names + run-ahead, names' reads held in flight (40 positions)")
         g0, _ = greedy("g0", "--cache-gb", f"{ALL_GB:.6f}")
         g1, _ = greedy("g1", *FEW, *RT, "--threads", "1")
         if g0 != g1:
             bad.append("greedy ids, few slots / names / 1 thread")
         verdict("invariance", "FAIL" if bad else "PASS",
-                (f"differ: {', '.join(bad)}" if bad else f"{len(variants) + 1} runs identical (300 positions; reads per run {min(reads)}-{max(reads)})")
+                (f"differ: {', '.join(bad)}" if bad else f"{len(variants) + 1} runs identical (300 positions; reads per run {min(reads)}-{max(reads)})"
+                           + ("; names' reads held in flight: identical (40 positions)" if RT else ""))
                 + ("" if RT else "; the folder has no router file"))
     except Exception as e:
         verdict("invariance", "FAIL", str(e)[-400:])
