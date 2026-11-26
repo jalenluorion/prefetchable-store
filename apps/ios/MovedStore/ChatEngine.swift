@@ -13,14 +13,18 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
     var role: Role
     var content: String
-    /// App-supplied context appended only to the engine copy of the message.
+    /// App-supplied context added only to the engine copy of the message: after the text (messages saved before
+    /// 2026-11-26), or before it when `noteFirst` (the device date at the start of a user turn: known before the user
+    /// types, so the idle-time warm-up and type-ahead compute it ahead).
     var modelNote: String?
+    var noteFirst: Bool?
 
-    init(id: UUID = UUID(), role: Role, content: String, modelNote: String? = nil) {
+    init(id: UUID = UUID(), role: Role, content: String, modelNote: String? = nil, noteFirst: Bool? = nil) {
         self.id = id
         self.role = role
         self.content = content
         self.modelNote = modelNote
+        self.noteFirst = noteFirst
     }
 
     /// The chat-template input.

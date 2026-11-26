@@ -585,16 +585,17 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     }
 
     /// Bring the system prompt's state into the engine (idle time: at launch and when a new chat opens).
-    func warmSystem(_ system: String) async {
-        await warm([ChatMessage(role: .system, content: system)], why: "system prompt")
+    func warmSystem(_ system: String, nextPrefix: String = "") async {
+        await warm([ChatMessage(role: .system, content: system)], why: "system prompt", nextPrefix: nextPrefix)
     }
 
     /// The ids of the next turn's head: `msgs` (rendered for the engine) and the next user message's header, i.e. where
     /// two renders of msgs + one more user message with different contents stop agreeing (the Qwen template refuses a
-    /// system message alone, so the head is found this way).
-    static func nextHead(_ c: TextCodec, _ msgs: [[String: String]], thinking: Bool) -> [Int]? {
-        guard let a = try? c.promptIds(messages: msgs + [["role": "user", "content": "a"]], thinking: thinking),
-              let b = try? c.promptIds(messages: msgs + [["role": "user", "content": "b"]], thinking: thinking) else { return nil }
+    /// system message alone, so the head is found this way). `prefix`: what the next user turn starts with (its device
+    /// date note), so the head includes it.
+    static func nextHead(_ c: TextCodec, _ msgs: [[String: String]], thinking: Bool, prefix: String = "") -> [Int]? {
+        guard let a = try? c.promptIds(messages: msgs + [["role": "user", "content": prefix + "a"]], thinking: thinking),
+              let b = try? c.promptIds(messages: msgs + [["role": "user", "content": prefix + "b"]], thinking: thinking) else { return nil }
         var n = 0
         while n < min(a.count, b.count) && a[n] == b[n] { n += 1 }
         return n > 0 ? Array(a.prefix(n)) : nil
@@ -611,12 +612,13 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     /// Idle-time work (launch, a new chat, a chat opened, the end of a reply): the live state brought to `messages`
     /// plus the next user message's header, state only (dm_sync without logits), and kept on disk there. The system
     /// boundary is the first mark (its disk file pinned); a chat's file is the one a relaunch restores. A message sent
-    /// next then computes only its own text and the generation prompt.
-    func warm(_ messages: [ChatMessage], why: String) async {
+    /// next then computes only its own text and the generation prompt. `nextPrefix`: the start of the next user turn
+    /// (its device date note, when it carries one), computed here with its header.
+    func warm(_ messages: [ChatMessage], why: String, nextPrefix: String = "") async {
         guard let m = lock.withLock({ model }), let c = lock.withLock({ codec }) else { return }
         let think = thinking
         let msgs = templateMessages(messages, mode: HistoryMode.current)
-        guard let head = Self.nextHead(c, msgs, thinking: think), head.count > 1 else { return }
+        guard let head = Self.nextHead(c, msgs, thinking: think, prefix: nextPrefix), head.count > 1 else { return }
         var marks: [Int32] = []
         if msgs.first?["role"] == "system", let sb = systemBoundary(c, system: msgs[0], thinking: think)?.count, sb <= head.count {
             marks.append(Int32(sb))
@@ -653,7 +655,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     /// `full` (after a pause in typing): instead the whole prompt as it would be sent now (the draft as the user message
     /// and the generation prompt), with its logits, so a send of exactly this draft computes nothing. Speculative: any
     /// keystroke cancels it (draftEdited).
-    func typeAhead(_ a: [ChatMessage], _ b: [ChatMessage], full: [ChatMessage]? = nil, text: String = "") {
+    func typeAhead(_ a: [ChatMessage], _ b: [ChatMessage], full: [ChatMessage]? = nil, text: String = "", prefix: String = "") {
         let tReq = ProcessInfo.processInfo.systemUptime
         guard let m = lock.withLock({ model }), let c = lock.withLock({ codec }) else { return }
         let think = thinking
@@ -661,10 +663,11 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         // tokenizer alone (no template render per keystroke; a boundary token that differs only costs the reuse: the
         // send's sync starts from the longest common prefix)
         let hist = Array(a.dropLast())
-        let hkey = "\(hist.count)|\(hist.last?.content.hashValue ?? 0)|\(hist.first?.content.hashValue ?? 0)|\(think)"
+        // `prefix`: the start of the user turn before the draft (its device date note): part of the head
+        let hkey = "\(hist.count)|\(hist.last?.content.hashValue ?? 0)|\(hist.first?.content.hashValue ?? 0)|\(think)|\(prefix)"
         var head: [Int]? = lock.withLock { taHeadKey == hkey ? taHead : nil }
         if head == nil {
-            head = Self.nextHead(c, templateMessages(hist, mode: HistoryMode.current), thinking: think)
+            head = Self.nextHead(c, templateMessages(hist, mode: HistoryMode.current), thinking: think, prefix: prefix)
             if let h = head { lock.withLock { taHeadKey = hkey; taHead = h } }
         }
         guard let head, !text.isEmpty else { return }
@@ -689,7 +692,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let mk = marks, nn = n
         m.queue.async { [weak self] in
             guard let self, self.lock.withLock({ self.taGen == gen && !self.cancelled }) else { return }
-            self.lock.withLock { self.taInflight = ids; self.taInflightFull = isFull; self.taInflightText = text }
+            // the text the send compares with (the user turn as sent, its note included)
+            self.lock.withLock { self.taInflight = ids; self.taInflightFull = isFull; self.taInflightText = isFull ? text : prefix + text }
             let t0 = Date()
             let tStart = ProcessInfo.processInfo.systemUptime
             var lg = [Float](repeating: 0, count: isFull ? m.vocab : 0)

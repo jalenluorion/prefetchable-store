@@ -128,6 +128,7 @@ struct ConversationFile: Codable {
         var role: ChatMessage.Role
         var content: String
         var modelNote: String?
+        var modelNoteFirst: Bool?  // the note before the text (absent: after it, the layout before 2026-11-26)
         var meta: MessageMeta?
     }
     var format = ConversationStore.format
@@ -148,7 +149,7 @@ struct ConversationFile: Codable {
         systemPrompt = c.systemPrompt; thinking = c.thinking; tools = c.tools; contextTokens = c.contextTokens
         model = c.model.rawValue
         messages = c.visible.map {
-            Message(id: $0.id, role: $0.role, content: $0.content, modelNote: $0.modelNote, meta: c.meta[$0.id])
+            Message(id: $0.id, role: $0.role, content: $0.content, modelNote: $0.modelNote, modelNoteFirst: $0.noteFirst, meta: c.meta[$0.id])
         }
     }
 
@@ -159,7 +160,7 @@ struct ConversationFile: Codable {
         c.tools = tools
         c.model = model.flatMap(ModelKind.init(rawValue:)) ?? .qwen36
         for m in messages where m.role != .system {
-            c.messages.append(ChatMessage(id: m.id, role: m.role, content: m.content, modelNote: m.modelNote))
+            c.messages.append(ChatMessage(id: m.id, role: m.role, content: m.content, modelNote: m.modelNote, noteFirst: m.modelNoteFirst))
             if let x = m.meta { c.meta[m.id] = x }
         }
         return c

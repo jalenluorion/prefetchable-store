@@ -499,9 +499,10 @@ final class ChatModel: ObservableObject {
         if ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue { return }
         let t = String(text.drop(while: { $0.isWhitespace }))
         let id = conv.id
-        let dateNote = ToolSettings.dateNote()
+        let note = conversation(id).flatMap { Self.nextNote($0) }
+        let notePrefix = note.map { $0 + "\n\n" } ?? ""
         func msgs(_ c: Conversation, _ content: String) -> [ChatMessage] {
-            engineMessages(c.messages + [ChatMessage(role: .user, content: content, modelNote: dateNote)], tools: c.toolsOn)
+            engineMessages(c.messages + [ChatMessage(role: .user, content: content, modelNote: note, noteFirst: note == nil ? nil : true)], tools: c.toolsOn)
         }
         // after a pause (300 ms without a keystroke): the whole prompt as it would be sent now, with its logits
         let whole = t.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -511,7 +512,7 @@ final class ChatModel: ObservableObject {
                 guard !Task.isCancelled, !self.isGenerating, let c = self.conversation(id) else { return }
                 let a = msgs(c, whole + " a"), b = msgs(c, whole + " b"), f = msgs(c, whole)
                 let sent = f.last(where: { $0.role == .user })?.content ?? whole
-                await Task.detached(priority: .userInitiated) { d.typeAhead(a, b, full: f, text: sent) }.value
+                await Task.detached(priority: .userInitiated) { d.typeAhead(a, b, full: f, text: sent, prefix: notePrefix) }.value
             }
         }
         guard let r = t.rangeOfCharacter(from: .whitespacesAndNewlines, options: .backwards) else { return }
@@ -524,7 +525,7 @@ final class ChatModel: ObservableObject {
             if !boundary { try? await Task.sleep(nanoseconds: 300_000_000) }
             guard !Task.isCancelled, !self.isGenerating, let c = self.conversation(id) else { return }
             let a = msgs(c, stable + " a"), b = msgs(c, stable + " b")
-            await Task.detached(priority: .userInitiated) { d.typeAhead(a, b, text: stable) }.value
+            await Task.detached(priority: .userInitiated) { d.typeAhead(a, b, text: stable, prefix: notePrefix) }.value
         }
     }
 
@@ -537,8 +538,9 @@ final class ChatModel: ObservableObject {
               let c = conversation(id), c.hasUserMessage, c.model == d.loadedKind else { return }
         // rendered with an (empty) next user message, then without it: earlier turns exactly as the next request renders them
         let msgs = Array(engineMessages(c.messages + [ChatMessage(role: .user, content: "")], tools: c.toolsOn).dropLast())
+        let next = Self.nextNote(c).map { $0 + "\n\n" } ?? ""  // the next turn's date note, computed with its header
         let prev = warmTask
-        let t = Task { await prev?.value; await d.warm(msgs, why: why) }
+        let t = Task { await prev?.value; await d.warm(msgs, why: why, nextPrefix: next) }
         warmTask = t
         Task { await t.value; if self.warmTask == t { self.warmTask = nil } }
     }
@@ -625,7 +627,8 @@ final class ChatModel: ObservableObject {
         let system = effectiveSystem(conv).trimmingCharacters(in: .whitespacesAndNewlines)
         guard engineState == .ready, prefixCache, !system.isEmpty, !isGenerating, warmTask == nil,
               let d = engine as? DmengChatEngine else { return }
-        let t = Task { await d.warmSystem(system) }
+        let next = (conv.hasUserMessage ? Self.nextNote(conv) : ToolSettings.dateNote()).map { $0 + "\n\n" } ?? ""
+        let t = Task { await d.warmSystem(system, nextPrefix: next) }
         warmTask = t
         await t.value
         warmTask = nil
@@ -748,7 +751,8 @@ final class ChatModel: ObservableObject {
         let assistant = ChatMessage(role: .assistant, content: "")
         var aid = assistant.id
         updateConv(convID) { c in
-            c.messages.append(ChatMessage(role: .user, content: prompt, modelNote: ToolSettings.dateNote()))
+            let note = Self.nextNote(c)
+            c.messages.append(ChatMessage(role: .user, content: prompt, modelNote: note, noteFirst: note == nil ? nil : true))
             if !c.titleIsCustom && c.title.isEmpty { c.title = Conversation.title(from: prompt) }
         }
         let history = conv.messages
@@ -972,6 +976,14 @@ final class ChatModel: ObservableObject {
     }
 
     /// Render hidden app notes and preserve the assistant prefix across tool calls.
+    /// The device date note for a chat's next user turn: on its first turn, and later only when the device's date
+    /// differs from the last one the chat was given (a same-day follow-up carries none). Placed before the user's text.
+    static func nextNote(_ c: Conversation) -> String? {
+        let today = ToolSettings.dateNote()
+        let last = c.messages.last(where: { $0.role == .user && $0.modelNote != nil })?.modelNote
+        return last == today ? nil : today
+    }
+
     func engineMessages(_ msgs: [ChatMessage], tools: Bool) -> [ChatMessage] {
         var out = msgs.filter { !($0.role == .assistant && $0.content.isEmpty) }
         if out.first?.role == .system {
@@ -980,11 +992,15 @@ final class ChatModel: ObservableObject {
             let system = ToolSettings.systemContent("", tools: tools)
             if !system.isEmpty { out.insert(ChatMessage(role: .system, content: system), at: 0) }
         }
+        var dated = false  // a device date given at or before this turn (a later same-day turn carries none)
         for i in out.indices {
+            if out[i].modelNote != nil { dated = true }
             if tools && out[i].role == .user {
-                out[i].content = SearchHint.engineContent(out[i].content, hasDeviceDate: out[i].modelNote != nil)
+                out[i].content = SearchHint.engineContent(out[i].content, hasDeviceDate: dated)
             }
-            if let note = out[i].modelNote { out[i].content += "\n\n" + note }
+            if let note = out[i].modelNote {
+                out[i].content = out[i].noteFirst == true ? note + "\n\n" + out[i].content : out[i].content + "\n\n" + note
+            }
         }
         if let u = out.lastIndex(where: { $0.role == .user }) {
             for i in out.indices where i > u && out[i].role == .assistant && !out[i].content.contains("</think>") {
