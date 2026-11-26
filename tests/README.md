@@ -34,7 +34,7 @@ generators and references), `MLX_PY` one with mlx and mlx-lm with the Inkling 2 
 | prefill | batched prefill == single steps (dmserve --check: logits, fixed state, KV, greedy continuation; CPU, sub-chunks, GPU share, few slots) and dmeng's ids batched == token by token |
 | checkpoint | dmserve --check-ckpt (long / identical / diverging requests, each equal to a cold computation) and dmeng --state-check |
 | server | the server worker's greedy and sampled ids equal dmeng's |
-| drafting | --verify-check (verify passes with rollbacks == single steps), --draft fixed / lookup == plain decoding (greedy, sampled), the server worker the same; a family without a verify pass: dmeng and dmserve must refuse `--draft`, `--drafts 1`, `--verify-check` |
+| drafting | --verify-check (verify passes with rollbacks == single steps), --draft fixed / lookup == plain decoding (greedy, sampled), the server worker the same; the C API's `dm_step_n` == `dm_step` + `dm_sample` with drafts off and on (greedy, sampled, penalties), tokens per step above 1 with fragments and on a regenerated reply, the draft counters reported, the iOS slab's reserve; a family without a verify pass: dmeng, dmserve and the C API must refuse `--draft`, `--drafts 1`, `--verify-check`, also a declared default |
 | presets | the precedence (explicit > profile > manifest > built-in) for every declared profile in dmeng, the C API and dmserve, read back from each one's `"resolved"` JSON, and the three printing the same settings |
 | files | every engine-ready file in the cache folder is listed in the manifest with its sha256, the manifest declares its 8-bit rule (`resident.q8_rule`), and a copy of the in-memory file with one byte changed is refused at load |
 | caps | per-layer caps of 2K + 4 slots, the routers naming K per step: `--layer-caps uniform:fit` refuses no name the layer can hold (the fixed reserve refuses most), ids identical with caps, fit caps and one pool |
@@ -65,7 +65,7 @@ lines for a comparison made outside them.
 | `qwen4_exp/chat_check.py FOLDER` | Flash-Next's chat format (python/serve/qwen4_exp) against transformers' apply_chat_template on the release's text files: token ids of conversations with tools, tool results and every reasoning effort; parsing a generated turn | the release's tokenizer and template files, transformers |
 | `inkling2_loop/tiny_check.py` | dmeng on the tiny random Inkling against the MLX model of the release (the fp32 path within 1e-4 with the bf16 and the engine's 8-bit resident), exact across budgets and oracle replays | `TINY`, numpy, mlx, mlx-lm (PR 2086) |
 | `prefill_check.sh MODEL_DIR` | a batched prefill leaves byte-identical logits, state and KV to single decode steps, and the same greedy continuation | a real model folder |
-| `c_api/dm_gate.c` (driver, built as `dm_gate`) | greedy ids through the C API only (optional mid-decode budget change and cancel test), to compare with dmeng's | a real model folder |
+| `c_api/dm_gate.c` (driver, built as `dm_gate`) | ids through the C API only, greedy or sampled with the app's sampler, through `dm_step` or `dm_step_n` (drafting: `--draft`, `--skeleton`, `--repeat`; arms in one process: `--arms`), optional mid-decode budget change and cancel test, to compare with dmeng's | a real model folder |
 | `evict_check/evict_check.cpp` (driver) | the cache's eviction decisions on a recorded routing, one line per eviction, to compare with the offline simulator | a recorded routing |
 
 ## Optional: the real models against an independent MLX runner
