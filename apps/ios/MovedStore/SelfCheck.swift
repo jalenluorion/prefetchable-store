@@ -44,16 +44,42 @@ enum SelfCheck {
     /// engine reopened in Exact and in Fast, each decoding the Pittsburgh prompt and the coding prompt (357 ids) greedily
     /// for `exactTokens`, with the engine's counters for the decode steps only. `-selfcheck-verify` also hashes the files.
     static let codeIds = [248045,846,198,40,2688,3133,383,264,2526,12654,2393,421,43303,18805,1433,7189,321,17657,287,1070,310,12977,13,9170,2706,1010,7189,513,5384,321,22217,279,1788,3150,369,5158,10598,13,5514,369,279,523,25,271,71093,12305,198,464,29174,11,854,11,2857,271,1005,417,27150,25,198,262,687,1259,2251,3676,701,11,1752,11,1866,11789,28,16,15,15,11,1866,30997,625,28,17,13,15,1590,198,285,638,3745,283,1752,198,285,638,6469,11789,283,1866,11789,198,285,638,6469,30997,625,283,1866,30997,625,198,285,638,43007,283,2958,198,285,638,7155,24230,283,2168,198,285,638,20362,283,29174,30371,363,198,285,29174,30977,8373,7424,1385,66032,11,37993,3497,553,2388,363,271,262,687,884,1153,11,1347,1590,198,285,440,638,20362,25,198,309,413,524,638,43007,25,198,388,638,7155,24230,283,854,6177,363,198,309,638,43007,1989,20009,8,198,285,413,2343,1153,43007,8,2518,638,6469,11789,25,198,309,638,22320,363,271,262,687,696,66032,1153,1590,198,285,1345,2912,25,198,309,854,10795,7,15,13,16,8,198,309,413,638,7155,24230,321,854,6177,363,471,638,7155,24230,835,638,6469,30997,625,25,198,388,638,22320,363,271,262,687,17657,1153,1590,198,285,3470,283,638,43007,198,285,440,1724,1153,3745,11,328,64,871,430,281,25,198,309,364,427,303,3470,25,198,388,281,3708,9028,20868,2515,8,478,2823,77,871,198,285,440,638,20362,25,198,309,638,43007,283,2958,198,309,638,7155,24230,283,2168,198,71093,271,9592,1396,6741,303,411,1970,11,10033,1204,1754,799,31130,466,40922,7189,11,321,2873,264,34773,2243,13,13262,279,569,3622,279,1788,11,321,884,264,3160,363,1654,421,17657,287,8554,369,2047,13,248046,198,248045,74455,198,248068,198]
-    static let followPrompt = "And why are sunsets red?"
+    /// -selfcheck-chat-p2: the 2026-11-23 chat rows' own messages (P2.md 0f / 0h): a short first message, its follow-up,
+    /// the relaunch follow-up, and a new chat with a 250-word answer (the chat path's decode); else the self-check's own.
+    static let p2 = ProcessInfo.processInfo.arguments.contains("-selfcheck-chat-p2")
+    static let p2First = "What is the capital of Japan? One sentence.", p2Follow = "And its population, roughly?"
+    static let p2Resume = "Name one famous temple there.", p2Long = "Describe the history of Kyoto in about 250 words."
+    /// -selfcheck-typed: each message typed into the composer at 5 characters per second (the composer's type-ahead
+    /// path, ChatModel.draftChanged, per character) and sent 0.5 s after the last one, as the 2026-11-23 typed rows.
+    static let typed = ProcessInfo.processInfo.arguments.contains("-selfcheck-typed")
+    static var followPrompt: String { p2 ? p2Follow : "And why are sunsets red?" }
     /// -selfcheck-resume: the follow-up sent to the kept chat after a relaunch.
-    static let resumePrompt = "And why is the sea blue?"
+    static var resumePrompt: String { p2 ? p2Resume : "And why is the sea blue?" }
     /// -selfcheck-keep-chat: the chat's id and the states that existed before it, for the next launch's -selfcheck-resume.
     static var keptURL: URL { docsURL.appendingPathComponent("selfcheck-kept-chat.txt") }
     /// -selfcheck-chat-long: the new chat's first message is this long request (about 460 tokens) instead of chatPrompt.
     static let longPrompt = """
     I am writing a small command-line tool in Python that reads a folder of CSV files, each one a day of readings from a set     of temperature sensors, and produces a weekly summary. Every file has a header row with the columns timestamp,     sensor_id, temperature_c and status, where status is either ok, warn or fault. Some files have rows out of order, some     have duplicated rows, and a few have temperatures recorded as empty strings when a sensor dropped out. The tool should     accept the folder path and an optional start date on the command line, read only the seven files that fall in the week     beginning on that date (or the most recent full week when no date is given), and skip any file it cannot parse while     printing a warning that names the file and the line number of the first bad row. For each sensor it should report the     number of readings, the minimum, maximum and mean temperature over the week ignoring empty values, the number of warn     and fault rows, and the longest stretch of consecutive hours with no reading at all. Duplicated rows should be counted     once. The summary should be printed as an aligned table sorted by sensor id, and also written to a JSON file next to the     input folder when a flag asks for it. Please explain how you would structure the program into functions, which parts of     the standard library you would use for the dates, the CSV parsing and the command-line arguments, how you would handle     time zones if the timestamps carry an offset, and how you would test the gap computation and the duplicate handling     without real sensor files. Then write the core function that takes the parsed rows for one sensor and returns its     summary, with comments, and list the edge cases you would cover in its tests, such as a sensor with a single reading,     a week where a sensor never reports, readings exactly on the hour boundaries, and a fault row with an empty temperature.
     """
-    static var firstPrompt: String { ProcessInfo.processInfo.arguments.contains("-selfcheck-chat-long") ? longPrompt : chatPrompt }
+    /// -selfcheck-chat-tokens N: the most tokens each chat reply generates (160 when not given).
+    static var chatTokens: Int { Int(arg("-selfcheck-chat-tokens") ?? "") ?? 160 }
+    /// -selfcheck-chat-date: the first message asks for today's date (the device date note's check).
+    static let dateQuestion = "What is today's date?"
+    static var firstPrompt: String {
+        let a = ProcessInfo.processInfo.arguments
+        return a.contains("-selfcheck-chat-long") ? longPrompt : a.contains("-selfcheck-chat-date") ? dateQuestion : p2 ? p2First : chatPrompt
+    }
+    /// A message sent at once, or typed first (-selfcheck-typed).
+    static func send(_ model: ChatModel, _ text: String, maxNew: Int) async -> ReplyRecord {
+        if typed {
+            for i in 1...max(1, text.count) {
+                model.draftChanged(String(text.prefix(i)))
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+        }
+        return await model.reply(to: text, maxNew: maxNew)
+    }
     /// Inkling's prompts: Documents/p2/ink_pitt_ids.txt and ink_code_ids.txt (the Nov 23 phone runs' files), else its
     /// Pittsburgh prompt built in (the coding row is then left out).
     static let inkPittBuiltIn = [371, 151698, 149879, 149876, 152652, 149879, 220, 136558, 165300, 149899]
@@ -128,7 +154,7 @@ enum SelfCheck {
         }
         // conversations a self-check made and could not delete (a run that was stopped): only the self-check's own two
         // prompts in them, nothing else
-        let mine: Set<String> = [chatPrompt, followPrompt, longPrompt, resumePrompt]
+        let mine: Set<String> = [chatPrompt, "And why are sunsets red?", longPrompt, "And why is the sea blue?", p2First, p2Follow, p2Resume, p2Long, dateQuestion]
         for c in ConversationStore.loadAll() {
             let users = c.messages.filter { $0.role == .user }.map(\.content)
             if !users.isEmpty && users.allSatisfy({ mine.contains($0) }) {
@@ -178,46 +204,50 @@ enum SelfCheck {
     /// `-selfcheck-remove-35b`: the swap's removal (approved procedure): the 35B's model folder (Documents/dmeng-model) and
     /// its saved states (Application Support/<bundle>/dmeng-prefix) are deleted, every file logged with its size; nothing
     /// else (conversations, Inkling's folder and states, settings) is touched. Then the result is written and the app exits.
-    static func remove35B() -> [String: Any] {
+    static func remove35B() -> [String: Any] { removeModel(.qwen36, states: true, tag: "remove-35b") }
+
+    /// `-selfcheck-remove-inkling`: Inkling's model folder (Documents/dmeng-model-inkling) only, the same way; its saved
+    /// states, the conversations, the 35B's folder and the settings are kept.
+    static func removeModel(_ kind: ModelKind, states: Bool, tag: String) -> [String: Any] {
         let fm = FileManager.default
         var r: [String: Any] = ["free_before": freeGB()]
         var files: [[String: Any]] = []
         var total: Int64 = 0
-        for root in [ModelKind.qwen36.folder, DmengLaunch.prefixDir(.qwen36)] {
+        for root in [kind.folder] + (states ? [DmengLaunch.prefixDir(kind)] : []) {
             if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) {
                 for case let u as URL in e {
                     guard let v = try? u.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]), v.isRegularFile == true else { continue }
                     let n = Int64(v.fileSize ?? 0)
                     total += n
                     files.append(["path": u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: ""), "bytes": n])
-                    log("SELFCHECK remove-35b \(u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: "")) (\(n) bytes)")
+                    log("SELFCHECK \(tag) \(u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: "")) (\(n) bytes)")
                 }
             }
-            do { try fm.removeItem(at: root); log("SELFCHECK remove-35b removed \(root.lastPathComponent)/") }
+            do { try fm.removeItem(at: root); log("SELFCHECK \(tag) removed \(root.lastPathComponent)/") }
             catch {
                 // a folder copied onto the phone by cable is not the app's to unlink from: each file is emptied in place
                 // instead (its space freed; the empty name stays, and a later copy overwrites it)
-                log("SELFCHECK remove-35b could not remove \(root.lastPathComponent)/ (\(error.localizedDescription)): emptying its files")
+                log("SELFCHECK \(tag) could not remove \(root.lastPathComponent)/ (\(error.localizedDescription)): emptying its files")
                 var emptied = 0
                 if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) {
                     for case let u as URL in e {
                         guard (try? u.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
                         if (try? fm.removeItem(at: u)) != nil { emptied += 1; continue }
                         if let h = try? FileHandle(forWritingTo: u) {
-                            do { try h.truncate(atOffset: 0); emptied += 1 } catch { log("SELFCHECK remove-35b could not empty \(u.lastPathComponent): \(error)") }
+                            do { try h.truncate(atOffset: 0); emptied += 1 } catch { log("SELFCHECK \(tag) could not empty \(u.lastPathComponent): \(error)") }
                             try? h.close()
-                        } else { log("SELFCHECK remove-35b could not open \(u.lastPathComponent)") }
+                        } else { log("SELFCHECK \(tag) could not open \(u.lastPathComponent)") }
                     }
                 }
                 r["emptied_\(root.lastPathComponent)"] = emptied
-                log("SELFCHECK remove-35b emptied \(emptied) files in \(root.lastPathComponent)/")
+                log("SELFCHECK \(tag) emptied \(emptied) files in \(root.lastPathComponent)/")
             }
         }
         r["files"] = files
         r["bytes"] = total
         r["free_after"] = freeGB()
         r["conversations"] = ConversationStore.loadAll().count
-        log("SELFCHECK remove-35b: \(files.count) files, \(total) bytes; free \(freeGB())")
+        log("SELFCHECK \(tag): \(files.count) files, \(total) bytes; free \(freeGB())")
         return r
     }
 
@@ -245,6 +275,11 @@ enum SelfCheck {
         optsOverride = arg("-selfcheck-opts")  // model options for every open of this launch (a measurement's setting)
         if let m = arg("-selfcheck-mode") { modeOverride = m; out["mode_override"] = m }  // the launch's mode (exact / fast)
         if let o = optsOverride { out["opts"] = o }
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-inkling") {
+            out["remove_inkling"] = removeModel(.inkling, states: false, tag: "remove-inkling")
+            finish()
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-35b") {
             out["remove_35b"] = remove35B()
             finish()
@@ -314,16 +349,68 @@ enum SelfCheck {
             return
         }
 
+        // -selfcheck-thermal: the thermal state at launch only (the waits between measurement arms), then exit
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-thermal") {
+            out["thermal"] = thermal()
+            log("SELFCHECK thermal \(thermal())")
+            finish()
+            return
+        }
+
+        // -selfcheck-teach "FILE:P,FILE:P": per Documents/FILE (comma-separated ids), its first P ids synced as the prompt
+        // and the rest teacher-forced in this launch's mode (-selfcheck-mode, -selfcheck-opts): per position the argmax and
+        // the true next token's NLL, with the forced steps' counters; one arm per launch (the arms are compared on the Mac)
+        if let spec = arg("-selfcheck-teach"), let d = model.engine as? DmengChatEngine {
+            model.startOnce()
+            for _ in 0..<900 where model.engineState != .ready {
+                if case .failed = model.engineState { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            out["engine_default"] = model.engineState.label
+            if model.engineState == .ready {
+                out["resolved_default"] = resolved(d.selfCheckStats)
+                var texts: [[String: Any]] = []
+                for item in spec.split(separator: ",") {
+                    let parts = item.split(separator: ":")
+                    guard parts.count == 2, let p = Int(parts[1]), let ids = idsFile(String(parts[0])), ids.count > p else {
+                        texts.append(["file": String(item), "error": "no ids"]); continue
+                    }
+                    let th = thermal()
+                    do {
+                        let t = try await d.selfCheckTeach(Array(ids.prefix(p)), cont: Array(ids.dropFirst(p)))
+                        texts.append(["file": String(parts[0]), "prompt": p, "n": t.top.count, "top": t.top, "nll": t.nll,
+                                      "decode_s": t.seconds, "tok_per_s": Double(t.top.count) / max(1e-9, t.seconds), "prefill_s": t.prefillSeconds,
+                                      "stats": json(t.decodeStats), "thermal_start": th, "thermal_end": thermal()] as [String: Any])
+                        log("SELFCHECK teach \(parts[0]): \(t.top.count) positions, \(String(format: "%.2f", Double(t.top.count) / max(1e-9, t.seconds))) tok/s, mean nll \(String(format: "%.4f", t.nll.reduce(0, +) / Double(max(1, t.nll.count)))), thermal \(th) -> \(thermal())")
+                    } catch {
+                        texts.append(["file": String(parts[0]), "error": String(describing: error)])
+                    }
+                }
+                out["teach"] = texts
+            }
+            out["memory_warnings"] = model.memoryWarnings
+            out["thermal_end"] = thermal()
+            finish()
+            return
+        }
+
         // -selfcheck-agree N: the coding prompt in Exact, N greedy ids E (with the prompt's time and reads); then in Fast the
         // same prompt and E teacher-forced: top-choice agreement with Exact over the N positions after the prompt
         if let ns = arg("-selfcheck-agree"), let n = Int(ns), let d = model.engine as? DmengChatEngine, let prompt = codeRowIds {
             var res: [String: Any] = ["prompt_ids": prompt.count, "n": n]
-            for mode in ["exact", "fast"] {
+            // -selfcheck-agree-fast-opts "A|B|...": one Fast arm per model-options string (e.g. run:mode=approx:drop:w=0.15),
+            // each against the one Exact reference (stored as fast_1_*, fast_2_*, ...); without it one Fast arm (fast_*)
+            let fastOpts = arg("-selfcheck-agree-fast-opts")?.split(separator: "|").map(String.init)
+            let arms: [(String, String, String?)] = [("exact", "exact", nil)]
+                + (fastOpts.map { $0.enumerated().map { ("fast", "fast_\($0.offset + 1)", Optional($0.element)) } } ?? [("fast", "fast", nil)])
+            for (mode, key, opts) in arms {
                 modeOverride = mode
+                optsOverride = opts ?? arg("-selfcheck-opts")
+                if let opts { res["\(key)_opts"] = opts }
                 await d.unload()
                 model.engineState = .idle
                 await model.load()
-                guard model.engineState == .ready else { res["\(mode)_engine"] = model.engineState.label; continue }
+                guard model.engineState == .ready else { res["\(key)_engine"] = model.engineState.label; continue }
                 if mode == "exact" {
                     if let g = try? await d.selfCheckGreedy(prompt, n: n) {
                         res["exact_ids"] = g.ids
@@ -331,17 +418,18 @@ enum SelfCheck {
                         res["exact_prefill"] = json(g.prefillJSON)
                     }
                 } else if let e = res["exact_ids"] as? [Int], let f = try? await d.selfCheckForced(prompt, cont: e) {
-                    res["fast_agree"] = Double(f.agree) / Double(max(1, f.n))
-                    res["fast_first_diff"] = f.firstDiff
-                    res["fast_prefill_s"] = f.prefillSeconds
-                    res["fast_prefill"] = json(f.prefillJSON)
-                    res["fast_top"] = f.top
-                    res["fast_stats"] = json(d.selfCheckStats)
-                    log("SELFCHECK agree fast vs exact \(f.agree)/\(f.n), first diff \(f.firstDiff), fast prompt \(String(format: "%.1f", f.prefillSeconds)) s")
+                    res["\(key)_agree"] = Double(f.agree) / Double(max(1, f.n))
+                    res["\(key)_first_diff"] = f.firstDiff
+                    res["\(key)_prefill_s"] = f.prefillSeconds
+                    res["\(key)_prefill"] = json(f.prefillJSON)
+                    res["\(key)_top"] = f.top
+                    res["\(key)_stats"] = json(d.selfCheckStats)
+                    log("SELFCHECK agree \(key)\(opts.map { " (\($0))" } ?? "") vs exact \(f.agree)/\(f.n), first diff \(f.firstDiff), fast prompt \(String(format: "%.1f", f.prefillSeconds)) s")
                 }
-                res["\(mode)_mem"] = mem("agree \(mode)")
+                res["\(key)_mem"] = mem("agree \(key)")
             }
             modeOverride = nil
+            optsOverride = nil
             out["agree"] = res
             finish()
             return
@@ -423,7 +511,7 @@ enum SelfCheck {
                 model.open(id)
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 let th = thermal()
-                let r = await model.reply(to: resumePrompt, maxNew: 160)
+                let r = await send(model, resumePrompt, maxNew: 160)
                 out["resume"] = chatRow(r, thermal0: th)
                 out["resume_last_reply"] = lastReply(model, "after relaunch")
             }
@@ -465,7 +553,8 @@ enum SelfCheck {
             let pk = Peak()
             Thread { while pk.on { pk.v = max(pk.v, MemProbe.read("").physFootprint); usleep(50_000) } }.start()
             out["chat_regions_before"] = regions()
-            let r1 = await model.reply(to: firstPrompt, maxNew: 160)
+            if typed { out["typed"] = true }
+            let r1 = await send(model, firstPrompt, maxNew: chatTokens)
             let id = model.conversations.first { $0.messages.contains { $0.role == .user && $0.content == firstPrompt } }?.id
             out["chat"] = chatRow(r1, thermal0: th)
             out["chat_last_reply"] = lastReply(model, "chat")
@@ -476,9 +565,19 @@ enum SelfCheck {
                                          return ["memory": j?["memory"] ?? NSNull(), "prefix_cache": j?["prefix_cache"] ?? NSNull()] as [String: Any] }()
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             th = thermal()
-            let r2 = await model.reply(to: followPrompt, maxNew: 160)
+            let r2 = await send(model, followPrompt, maxNew: chatTokens)
             out["chat_followup"] = chatRow(r2, thermal0: th)
             out["chat_followup_last_reply"] = lastReply(model, "follow-up")
+            if p2 {  // a new chat with the 250-word answer, sent at once (the chat path's decode row)
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                model.newConversation()
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                th = thermal()
+                let r3 = await model.reply(to: p2Long, maxNew: 300)
+                out["chat_long_answer"] = chatRow(r3, thermal0: th)
+                out["chat_long_answer_last_reply"] = lastReply(model, "250-word answer")
+                if let id3 = model.conversations.first(where: { $0.messages.contains { $0.role == .user && $0.content == p2Long } })?.id { model.delete(id3) }
+            }
             pk.on = false
             out["chat_peak_all_gb"] = Double(pk.v) / 1e9
             out["chat_regions_end"] = regions()

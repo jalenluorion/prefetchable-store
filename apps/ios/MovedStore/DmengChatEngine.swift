@@ -814,6 +814,34 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         }
     }
     var selfCheckStats: String { lock.withLock { model }?.statsJSON() ?? "" }
+    struct Teach: Sendable { var top: [Int]; var nll: [Double]; var seconds: Double; var prefillSeconds: Double; var decodeStats: String; var prefillJSON: String }
+    /// SelfCheck: the prompt synced, then the teacher's `cont` forced; at each position the argmax and the true next
+    /// token's negative log-likelihood (log-sum-exp of the logits less the token's logit); the counters restarted after
+    /// the sync, so `decodeStats` covers the forced steps only.
+    func selfCheckTeach(_ prompt: [Int], cont: [Int]) async throws -> Teach {
+        guard let m = lock.withLock({ model }) else { throw EngineError.notLoaded }
+        return try await m.run {
+            var logits = [Float](repeating: 0, count: m.vocab)
+            let tp = Date()
+            _ = try m.sync(prompt.map { Int32($0) }, logits: &logits)
+            let ps = Date().timeIntervalSince(tp)
+            let pj = m.lastPrefillJSON
+            _ = m.statsJSON()
+            var top: [Int] = [], nll: [Double] = []
+            let t0 = Date()
+            for (i, t) in cont.enumerated() {
+                top.append(Int(DmengModel.argmax(logits, vocab: m.vocab)))
+                var mx = -Float.infinity
+                for j in 0..<m.vocab where logits[j] > mx { mx = logits[j] }
+                var sum = 0.0
+                for j in 0..<m.vocab { sum += exp(Double(logits[j] - mx)) }
+                nll.append(log(sum) + Double(mx) - Double(t < m.vocab ? logits[t] : -Float.infinity))
+                if i + 1 == cont.count { break }
+                guard try m.step(Int32(t), logits: &logits) else { break }
+            }
+            return Teach(top: top, nll: nll, seconds: Date().timeIntervalSince(t0), prefillSeconds: ps, decodeStats: m.statsJSON(), prefillJSON: pj)
+        }
+    }
     struct Forced: Sendable { var agree: Int; var n: Int; var firstDiff: Int; var prefillSeconds: Double; var prefillJSON: String; var top: [Int] }
     /// SelfCheck: the prompt synced, then `cont` teacher-forced: at each position the argmax against the next forced id.
     func selfCheckForced(_ prompt: [Int], cont: [Int]) async throws -> Forced {
