@@ -293,9 +293,9 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.diskDir = sub.path
         #if !targetEnvironment(macCatalyst)
         o.diskGB = 0.6  // the pinned system-prompt states + the last few chats (~65 MB each)
-        // few checkpoints in memory (each is the recurrent state, 66 MB): the pinned system boundary and the newest; the
-        // rest are restored from their disk copies; no parked sequences
-        o.checkpointGB = 0.07
+        // checkpoints in memory: the C API's rule for every model (the pinned system boundary and the newest, whatever
+        // their size; the rest are restored from their disk copies); no parked sequences
+        o.checkpointGB = 0
         o.parkGB = 0.001
         #endif
         o.ctx = kind.ctx(profile: DmengLaunch.profile)

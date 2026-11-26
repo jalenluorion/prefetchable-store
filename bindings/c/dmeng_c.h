@@ -85,7 +85,8 @@ typedef struct dm_open_opts {
   const char* disk_dir;    /* prefix-cache disk copies (system prompt states); NULL = none */
   double disk_gb;          /* cap of disk_dir; 0 = 4 */
   double ckpt_gb;          /* prefix cache: memory for checkpoints on the live sequence (one is the fixed state, 66 MB
-                              for Qwen3.6); 0 = 0.25 on macOS, 0.2 on iOS */
+                              for Qwen3.6, 173 MB for Inkling); 0 = 0.25 on macOS; on iOS the pinned system boundary and the newest, whatever their
+                              size */
   double park_gb;          /* prefix cache: memory for parked sequences; 0 = 0.9 on macOS, 0.3 on iOS */
   int ctx;                 /* max positions; 0 = 16384 */
   int file_check;          /* DM_MEM_FILE: a held record is checked on use: 0 never, 1 first + last page (default), 2 all */
