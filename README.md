@@ -6,12 +6,12 @@ iPhone. That includes a 180B-parameter model whose weights are eight times the l
 | model | machine | memory used | speed |
 |---|---|---|---|
 | [Qwen3.8-Flash-Next](https://huggingface.co/jalenluorion/Qwen3.8-Flash-Next-prefetchable-store) (180B parameters) | base M4 MacBook Pro, 16 GB | 8.6 GB | 4.3 to 4.4 tokens/s exact, 5.9 to 6.0 fast |
-| [Qwen3.6-35B-A3B](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-prefetchable-store) (35B parameters) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 26 to 29 tokens/s exact, 30 to 32 fast |
-| [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-prefetchable-store) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 17 to 20 tokens/s exact, about 21 fast |
-| Qwen3.6-35B-A3B | iPhone 15 Plus, 6 GB | 2.9 GB | 3.4 tokens/s exact, 4.1 fast |
-| Inkling 2 Mini | iPhone 15 Plus, 6 GB | 2.9 GB | 1.5 tokens/s exact, 2.4 fast |
-| Qwen3.6-35B-A3B | iPhone 17 Pro, 12 GB | | 11 tokens/s (published app, out of the box) |
-| Inkling 2 Mini | iPhone 17 Pro, 12 GB | | 4 tokens/s (published app, out of the box) |
+| [Qwen3.6-35B-A3B](https://huggingface.co/jalenluorion/Qwen3.6-35B-A3B-prefetchable-store) (35B parameters) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 25 to 27 tokens/s exact, 30 to 32 fast |
+| [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-prefetchable-store) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 17 to 19 tokens/s exact, 20 to 21 fast |
+| Qwen3.6-35B-A3B | iPhone 15 Plus, 6 GB | 2.9 GB | 3.0 to 3.7 tokens/s exact, 7.4 to 9.3 fast |
+| Inkling 2 Mini | iPhone 15 Plus, 6 GB | 2.9 GB | 1.5 tokens/s exact, 4.5 to 5.0 fast |
+| Qwen3.6-35B-A3B | iPhone 17 Pro, 12 GB | | 11 to 13 tokens/s exact, 15 to 16 fast (estimated, see Speed and memory) |
+| Inkling 2 Mini | iPhone 17 Pro, 12 GB | | about 7 tokens/s exact, 10 to 11 fast (estimated, see Speed and memory) |
 
 The engine makes released models **prefetchable**: the experts a layer will use are known before the layer runs,
 early enough for the SSD to deliver them while the model computes something else. The released weights are frozen. The
@@ -136,30 +136,31 @@ phone with at least 11 GB of memory it also uses the system's spare memory in ex
 ## Speed and memory
 
 Base M4 MacBook Pro, 16 GB, internal SSD, plugged in, 8 threads, greedy decoding, 400 generated tokens, range over two
-runs. "On demand" is the like-for-like comparison: the same engine and cache size with no early names and no run-ahead,
+runs (a run is left out when other processes used more than one core; a cell with one run left says so). "On demand" is
+the like-for-like comparison: the same engine and cache size with no early names and no run-ahead,
 every expert read when its layer asks for it.
 
 **Qwen3.6-35B-A3B** (tokens/s)
 
 | expert cache | text | on demand | exact | fast | memory |
 |---|---|---|---|---|---|
-| 5 GB | prose | 18.0-18.4 | 22.3-23.1 | 26.3-28.8 | 7.3 GB |
-| 5 GB | code | 16.0-16.1 | 18.8-18.9 | 22.6-23.2 | 7.8 GB |
-| 6.6 GB | prose | 22.1-22.2 | 25.7-26.9 | 30.0-31.3 | 8.9 GB |
-| 6.6 GB | code | 19.3-19.5 | 22.1-22.2 | 27.5-27.8 | 9.4 GB |
-| 8 GB | prose | | 27.7-29.2 | 31.3-32.0 | 10.3 GB |
-| 8 GB | code | | 22.3-23.7 | 26.8-29.9 | 10.8 GB |
+| 5 GB | prose | 20.1-20.7 | 22.2-22.4 | 26.8-28.1 | 7.3 GB |
+| 5 GB | code | 17.7-17.8 | 18.7-19.1 | 26.2-27.3 | 7.5 GB |
+| 6.6 GB | prose | 23.5-24.1 | 25.4-26.6 | 32.1 (1 run) | 8.9 GB |
+| 6.6 GB | code | 20.0-21.8 | 20.6-21.8 | 29.1-29.7 | 9.1 GB |
+| 8 GB | prose | | 26.5-27.1 | 29.5-31.3 | 10.3 GB |
+| 8 GB | code | | 23.5-24.6 | 30.6-31.2 | 10.6 GB |
 
 **Inkling 2 Mini** (tokens/s)
 
 | expert cache | text | on demand | exact | fast | memory |
 |---|---|---|---|---|---|
-| 6 GB | prose | 12.7-12.8 | 14.1-14.2 | 18.0-18.8 | 7.5 GB |
-| 6 GB | code | 9.1 | 9.8-10.0 | 13.0-13.4 | 8.2 GB |
-| 7.8 GB | prose | 15.5-16.6 | 17.2-17.7 | 20.8 | 9.3 GB |
-| 7.8 GB | code | 11.7-12.8 | 13.2-13.3 | 15.2-16.8 | 10.0 GB |
-| 9 GB | prose | | 18.3-19.6 | 21.6 | 10.5 GB |
-| 9 GB | code | | 14.7-14.8 | 19.1 | 11.2 GB |
+| 6 GB | prose | 12.9-13.1 | 13.9-14.0 | 21.2-21.7 | 7.5 GB |
+| 6 GB | code | 9.4-9.6 | 9.7 | 18.9-19.4 | 7.9 GB |
+| 7.8 GB | prose | 16.2-16.6 | 17.3 | 20.2 (1 run) | 9.3 GB |
+| 7.8 GB | code | 12.9 | 13.1 | 20.0-20.2 | 9.7 GB |
+| 9 GB | prose | | 17.9-19.0 | 21.5 (1 run) | 10.5 GB |
+| 9 GB | code | | 15.2-15.3 | 20.2-20.3 | 10.9 GB |
 
 **Qwen3.8-Flash-Next, 180B** (160 generated tokens, two alternating runs, range; tokens/s)
 
@@ -176,10 +177,10 @@ controlled comparison (logs in [results/flash_next/llama_cpp](results/flash_next
 
 | model | turn | expert cache | exact | fast |
 |---|---|---|---|---|
-| Qwen3.6-35B-A3B | file rewrite by tool call | 6.6 GB | 17.5 | 19.3 |
-| Qwen3.6-35B-A3B | code answer | 6.6 GB | 22.7 | 26.8 |
-| Inkling 2 Mini | file rewrite by tool call | 7.8 GB | 12.4 | 16.6 |
-| Inkling 2 Mini | code answer | 7.8 GB | 13.5 | 16.8 |
+| Qwen3.6-35B-A3B | file rewrite by tool call | 6.6 GB | 18.0 | 27.8 |
+| Qwen3.6-35B-A3B | code answer | 6.6 GB | 22.0 | 30.3 |
+| Inkling 2 Mini | file rewrite by tool call | 7.8 GB | 11.9 | 18.6 |
+| Inkling 2 Mini | code answer | 7.8 GB | 13.0 | 19.8 |
 | Qwen3.8-Flash-Next | decode only, after each tool result of a session at 8,000 to 10,000 tokens of context | 3.0 GB | | 4.1-4.9 |
 
 In stock OpenCode, a bug-fix task ([bench/serving/demo_task.sh](bench/serving/demo_task.sh)) took Qwen3.8-Flash-Next
@@ -189,9 +190,12 @@ In stock OpenCode, a bug-fix task ([bench/serving/demo_task.sh](bench/serving/de
 
 | model | cold request | the same context again | 2,000 more tokens |
 |---|---|---|---|
-| Qwen3.6-35B-A3B (7,572 tokens) | 68.6 | 15.3 | 24.0 |
-| Inkling 2 Mini (8,365 tokens) | 162.4 | 6.7 | 46.6 |
+| Qwen3.6-35B-A3B (7,572 tokens) | 69.0 | 15.1 | 23.2 |
+| Inkling 2 Mini (8,365 tokens) | 167.7 | 5.3 | 48.3 |
 | Qwen3.8-Flash-Next (7,598 tokens), fast, 3.0 GB cache | 81.6 | | |
+
+Through these requests the process peaked at 9.9 GB for the 35B (6.6 GB cache) and 9.4 GB for Inkling 2 Mini (6 GB
+cache): the cache lends part of its space to a long prompt.
 
 Qwen3.8-Flash-Next's cold request reads each expert it needs once, about 68 GB. Later requests of the same session
 (fast, 3.0 GB cache; seconds to first token):
@@ -202,31 +206,36 @@ Qwen3.8-Flash-Next's cold request reads each expert it needs once, about 68 GB. 
 | a tool result of 209 / 314 new tokens | 12.9 / 13.2 |
 | the first message of a new thread, from the saved system prompt | 3.3 |
 
-Through the server the process used 9.0 GB at its peak, during the long prompt, and 8.5 GB between requests.
+Through the server Qwen3.8-Flash-Next's process used 9.0 GB at its peak, during the long prompt, and 8.5 GB between
+requests.
 
 **iPhone 15 Plus** (6 GB phone; the app uses 2.9 GB; measured on the device)
 
 | | Qwen3.6-35B-A3B, exact | Qwen3.6-35B-A3B, fast | Inkling 2 Mini, exact | Inkling 2 Mini, fast |
 |---|---|---|---|---|
-| decode in a chat, tokens/s | 3.4 | 4.1 | | |
-| decode, long prose / code, tokens/s | 2.9 / 2.1 | 3.7 / 2.9 | 1.5 / - | 2.4 / - |
-| first token of a new chat, sent at once / typed ahead | 4.8 s / 3.7 s | 4.8 s / 3.9 s | | |
-| first token of a follow-up | 4.0 s | 4.2 s | | |
-| first token after relaunching the app | 4.2 s | 4.3 s | | |
-| launch to ready | 2.7-3.2 s | 2.7-2.9 s | | |
+| decode in a chat, tokens/s | 3.6-3.7 | 9.2-9.3 | | |
+| decode, long prose / code, tokens/s | 3.0-3.4 / 2.5 | 7.4-9.0 / 6.2 | 1.5 / - | 4.5-5.0 / - |
+| first token of a new chat, sent at once / typed ahead | 4.6-4.8 s / 3.2-3.3 s | 1.6-1.7 s / 1.2 s | 10.8-11.1 s / - | 2.4-2.6 s / - |
+| first token of a follow-up | 4.1 s | 1.2 s | 6.1-6.2 s | 1.6-2.4 s |
+| first token after relaunching the app | 4.6 s | 1.1-1.2 s | | |
+| launch to ready | 1.9-2.3 s | 1.9-2.3 s | 1.4-1.8 s | 1.4-1.8 s |
 
-The phone's drive sets its decode speed (about 0.85 GB/s). The 35B reads 180 to 240 MB per token; Inkling 2 Mini reads
-300 MB in fast and 590 MB in exact, and its exact tokens equal the Mac's.
+The phone's drive sets its decode speed (about 0.85 GB/s). The 35B reads 210 to 310 MB per token in exact and 67 to 84
+in fast; Inkling 2 Mini reads 570 MB in exact and 113 MB in fast, and its exact tokens equal the Mac's.
 
-**iPhone 17 Pro** (12 GB; measured by a user on the published app, out of the box)
+**iPhone 17 Pro** (12 GB; estimated)
 
 On a phone with more memory the expert cache grows with it: the engine sizes it from what iOS makes available to the
-app.
+app. A user measured an earlier version of the app on this phone, out of the box: 11 tokens/s for Qwen3.6-35B-A3B and
+4 for Inkling 2 Mini. The figures below are estimates for the current engine, not measurements on the phone. They come
+from a stand-in: the engine on the Mac under the `phone` profile, with four threads and the drive capped to the phone's
+rate. In exact mode without spare memory the stand-in gives 11.2 to 11.7 and 4.1 to 4.3 tokens/s, the user's two
+figures, and the estimates scale its other runs by the same factor.
 
-| | mode | decode, tokens/s |
+| | exact (spare memory on, the default) | fast |
 |---|---|---|
-| Qwen3.6-35B-A3B | published app, out of the box | 11 |
-| Inkling 2 Mini | published app, out of the box | 4 |
+| Qwen3.6-35B-A3B | 11 to 13 | 15 to 16 |
+| Inkling 2 Mini | about 7 | 10 to 11 |
 
 **Spare memory.** On phones with at least 11 GB (the iPhone 17 Pro class), the model's files that the system keeps in
 memory the app does not own are used before reading the drive: experts the app's cache has no room for stay in the
@@ -246,22 +255,21 @@ The run records behind the tables of Qwen3.6-35B-A3B and Inkling 2 Mini on the M
 
 `exact` changes nothing: at any cache size the generated tokens equal those of the same weights held fully in memory.
 
-`fast` leaves out a few low-weight experts. Share of positions where its top choice equals `exact`'s, on held-out
-text with the true previous tokens:
+`fast` leaves out a few low-weight experts. Share of positions where its top choice equals `exact`'s, with `exact`'s
+own continuation of a prose prompt and of a code prompt fed back:
 
 | model, machine | prose | code or agent text |
 |---|---|---|
-| Qwen3.6-35B-A3B, Mac (3.3 to 5 GB cache) | 0.96 | 0.98 |
-| Inkling 2 Mini, Mac (6 to 7.8 GB cache) | 0.965-0.973 | 0.966-0.967 |
-| Qwen3.8-Flash-Next, Mac (3.0 GB cache) | 0.964 | 0.992 |
+| Qwen3.6-35B-A3B, Mac (6.6 GB cache, 1,100 positions) | 0.987 | 0.976 |
+| Inkling 2 Mini, Mac (7.8 GB cache, 1,100 positions) | 0.985 | 0.975 |
+| Qwen3.8-Flash-Next, Mac (3.0 GB cache, 600 positions) | 0.964 | 0.992 |
 
-The 35B's rows here and its speeds above were measured at its earlier threshold of 0.1. At 0.15 (since 2026-11-26), on
-the iPhone 15 Plus with its 4-bit in-memory weights, its top choice equals `exact`'s at 581 of 600 positions (591 at
-0.1), and one launch ran 7.4 to 7.9 tokens/s against 5.8 at 0.1 on a 200-token prompt; the Mac rows are being measured
-again.
+Against `exact`, `fast` changes the loss on those texts by +0.005 and +0.006 nats for the 35B and by +0.005 and +0.007
+for Inkling 2 Mini. On the iPhone 15 Plus, with its smaller cache, `fast` equals the phone's own `exact` at 581 of 600
+agent-text positions for the 35B and at 570 of 600 for Inkling 2 Mini.
 
 For Qwen3.8-Flash-Next the two texts are `exact`'s own 600-token answers to an explanation prompt and to a code-review
-agent prompt, fed back; `fast` changes the loss against `exact` by +0.016 and +0.008 nats.
+agent prompt; `fast` changes the loss against `exact` by +0.016 and +0.008 nats.
 
 Qwen3.8-Flash-Next in `exact` gives the same token ids at two cache sizes. Against the released bf16 model on its
 reference prompt, the first 26 generated tokens are equal, and with the released model's tokens fed in, 62 of 64 top

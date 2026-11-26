@@ -41,7 +41,7 @@ AGENT = [("exact", "off"), ("exact, drafting on", "plain"), ("fast", "fast")]
 PROMPTS = {"pitt": "prose", "code": "code"}
 CASES = {"toolrw": "agent turn: file rewrite", "code": "code answer"}
 # fast mode's measured agreement with exact (top choice equal; the model cards have the conditions)
-AGREE = {("q36", "pitt"): "0.96", ("q36", "code"): "0.98", ("ink", "pitt"): "0.965-0.973", ("ink", "code"): "0.966-0.967"}
+AGREE = {("q36", "pitt"): "0.987", ("q36", "code"): "0.976", ("ink", "pitt"): "0.985", ("ink", "code"): "0.975"}
 
 
 def slim(r):
@@ -243,17 +243,13 @@ def tables():
               "request of each model, then the same request again, then 2,000 more tokens; one run per row)", ""] + t + [""]
     t = phone_table()
     if t:
-        L += ["**Qwen3.6-35B-A3B on an iPhone 15 Plus** (`phone-small` profile: the calibrated 4-bit in-memory file, "
-              "a 2.93-2.95 GB footprint against the old app's 2.96 GB; fast mode as the app runs it, threshold 0.08 with `linear_k2` "
-              "names, top 3; one run per cell, measured on the device; the old app is the earlier MLX-based app on the same phone)", ""] + t + [""]
+        L += ["**iPhone 15 Plus** (`phone-small` profile, measured on the device)", ""] + t + [""]
     L += ["Mac: base M4 MacBook Pro, 16 GB, internal SSD, 8 compute threads, `--mem mlock`, greedy decoding. Baseline: no "
-          "router names, the older eviction rule (`--evict freq --layer-caps none`), no run-ahead. Exact: the `mac` profile's "
-          "defaults, nothing passed (35B: `linear_k2` routers, top 8; Inkling: `linear_k2` routers with the confidence rule and "
-          "cross-token names; run-ahead on); its tokens never depend on the cache, the routers or timing. Fast: the same with "
-          "`--mode fast`; its tokens can differ from exact, and the agreement column gives how often its top choice equals "
-          "exact's. Inkling's agent turns were measured before its default router changed (MLP router `mlp_k2_h512`). A run "
-          "is left out when other processes used more than one core on average (contaminated); a cell with one run left is "
-          "marked. Exact ids: the greedy ids of the row's exact runs compared with each other.", "", END]
+          "router names, the frequency eviction rule (`--prefetch none --evict freq --layer-caps none`), no run-ahead. Exact: the "
+          "`mac` profile's defaults, nothing passed; its tokens never depend on the cache, the routers or timing. Fast: the same "
+          "with `--mode fast`; its tokens can differ from exact, and the agreement column gives how often its top choice equals "
+          "exact's. A run is left out when other processes used more than one core on average (contaminated); a cell with one "
+          "run left is marked. Exact ids: the greedy ids of the row's exact runs compared with each other.", "", END]
     return "\n".join(L)
 
 

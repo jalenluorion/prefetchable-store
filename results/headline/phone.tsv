@@ -1,12 +1,10 @@
-# iPhone 15 Plus, engine v2 f95cd75, phone-small profile (calibrated 4-bit in-memory file), equal footprint 2.93-2.95 GB against the old app's 2.96 GB; fast: threshold 0.08, linear_k2 names, top 3; exact: run-ahead on; drive 0.82-0.85 GB/s with 2.95 GB free; one run per cell, measured on the device
-aspect	old app (best)	exact mode	fast mode
-decode, prose, tok/s	3.95	2.94	3.74
-decode in the chat path, tok/s	3.3 (same day)	3.41	4.11
-decode, coding, tok/s	-	2.11	2.88
-MB read per token	199	233-239	179
-short first message, sent at once / typed ahead, s to first token	6.57	4.8 / 3.7	4.8 / 3.9
-follow-up in the same chat, at once / typed ahead, s	5.6-6	4.0 / 4.2	4.2 / 3.5
-same chat after a relaunch, at once / typed ahead, s	8.7	4.2 / 3.3	4.3 / 3.3
-cold 472-token input, s to first token	21	19.5	-
-cold launch to ready, s	3.5	2.7-3.2	2.7-2.9
-top choice equal to the exact 8-bit engine, prose / agent text	not measured	0.913 / 0.884	0.891 / 0.881
+# iPhone 15 Plus (6 GB), phone-small profile, measured on the device; fast: threshold 0.15; a dash: not measured
+aspect	Qwen3.6-35B-A3B, exact	Qwen3.6-35B-A3B, fast	Inkling 2 Mini, exact	Inkling 2 Mini, fast
+decode in a chat, tokens/s	3.6-3.7	9.2-9.3	-	-
+decode, long prose / code, tokens/s	3.0-3.4 / 2.5	7.4-9.0 / 6.2	1.5 / -	4.5-5.0 / -
+MB read per token, decode	210-310	67-84	570	113
+first token of a new chat, sent at once / typed ahead, s	4.6-4.8 / 3.2-3.3	1.6-1.7 / 1.2	10.8-11.1 / -	2.4-2.6 / -
+first token of a follow-up, s	4.1	1.2	6.1-6.2	1.6-2.4
+first token after relaunching the app, s	4.6	1.1-1.2	-	-
+launch to ready, s	1.9-2.3	1.9-2.3	1.4-1.8	1.4-1.8
+top choice equal to the phone's own exact, 600 agent-text positions	-	581	-	570
