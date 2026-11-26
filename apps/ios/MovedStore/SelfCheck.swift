@@ -133,7 +133,41 @@ enum SelfCheck {
         return removed
     }
 
+    /// `-selfcheck-remove-35b`: the swap's removal (approved procedure): the 35B's model folder (Documents/dmeng-model) and
+    /// its saved states (Application Support/<bundle>/dmeng-prefix) are deleted, every file logged with its size; nothing
+    /// else (conversations, Inkling's folder and states, settings) is touched. Then the result is written and the app exits.
+    static func remove35B() -> [String: Any] {
+        let fm = FileManager.default
+        var r: [String: Any] = ["free_before": freeGB()]
+        var files: [[String: Any]] = []
+        var total: Int64 = 0
+        for root in [ModelKind.qwen36.folder, DmengLaunch.prefixDir(.qwen36)] {
+            if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) {
+                for case let u as URL in e {
+                    guard let v = try? u.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]), v.isRegularFile == true else { continue }
+                    let n = Int64(v.fileSize ?? 0)
+                    total += n
+                    files.append(["path": u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: ""), "bytes": n])
+                    log("SELFCHECK remove-35b \(u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: "")) (\(n) bytes)")
+                }
+            }
+            do { try fm.removeItem(at: root); log("SELFCHECK remove-35b removed \(root.lastPathComponent)/") }
+            catch { log("SELFCHECK remove-35b could not remove \(root.path): \(error)") }
+        }
+        r["files"] = files
+        r["bytes"] = total
+        r["free_after"] = freeGB()
+        r["conversations"] = ConversationStore.loadAll().count
+        log("SELFCHECK remove-35b: \(files.count) files, \(total) bytes; free \(freeGB())")
+        return r
+    }
+
     private static func run(_ model: ChatModel) async {
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-35b") {
+            out["remove_35b"] = remove35B()
+            finish()
+            return
+        }
         let kind = ModelKind.selected
         let tStart = Date()
         out["thermal_start"] = thermal()
