@@ -53,6 +53,8 @@ enum SelfCheck {
     static let longPrompt = """
     I am writing a small command-line tool in Python that reads a folder of CSV files, each one a day of readings from a set     of temperature sensors, and produces a weekly summary. Every file has a header row with the columns timestamp,     sensor_id, temperature_c and status, where status is either ok, warn or fault. Some files have rows out of order, some     have duplicated rows, and a few have temperatures recorded as empty strings when a sensor dropped out. The tool should     accept the folder path and an optional start date on the command line, read only the seven files that fall in the week     beginning on that date (or the most recent full week when no date is given), and skip any file it cannot parse while     printing a warning that names the file and the line number of the first bad row. For each sensor it should report the     number of readings, the minimum, maximum and mean temperature over the week ignoring empty values, the number of warn     and fault rows, and the longest stretch of consecutive hours with no reading at all. Duplicated rows should be counted     once. The summary should be printed as an aligned table sorted by sensor id, and also written to a JSON file next to the     input folder when a flag asks for it. Please explain how you would structure the program into functions, which parts of     the standard library you would use for the dates, the CSV parsing and the command-line arguments, how you would handle     time zones if the timestamps carry an offset, and how you would test the gap computation and the duplicate handling     without real sensor files. Then write the core function that takes the parsed rows for one sensor and returns its     summary, with comments, and list the edge cases you would cover in its tests, such as a sensor with a single reading,     a week where a sensor never reports, readings exactly on the hour boundaries, and a fault row with an empty temperature.
     """
+    /// -selfcheck-chat-tokens N: the most tokens each chat reply generates (160 when not given).
+    static var chatTokens: Int { Int(arg("-selfcheck-chat-tokens") ?? "") ?? 160 }
     static var firstPrompt: String { ProcessInfo.processInfo.arguments.contains("-selfcheck-chat-long") ? longPrompt : chatPrompt }
     /// Inkling's prompts: Documents/p2/ink_pitt_ids.txt and ink_code_ids.txt (the Nov 23 phone runs' files), else its
     /// Pittsburgh prompt built in (the coding row is then left out).
@@ -459,7 +461,7 @@ enum SelfCheck {
             let pk = Peak()
             Thread { while pk.on { pk.v = max(pk.v, MemProbe.read("").physFootprint); usleep(50_000) } }.start()
             out["chat_regions_before"] = regions()
-            let r1 = await model.reply(to: firstPrompt, maxNew: 160)
+            let r1 = await model.reply(to: firstPrompt, maxNew: chatTokens)
             let id = model.conversations.first { $0.messages.contains { $0.role == .user && $0.content == firstPrompt } }?.id
             out["chat"] = chatRow(r1, thermal0: th)
             out["chat_last_reply"] = lastReply(model, "chat")
@@ -470,7 +472,7 @@ enum SelfCheck {
                                          return ["memory": j?["memory"] ?? NSNull(), "prefix_cache": j?["prefix_cache"] ?? NSNull()] as [String: Any] }()
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             th = thermal()
-            let r2 = await model.reply(to: followPrompt, maxNew: 160)
+            let r2 = await model.reply(to: followPrompt, maxNew: chatTokens)
             out["chat_followup"] = chatRow(r2, thermal0: th)
             out["chat_followup_last_reply"] = lastReply(model, "follow-up")
             pk.on = false
