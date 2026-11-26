@@ -100,28 +100,34 @@ enum DmengLaunch {
         return false
         #endif
     }
-    /// The user's choice (Settings: Exact / Fast), else the profile's default: Fast on phone and phone-small, Exact elsewhere.
-    static var userMode: String {
+    /// The user's choice (Settings: Exact / Fast), nil when none was made: the engine then takes the profile's mode.
+    static var modeChoice: String? {
         get {
             #if SELFCHECK
             if let o = SelfCheck.modeOverride { return o }
             #endif
-            return UserDefaults.standard.string(forKey: kind.modeKey) ?? kind.defaultMode(profile: profile)
+            return UserDefaults.standard.string(forKey: kind.modeKey)
         }
         set { UserDefaults.standard.set(newValue, forKey: kind.modeKey) }
     }
-    /// The engine mode for dm_open: nil = exact; Fast is the model's fast preset (ModelKind.fastEngineMode).
-    static var engineMode: String? {
-        switch userMode {
-        case "fast": return kind.fastEngineMode
-        default: return nil
+    /// The mode the manifest declares for this device's profile (profiles.<profile>.mode: the bundled manifest's, else the
+    /// model folder's), for the screens before a choice is made; the engine reads it itself at open.
+    static var declaredMode: String? {
+        for u in [ManifestChoice.bundledURL(kind), kind.folder.appendingPathComponent("moved-store.json")].compactMap({ $0 }) {
+            if let d = try? Data(contentsOf: u), let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+               let m = ((j["profiles"] as? [String: Any])?[profile] as? [String: Any])?["mode"] as? String { return m }
         }
+        return nil
     }
     /// The in-memory weights' precision: 4-bit on phone-small when the folder holds the 4-bit copy, else 8-bit.
     static func residentBits(dir: String) -> Int {
         let has4 = ["/derived", "/.dmeng"].contains { ((try? FileManager.default.contentsOfDirectory(atPath: dir + $0)) ?? []).contains { $0.hasPrefix("resident_q4.") } }
         return profile == "phone-small" && has4 ? 4 : 8
     }
+    /// The mode shown: the choice, else the profile's declared one.
+    static var shownMode: String? { modeChoice ?? declaredMode }
+    /// The engine mode for dm_open: nil = the profile's; "exact", or Fast as the model's fast preset (ModelKind.fastEngineMode).
+    static var engineMode: String? { modeChoice.map { $0 == "fast" ? kind.fastEngineMode : "exact" } }
     /// Spare memory for the model's files (the system's file cache under the expert cache): on where the engine's profile
     /// turns it on (its spare_memory rule, by the device's physical memory). The switch (Diagnostics) is offered where the
     /// engine turned it on at this open, or once a choice was made with it (DmengChatEngine.spareMemoryOffered); a choice
@@ -296,7 +302,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                                      ("model", (lock.withLock { loadedKind } ?? DmengLaunch.kind).displayName
                                         + (lock.withLock { codec }.map { $0.family.isEmpty ? "" : " (\($0.family))" } ?? "")),
                                      ("profile", String(format: "%@ (%.2f GB available at open)", DmengLaunch.profile, Double(DmengLaunch.availableAtOpen) / 1e9)),
-                                     ("mode", DmengLaunch.userMode + " (passed to the engine as \"\(DmengLaunch.engineMode ?? "exact")\")"),
+                                     ("mode", (DmengLaunch.modeChoice ?? "none chosen") + " (passed to the engine as \(DmengLaunch.engineMode.map { "\"\($0)\"" } ?? "nothing: the profile's"))"),
                                      ("in-memory weights", "\(DmengLaunch.residentBits(dir: DmengLaunch.modelDir.path))-bit"),
                                      ("model dir", DmengLaunch.modelDir.path),
                                      ("manifest", lock.withLock { manifestPick }?.label ?? "not opened yet")]
@@ -416,7 +422,11 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                 break
             }
         }
-        let key = (DmengLaunch.engineMode ?? "exact") + "|" + resKey + (pick.bundled ? "|line-manifest" : "")  // Fast's rule is the manifest's
+        // no mode chosen: the profile's, which the profile and the manifest opened decide (both in the key)
+        var mh: UInt64 = 1469598103934665603
+        for b in (try? Data(contentsOf: URL(fileURLWithPath: pick.dir + "/moved-store.json"))) ?? Data() { mh = (mh ^ UInt64(b)) &* 1099511628211 }
+        let modeKey: String = DmengLaunch.engineMode ?? (String(format: "the profile's (%@, manifest %016llx)", DmengLaunch.profile, mh))
+        let key = modeKey + "|" + resKey + (pick.bundled ? "|line-manifest" : "")  // the mode's rule (and the default) is the manifest's
         var hsh: UInt64 = 1469598103934665603
         for b in key.utf8 { hsh = (hsh ^ UInt64(b)) &* 1099511628211 }
         let sub = DmengLaunch.diskDir.appendingPathComponent(String(format: "s%016llx", hsh), isDirectory: true)
@@ -449,8 +459,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.routerTau = 0  // the profile's names rule (per mode where declared)
         o.routerCand = 0
         o.split = 1
-        // passed as "exact" explicitly: the engine's profile would otherwise choose its own default mode (phone-small: fast)
-        o.mode = DmengLaunch.engineMode ?? "exact"
+        o.mode = DmengLaunch.engineMode  // nil: the profile's mode (its manifest's profiles.<profile>.mode)
         o.residentBits = bitsNow
         o.prefillThreads = 0
         // the batched prefill split with the GPU (exact: the GPU's rows are the CPU kernels' bits): on iOS the profile's
@@ -513,7 +522,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let res = sj?["resolved"] as? [String: Any] ?? [:]
         let pre = (sj?["policy"] as? [String: Any])?["preset"] as? [String: Any] ?? [:]  // the profile as the engine read it
         lock.withLock { resolvedAtOpen = res; presetAtOpen = pre }
-        log("DMENG MODE \(DmengLaunch.engineMode ?? "exact") -> \((res["mode"] as? String) ?? "?") (profile default engine_mode \((pre["engine_mode"] as? String) ?? "?"), from \((pre["engine_mode_from"] as? String) ?? "the manifest's modes"))")
+        log("DMENG MODE \(DmengLaunch.engineMode ?? "the profile's") -> \((res["mode"] as? String) ?? "?") (profile default engine_mode \((pre["engine_mode"] as? String) ?? "?"), from \((pre["engine_mode_from"] as? String) ?? "the manifest's modes"))")
         progress("ready: " + info.detail)
         observeMemory()
     }

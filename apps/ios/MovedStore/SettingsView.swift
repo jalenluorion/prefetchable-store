@@ -83,9 +83,11 @@ struct SettingsView: View {
     @State private var freeBytes = ModelDownloader.volumeFree() ?? 0
 
     /// The mode of the selected model (each model has its own setting: ModelKind.modeKey).
-    @State private var modeShown = DmengLaunch.userMode
+    @State private var modeShown = DmengLaunch.shownMode
+    /// The profile's declared mode (the manifest's), marked "(default)".
+    @State private var modeDefault = DmengLaunch.declaredMode
     var engineMode: Binding<String> {
-        Binding(get: { modeShown }, set: { DmengLaunch.userMode = $0; modeShown = $0 })
+        Binding(get: { modeShown ?? "" }, set: { DmengLaunch.modeChoice = $0; modeShown = $0 })
     }
     /// Settings › Model: the models whose files are present (ModelKind); a choice closes the open model and opens the
     /// other one (a new chat starts with it).
@@ -99,7 +101,8 @@ struct SettingsView: View {
             Task {
                 await m.switchModel(to: k)
                 modelShown = ModelKind.selected
-                modeShown = DmengLaunch.userMode
+                modeShown = DmengLaunch.shownMode
+                modeDefault = DmengLaunch.declaredMode
                 switching = false
             }
         })
@@ -126,8 +129,8 @@ struct SettingsView: View {
                 Text("Model files")
             }
             Picker("Mode", selection: engineMode) {
-                Text("Fast (default)").tag("fast")
-                Text("Exact").tag("exact")
+                Text(modeDefault == "fast" ? "Fast (default)" : "Fast").tag("fast")
+                Text(modeDefault == "exact" ? "Exact (default)" : "Exact").tag("exact")
             }
             Button("Delete model", role: .destructive) { confirmDeleteModel = true }
                 .disabled(presentBytes == 0)
@@ -159,7 +162,7 @@ struct SettingsView: View {
     func afterDeletingSelected() {
         let other = ModelKind.selected.other
         if other.isComplete {
-            Task { await m.switchModel(to: other); modelShown = ModelKind.selected; modeShown = DmengLaunch.userMode }
+            Task { await m.switchModel(to: other); modelShown = ModelKind.selected; modeShown = DmengLaunch.shownMode; modeDefault = DmengLaunch.declaredMode }
         } else {
             SetupGate.shared.modelDeleted()
         }

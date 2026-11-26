@@ -10,7 +10,7 @@ import UIKit
 @MainActor
 enum SelfCheck {
     static let requested = ProcessInfo.processInfo.arguments.contains("-selfcheck")
-    /// Read by DmengLaunch.userMode: the Exact pass's mode for this process only (never saved).
+    /// Read by DmengLaunch.modeChoice: the Exact pass's mode for this process only (never saved).
     nonisolated(unsafe) static var modeOverride: String?
     /// A lever's model options for the engine's next open (-selfcheck-lever-opts), this process only.
     nonisolated(unsafe) static var optsOverride: String?
@@ -257,7 +257,7 @@ enum SelfCheck {
         out["model"] = kind.rawValue
         out["profile"] = DmengLaunch.profile
         out["available_at_open_gb"] = Double(DmengLaunch.availableAtOpen) / 1e9
-        out["mode_default"] = DmengLaunch.userMode
+        out["mode_default"] = DmengLaunch.shownMode ?? NSNull()
         out["mode_saved"] = UserDefaults.standard.string(forKey: kind.modeKey) ?? NSNull()
         let convsBefore = ConversationStore.loadAll().count
         out["conversations_before"] = convsBefore
@@ -267,7 +267,7 @@ enum SelfCheck {
             out["cleanup"] = cleanup()
             out["free_after_cleanup"] = freeGB()
         }
-        log("SELFCHECK screen \(out["first_screen"]!) model \(kind.rawValue) profile \(DmengLaunch.profile) mode \(DmengLaunch.userMode)")
+        log("SELFCHECK screen \(out["first_screen"]!) model \(kind.rawValue) profile \(DmengLaunch.profile) mode \(DmengLaunch.shownMode ?? "?")")
 
         // -selfcheck-lever NAME -selfcheck-lever-opts "OPTS" [-selfcheck-lever-mode fast|exact] [-selfcheck-lever-tokens N]:
         // one launch, the engine opened twice in the mode (default, then with OPTS as its model options / run: flags); per

@@ -90,7 +90,7 @@ enum Expectations {
     }
 
     static var stored: Estimate? {
-        guard let tps = DmengLaunch.kind.tokensPerSec(profile: DmengLaunch.profile, fast: DmengLaunch.userMode == "fast") else { return nil }
+        guard let tps = DmengLaunch.kind.tokensPerSec(profile: DmengLaunch.profile, fast: DmengLaunch.shownMode == "fast") else { return nil }
         return Estimate(tokensPerSec: tps, wordsPerSec: tps * wordsPerToken)
     }
 }
