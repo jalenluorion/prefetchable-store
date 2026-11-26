@@ -128,6 +128,7 @@ int main(int argc, char** argv) {
     const uint8_t* view = c.fmap[0] + 3 * R0;
     check(s >= S.n && c.rec(0, s) == view && same_as_file(c.rec(0, s), 0, 3, R0), "a miss lands in probation: the record is the mapping's, the file's bytes");
     check(c.rd.bytes.load() - b0 == R0 && resident(view, R0), "the reader read it from the drive into the file cache (pages resident)");
+    check(c.rd.reader_pageins.load() > 0 && c.rd.reader_faults.load() > 0, "... by an advisory read and its own touches (the readers' page-ins and faults counted)");
     check(c.held(0) == 8 && c.prob_held(0) == 1 && c.prob_held_bytes() == R0, "the slab's 8 untouched; probation holds one record");
     // the compute reads it: no page-in (the reader mapped every page)
     {
@@ -146,18 +147,21 @@ int main(int argc, char** argv) {
     c.slot(0, s).pins = 1;
     done(c, 0, s, 0);
     c.tok_now = 0;
-    check(!c.tier_due() && c.slot_of(0, 3) == s, "a reuse inside the token (a looped layer's pass) does not promote");
+    c.tier_step();  // (the token's own work)
+    check(!c.slot(0, s).promote && !c.tier_due() && c.slot_of(0, 3) == s, "a reuse inside the token (a looped layer's pass) does not promote");
     // a use in a second token: not yet (prom_uses 3 distinct tokens); a third: a candidate
     c.slot(0, s).pins = 1;
     s = c.slot_for_use(0, 3);
     done(c, 0, s, 1);
     check(c.st.n_prob_hit == 2 && c.st.bytes_prob_hit == 2 * R0, "uses after the first are counted as served by the file cache");
+    c.tok_now = 1;
+    c.tier_step();  // (the token's own work: the budget, the pressure rule)
     check(c.prom_uses == 3 && !c.tier_due(), "used in two tokens: not a candidate (the rule's 3 distinct tokens)");
     c.slot(0, s).pins = 1;
     done(c, 0, s, 2);
-    check(c.tier_due(), "used in a third token: a candidate for promotion");
-    // the gate: the slab is full, so its keep score must beat the record it would displace by the margin
     c.tok_now = 2;
+    check(c.tier_due() && c.slot(0, s).promote, "used in a third token: a candidate for promotion");
+    // the gate: the slab is full, so its keep score must beat the record it would displace by the margin
     c.prom_margin = 2.0;  // (a hazard score is a probability: nothing beats another by 2)
     c.tier_step();
     check(c.slot_of(0, 3) == s && c.st.n_promote_score_refused == 1 && c.st.prom_score_n == 1 && !c.tier_due(),
@@ -288,6 +292,68 @@ int main(int argc, char** argv) {
     c.rd.drops_flush();
     const int pb = c.slot_of(1, 2);
     check(pb >= 0 && pb < c.P[1].n && same_as_file(c.rec(1, pb), 1, 2, R1) && none_resident(c.fmap[1] + 2 * R1, R1), "two pools: the second pool's record promoted");
+  }
+  // ---------------------------------------------------------------- the copy budget and the pressure rule
+  {
+    const size_t rec[2] = {R0, R0};
+    write_store(dir, rec);
+    Cache c;
+    c.file_under = true;
+    c.prob_bytes = (int64_t)(8 * R0);
+    if (!c.init(NL, NE, K, {0, 1}, {0, 0}, {R0}, {1.0}, dir, "layer_%02d.bin", 8.0 * R0, 2, 1, Mem::PLAIN, false, err)) {
+      printf("FAIL init (budget): %s\n", err.c_str());
+      return 1;
+    }
+    c.enable_hazard();
+    SlotPool& S = c.P[0];
+    check(fill_slab(c, 0, {8, 9, 10, 11, 12, 13, 14, 15}, R0), "budget: the slab filled");
+    c.prom_uses = 2;
+    c.prom_margin = -2.0;
+    c.prom_copy_budget = (int64_t)R0;  // one record's copy per token
+    int a = miss(c, 1, 1, 1), b = miss(c, 1, 2, 1);
+    done(c, 1, a, 1);
+    done(c, 1, b, 1);
+    for (int x : {a, b}) {
+      c.slot(1, x).pins = 1;
+      done(c, 1, x, 2);
+    }
+    c.tok_now = 2;
+    c.tier_step();
+    check(c.st.n_promote_started == 1 && c.st.n_promote_budget_deferred >= 1 && c.tier_due(), "the copy budget: one copy this token, the other candidate deferred");
+    c.rd.drops_flush();
+    c.tok_now = 3;
+    c.tier_step();
+    check(c.st.n_promote_started == 2, "... started at the next token");
+    c.rd.drops_flush();
+    c.tier_step();
+    check(c.slot_of(1, 1) < S.n && c.slot_of(1, 2) < S.n && c.st.n_promoted == 2, "... both promoted");
+    // the pressure rule: the OS reclaims faster than the tier helps -> the caps halve, the records past them go; then off
+    c.press_window = 1;
+    c.press_min = 1;
+    c.prom_margin = 2.0;  // (no promotion: the records stay exposed to the OS)
+    const int np0 = c.prob_cap(0);
+    for (int e = 3; e < 8; e++) done(c, 1, miss(c, 1, e, 4), 4);
+    for (int e = 3; e < 6; e++) msync(c.fmap[1] + (size_t)e * R0, R0, MS_INVALIDATE);  // the OS takes three
+    for (int e = 3; e < 6; e++) check(c.slot_for_use(1, e) < 0, ("pressure: reclaimed record " + std::to_string(e) + " a miss").c_str());
+    c.tok_now = 5;
+    c.tier_step();
+    check(c.tier_shrinks == 1 && c.prob_cap(0) == np0 / 2 && !c.tier_auto_paused, "pressure: reclaims > a quarter of reuses + reclaims: the probation cap halves");
+    int over = 0;
+    for (int i = S.n + c.prob_cap(0); i < S.n + S.np; i++) over += S.s[i].layer >= 0;
+    check(over == 0 && c.prob_held(0) <= c.prob_cap(0), "... and the records past the new cap are dropped");
+    for (int t = 6; t < 12 && !c.tier_auto_paused; t++) {  // the OS keeps reclaiming
+      int s2 = c.slot_for_use(1, 6);
+      if (s2 >= 0) c.slot(1, s2).pins++;
+      else s2 = miss(c, 1, 6, t);
+      done(c, 1, s2, t);
+      if (s2 >= S.n) {
+        msync(c.fmap[1] + 6 * R0, R0, MS_INVALIDATE);
+        c.slot_for_use(1, 6);
+      }
+      c.tok_now = t;
+      c.tier_step();
+    }
+    check(c.tier_auto_paused && !c.prob_on() && c.spare_paused.load(), "pressure: below an eighth of its slots the tier pauses for the session");
   }
   // ---------------------------------------------------------------- the tier off
   {

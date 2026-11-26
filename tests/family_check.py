@@ -182,7 +182,7 @@ if wanted("invariance"):
             if "--spare-mem" in fl:  # the tier must have run: reuses served from the file cache, the promotion gate tested
                 sm = js.get("spare_memory") or {}
                 tier.append(sm.get("promotions_per_token", 0))
-                pageins.append(sm.get("pageins", -1))
+                pageins.append(round(js.get("compute_pageins_per_token", -1), 2))
                 # (the default rule may promote nothing on a tiny model: the every-reuse arm must promote)
                 if not (sm.get("reuses_per_token", 0) > 0 and (sm.get("promotions_per_token", 0) > 0 or "--spare-margin" not in fl)):
                     bad.append(f"{nm}: the tier did not run as expected ({json.dumps(sm)[:300]})")
@@ -204,7 +204,7 @@ if wanted("invariance"):
         verdict("invariance", "FAIL" if bad else "PASS",
                 (f"differ: {', '.join(bad)}" if bad else f"{len(variants) + 1} runs identical (300 positions; reads per run {min(reads)}-{max(reads)})"
                            + ("; names' reads held in flight: identical (40 positions)" if RT else "")
-                           + f"; spare tier on in {len(tier)} (promotions per token {min(tier):.2f}-{max(tier):.2f}, process page-ins {min(pageins)}-{max(pageins)}) and the greedy ids")
+                           + f"; spare tier on in {len(tier)} (promotions per token {min(tier):.2f}-{max(tier):.2f}, compute page-ins per token {min(pageins)}-{max(pageins)}) and the greedy ids")
                 + ("" if RT else "; the folder has no router file"))
     except Exception as e:
         verdict("invariance", "FAIL", str(e)[-400:])

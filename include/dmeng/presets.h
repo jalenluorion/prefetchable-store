@@ -86,7 +86,7 @@ struct Preset {
   bool spare_mem = false;
   // its promotion rule ("promote": {"uses": N, "margin": M}; store.h, Cache::prom_uses / prom_margin): 0 / NaN = undeclared
   int spare_uses = 0;
-  double spare_margin = __builtin_nan("");
+  double spare_margin = __builtin_nan(""), spare_copy_mb = -1;  // ("promote": {..., "copy_mb": X}; -1 undeclared)
   // the context positions the front end reserves (a profile's "ctx": N or {"positions": N, "calibration": {...}});
   // 0 = undeclared, the front end's own (dmeng and the C API 16384, dmserve 33792)
   int ctx = 0;
@@ -128,7 +128,7 @@ struct Resolved {
   bool spare_mem = false;  // written only when on (the block is unchanged with it off), with its probation budget
   double spare_gb = 0;     // and its promotion rule
   int spare_uses = 3;
-  double spare_margin = 0.1;
+  double spare_margin = 0.1, spare_copy_mb = 32;
   int ctx = 0;             // the context positions in force, written only when the profile declares a ctx (else 0)
   double drive_gbs = 0;    // bench only (--drive-gbs): written only when set (the block is unchanged without it)
   // the in-memory weights the front end opened (LoadOpts::resident_id: resident_q8 | resident_q4, "" = another file
@@ -175,6 +175,7 @@ struct Given {
   std::optional<double> spare_gb;       // --spare-gb X: its probation budget in GB
   std::optional<int> spare_uses;        // --spare-uses N: its promotion rule's distinct tokens of use (at least 2)
   std::optional<double> spare_margin;   // --spare-margin M: its promotion rule's keep-score margin
+  std::optional<double> spare_copy_mb;  // --spare-copy-mb X: its promotions' copies per token at most (0: no limit)
   std::optional<double> drive_gbs;      // --drive-gbs X: bench only, the readers' drive rate capped (never from a profile)
   std::optional<int> ctx;               // context positions (dmeng / dmserve --ctx, the C API's ctx > 0)
   std::optional<std::string> evict, layer_caps;
@@ -194,7 +195,7 @@ struct Given {
 // function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
 // --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
 // --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
-// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --draft-max N --early N --spare-mem 0|1 --spare-gb X --spare-uses N --spare-margin M --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --draft-max N --early N --spare-mem 0|1 --spare-gb X --spare-uses N --spare-margin M --spare-copy-mb X --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
 // run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
 // and err on a malformed value).
 std::string run_flag_name(const std::string& flag);
@@ -232,8 +233,8 @@ struct RunOpts {
   int early = 0;
   bool spare_mem = false;  // the spare tier (CoreOpts::spare_mem): explicit, else the profile's rule
   double spare_gb = 0;     // its probation budget (CoreOpts::spare_gb): explicit, else the profile's, else SPARE_GB_DEFAULT
-  int spare_uses = 3;      // its promotion rule (CoreOpts::spare_uses / spare_margin): explicit, else the profile's, else these
-  double spare_margin = 0.1;
+  int spare_uses = 3;      // its promotion rule (CoreOpts::spare_uses / spare_margin / spare_copy_mb): explicit, else the
+  double spare_margin = 0.1, spare_copy_mb = 32;  // profile's, else these
   double drive_gbs = 0;    // bench only (CoreOpts::drive_gbs): explicit only, 0 = off
   int ctx = 16384;         // context positions: explicit, else the profile's declared ctx, else the front end's own
   bool ctx_declared = false;  // the profile declares one (resolved.ctx is written)

@@ -308,8 +308,8 @@ typedef struct dm_counters_t {
                                            reads that served nothing */
   uint64_t promotions;                  /* spare memory: probation records moved into the slab at their reuse */
   uint64_t probation_reclaimed;         /* spare memory: probation records the OS reclaimed before their reuse (read again) */
-  uint64_t pageins;                     /* the process's page-ins since dm_open: faults that read the drive (the readers
-                                           never page in, so these are the compute's) */
+  uint64_t pageins;                     /* the compute's page-ins since dm_open: the process's faults that read the drive,
+                                           less those the readers took bringing probation records in */
   int64_t probation_bytes;              /* spare memory: records held in probation now (in the file cache, not the app's) */
 } dm_counters_t;
 int dm_counters(dm_engine* e, dm_counters_t* out);

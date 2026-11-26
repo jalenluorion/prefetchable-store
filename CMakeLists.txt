@@ -112,6 +112,8 @@ target_compile_options(dmeng_c PRIVATE ${DM_ARCH} -Wall)
 # The spare tier's mechanics on a small store of known bytes, no model (tests/spare_tier/spare_tier_check.cpp)
 add_executable(spare_tier_check tests/spare_tier/spare_tier_check.cpp)
 target_link_libraries(spare_tier_check PRIVATE dmengcore)
+add_executable(spare_tier_bench tests/spare_tier/spare_tier_bench.cpp)  # the tier's cost to the compute, synthetic store
+target_link_libraries(spare_tier_bench PRIVATE dmengcore)
 # The P1 gate through the C API only (tests/c_api/dm_gate.c)
 enable_language(C)
 add_executable(dm_gate tests/c_api/dm_gate.c)

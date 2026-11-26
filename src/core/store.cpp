@@ -308,6 +308,41 @@ static bool all_resident(const uint8_t* p, size_t n) {
   return true;
 }
 
+// the pages of [p, p + n) not resident (mincore)
+static size_t pages_missing(const uint8_t* p, size_t n) {
+  static thread_local std::vector<char> v;
+  const size_t pg = (size_t)getpagesize(), np = (n + pg - 1) / pg;
+  v.resize(np);
+  if (mincore((void*)p, n, v.data()) != 0) return np;
+  size_t k = 0;
+  for (size_t i = 0; i < np; i++) k += !(v[i] & MINCORE_INCORE);
+  return k;
+}
+static uint64_t task_faults_now() {
+  task_events_info_data_t e;
+  mach_msg_type_number_t c = TASK_EVENTS_INFO_COUNT;
+  return task_info(mach_task_self(), TASK_EVENTS_INFO, (task_info_t)&e, &c) == KERN_SUCCESS ? (uint64_t)e.faults : 0;
+}
+static uint64_t task_pageins_now() {
+  task_events_info_data_t e;
+  mach_msg_type_number_t c = TASK_EVENTS_INFO_COUNT;
+  return task_info(mach_task_self(), TASK_EVENTS_INFO, (task_info_t)&e, &c) == KERN_SUCCESS ? (uint64_t)e.pageins : 0;
+}
+
+// a cheap residency probe (3 pages: the first, the middle, the last): a whole-record mincore of a 5 MB record costs
+// ~120 us (measured, M-series), the probe ~2 us. A reader maps every page when the record lands; the OS reclaims a
+// record's pages together (they were touched together), so a probe that misses a reclaimed page is rare, and such a
+// page is a page-in on the compute thread, counted (Cache::task_pageins less Readers::reader_pageins)
+static bool probe_resident(const uint8_t* p, size_t n) {
+  const size_t pg = (size_t)getpagesize();
+  const size_t at[3] = {0, (n / 2) & ~(pg - 1), n - pg};
+  for (size_t o : at) {
+    char c = 0;
+    if (mincore((void*)(p + o), pg, &c) != 0 || !(c & MINCORE_INCORE)) return false;
+  }
+  return true;
+}
+
 void Readers::loop() {
   // the reads are DMA; the thread only issues them. This QoS lets macOS keep these off the compute cores' way.
   int q = qos;
@@ -361,16 +396,61 @@ void Readers::loop() {
     if (spec_us > 0 && cls != 0) std::this_thread::sleep_for(std::chrono::microseconds(spec_us));
     bool skip_piece = skip_;
     if (j.key >= 0 && drop_state_) settle_drop(j.key);  // the spare tier: a drop of this record's pages is not wanted now
-    if (!skip_piece && !j.dst && file_skip_resident && all_resident(j.view, j.n)) {
-      skip_piece = true;
-      file_resident_skips.fetch_add(1, std::memory_order_relaxed);
-      file_bytes_skipped.fetch_add(j.n, std::memory_order_relaxed);
-      if (j.prob && file_prefault) {  // a probation read found resident: its pages mapped here, not in the compute threads
-        const size_t pg = (size_t)getpagesize();
+    if (j.prob && !skip_piece) {
+      // a probation read: the pages come into the file cache by one advisory read of the piece, and this thread maps
+      // them by touching each (it waits there for the I/O); no copy to user memory (a pread to scratch copied every
+      // byte beside the compute's kernels). Its own faults and page-ins are counted apart from the compute's.
+      const size_t pg = (size_t)getpagesize();
+      const size_t gone = pages_missing(j.view, j.n);
+      const uint64_t f0 = task_faults_now(), p0 = task_pageins_now();
+      if (gone == 0 && file_skip_resident) {
+        file_resident_skips.fetch_add(1, std::memory_order_relaxed);
+        file_bytes_skipped.fetch_add(j.n, std::memory_order_relaxed);
+      } else {
+        const size_t nb = std::min(j.n, gone * pg);  // the drive's bytes: the pages not resident
+        int64_t slot_end = 0;
+        if (drive_bps > 0) {
+          std::lock_guard<std::mutex> g(drive_mu_);
+          slot_end = std::max(now_ns(), drive_t_) + (int64_t)((double)nb * 1e9 / drive_bps);
+          drive_t_ = slot_end;
+        }
+        radvisory ra{(off_t)j.off, (int)j.n};
+        if (fcntl(j.fd, F_RDADVISE, &ra) != 0) {  // (refused: a buffered pread to scratch, as before)
+          if (scratch.size() < j.n) scratch.resize(j.n);
+          for (size_t done = 0; done < j.n;) {
+            ssize_t r = pread(j.fd, scratch.data() + done, j.n - done, j.off + (long)done);
+            if (r <= 0) {
+              fprintf(stderr, "read failed (fd %d off %ld): %s\n", j.fd, j.off, strerror(errno));
+              abort();
+            }
+            done += (size_t)r;
+          }
+        }
+        uint64_t acc = 0;
+        for (size_t o = 0; o < j.n; o += pg) acc += ((const volatile uint8_t*)j.view)[o];
+        (void)acc;
+        if (slot_end > 0) {
+          const int64_t left = slot_end - now_ns();
+          if (left > 0) std::this_thread::sleep_for(std::chrono::nanoseconds(left));
+        }
+        bytes.fetch_add(nb, std::memory_order_relaxed);
+        bytes_cls[cls].fetch_add(nb, std::memory_order_relaxed);
+        if (j.pool >= 0 && j.pool < 4) bytes_pool[j.pool].fetch_add(nb, std::memory_order_relaxed);
+        if (nb < j.n) file_bytes_skipped.fetch_add(j.n - nb, std::memory_order_relaxed);  // (the resident part: the file cache's)
+      }
+      if (gone == 0 && file_prefault) {  // resident: mapped here, not in the compute threads
         uint64_t acc = 0;
         for (size_t o = 0; o < j.n; o += pg) acc += ((const volatile uint8_t*)j.view)[o];
         (void)acc;
       }
+      reader_faults.fetch_add(task_faults_now() - f0, std::memory_order_relaxed);
+      reader_pageins.fetch_add(task_pageins_now() - p0, std::memory_order_relaxed);
+      skip_piece = true;
+    }
+    if (!skip_piece && !j.dst && file_skip_resident && all_resident(j.view, j.n)) {  // Mem::FILE
+      skip_piece = true;
+      file_resident_skips.fetch_add(1, std::memory_order_relaxed);
+      file_bytes_skipped.fetch_add(j.n, std::memory_order_relaxed);
     }
     if (!skip_piece) {
       uint8_t* dst = j.dst;
@@ -406,8 +486,6 @@ void Readers::loop() {
         for (size_t o = 0; o < j.n; o += pg) acc += ((const volatile uint8_t*)j.view)[o];
         (void)acc;
       }
-      // a slab read with the spare tier on: the slab holds the record, so the file cache does not (one place)
-      if (j.dst && j.drop_view && j.view) msync((void*)j.view, j.n, MS_INVALIDATE);
     }
     const int64_t t1 = now_ns();
     busy_ns.fetch_add((uint64_t)(t1 - t0), std::memory_order_relaxed);
@@ -515,6 +593,16 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
     if (mode != Mem::FILE && !under) fcntl(fd, F_NOCACHE, 1);  // FILE: buffered reads, the file cache is the tier
     fcntl(fd, F_RDAHEAD, 0);
     fds.push_back(fd);
+    if (under) {  // the spare tier: a second descriptor, F_NOCACHE, for slab reads (DMA into the slab, the file cache untouched)
+      const int fd2 = open(p.c_str(), O_RDONLY);
+      if (fd2 < 0) {
+        err = "cannot open " + p;
+        return false;
+      }
+      fcntl(fd2, F_NOCACHE, 1);
+      fcntl(fd2, F_RDAHEAD, 0);
+      fds_nc.push_back(fd2);
+    }
     if (mode == Mem::FILE || under) {
       const off_t sz = lseek(fd, 0, SEEK_END);
       void* m = sz > 0 ? mmap(nullptr, (size_t)sz, PROT_READ, MAP_SHARED, fd, 0) : MAP_FAILED;
@@ -527,6 +615,8 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
     }
   }
   file_under = prob_slots_ > 0;  // (the tier is on only with probation slots)
+  pcap_.assign(MAXP, 0);
+  for (int p = 0; p < npools; p++) pcap_[p] = P[p].np;
   pageins_at_init = task_pageins();
   for (int p = 0; p < npools; p++) pend_[p] = P[p].pending.get();
   if (file_under) {
@@ -552,6 +642,13 @@ uint64_t Cache::task_pageins() {
   return (uint64_t)e.pageins;
 }
 
+uint64_t Cache::task_faults() {
+  task_events_info_data_t e;
+  mach_msg_type_number_t c = TASK_EVENTS_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_EVENTS_INFO, (task_info_t)&e, &c) != KERN_SUCCESS) return 0;
+  return (uint64_t)e.faults;
+}
+
 int Cache::prob_held(int p) const {
   int k = 0;
   for (int i = P[p].n; i < P[p].n + P[p].np; i++) k += P[p].s[i].layer >= 0;
@@ -575,10 +672,11 @@ void Cache::free_slot(int p, int slot) {
 int Cache::prob_take(int L) {
   const int p = layer_pool[L];
   SlotPool& S = P[p];
-  if (!S.pfree.empty()) {
+  const int lim = S.n + pcap_[p];  // slots past the pool's cap (the pressure rule lowered it) are not used again
+  while (!S.pfree.empty()) {
     const int v = S.pfree.back();
     S.pfree.pop_back();
-    return v;
+    if (v < lim) return v;
   }
   for (auto it = S.pfifo.begin(); it != S.pfifo.end();) {
     const int s = it->first;
@@ -591,10 +689,10 @@ int Cache::prob_take(int L) {
       ++it;
       continue;
     }
-    S.pfifo.erase(it);
+    it = S.pfifo.erase(it);
     drop(L, s, true);  // (its pages invalidated)
     st.n_prob_budget_drops++;
-    return s;
+    if (s < lim) return s;  // (past the cap: dropped, and the next oldest goes)
   }
   return -1;
 }
@@ -604,7 +702,7 @@ int Cache::prob_check(int L, int slot) {
   Slot& x = S.s[slot];
   if (S.pending[slot].load(std::memory_order_acquire) != 0 || skip_reads) return slot;  // in flight: the reader maps it
   const uint8_t* v = fmap[L] + (size_t)x.e * S.rec;
-  if (all_resident(v, S.rec)) return slot;
+  if (probe_resident(v, S.rec)) return slot;
   st.n_prob_reclaimed++;  // the OS took (part of) it before this use
   if (x.pins == 0) {      // a miss like any other
     drop(L, slot, true);
@@ -646,8 +744,56 @@ void Cache::tier_drain() {
   prob_drained_ = !left;
 }
 
+// the OS reclaiming faster than the tier helps (Mac / iOS without a memory warning): every press_window tokens, if the
+// probation records the OS took before their reuse are at least press_min and more than press_frac of the reuses plus
+// them, or the compute's page-ins exceed press_pageins per token, every pool's probation cap halves (its records past
+// the new cap dropped now, unless pinned); once the caps hold less than an eighth of the slots they began with, the tier
+// pauses for the session (spare_pause: the memory warning's rule). Never raised again.
+void Cache::tier_pressure() {
+  const uint64_t r = st.n_prob_reclaimed, h = st.n_prob_hit;
+  const uint64_t tp = task_pageins(), rp = rd.reader_pageins.load(std::memory_order_relaxed);
+  const uint64_t pin = tp > rp ? tp - rp : 0;
+  if (!press_armed_) {  // the first token: the counts from here (not the model's load)
+    press_armed_ = true;
+    press_tokens_ = 0;
+    press_r0_ = r, press_h0_ = h, press_p0_ = pin;
+    return;
+  }
+  if (++press_tokens_ < press_window) return;
+  press_tokens_ = 0;
+  if (r < press_r0_ || h < press_h0_ || pin < press_p0_) {  // (statistics reset since: start again)
+    press_r0_ = r, press_h0_ = h, press_p0_ = pin;
+    return;
+  }
+  const double dr = (double)(r - press_r0_), dh = (double)(h - press_h0_), dp = (double)(pin - press_p0_);
+  press_r0_ = r, press_h0_ = h, press_p0_ = pin;
+  if (!((dr >= press_min && dr > press_frac * (dr + dh)) || dp / press_window > press_pageins)) return;
+  tier_shrinks++;
+  int left = 0;
+  for (int p = 0; p < npools; p++) {
+    SlotPool& S = P[p];
+    pcap_[p] /= 2;
+    left += pcap_[p];
+    for (int i = S.n + pcap_[p]; i < S.n + S.np; i++) {
+      Slot& x = S.s[i];
+      if (x.layer < 0 || x.pins > 0 || S.pending[i].load(std::memory_order_acquire) != 0 || x.promote) continue;
+      drop(x.layer, i, false);
+      st.n_prob_budget_drops++;
+    }
+  }
+  if (left * 8 < prob_slots_) {
+    tier_auto_paused = true;
+    spare_pause();
+  }
+}
+
 void Cache::tier_step() {
   const auto t0 = clk::now();
+  if (tok_now != tier_tok_) {  // a new token: this token's copy budget; the pressure rule
+    tier_tok_ = tok_now;
+    prom_tok_bytes_ = 0;
+    if (!spare_paused.load(std::memory_order_relaxed)) tier_pressure();
+  }
   const bool paused = spare_paused.load(std::memory_order_relaxed);
   if (paused && !prob_drained_) tier_drain();
   if (!prom_fl_.empty()) promote_settle();  // copies that landed: the records move (also after a pause)
@@ -663,7 +809,7 @@ void Cache::tier_step() {
         prom_q_[w++] = k;  // in use (a hold, a name): at a later boundary
         continue;
       }
-      promote_one(L, s);
+      if (promote_one(L, s)) prom_q_[w++] = k;  // (deferred by the copy budget)
     }
     prom_q_.resize(w);
   }
@@ -676,16 +822,20 @@ void Cache::tier_step() {
 // keep-score, its score must exceed that of the record the slab would evict for it (hz_victim: the lowest eligible
 // score, pins, the loop hold and the caps as at an eviction) by prom_margin. Refused: it stays in probation and is
 // tested again at its next reuse in a later token.
-void Cache::promote_one(int L, int s) {
+bool Cache::promote_one(int L, int s) {
   SlotPool& S = pool(L);
   Slot& x = S.s[s];
   const int e = x.e;
   const uint8_t* src = fmap[L] + (size_t)e * S.rec;
-  if (!all_resident(src, S.rec)) {  // the OS took it: a later use misses (no copy from the drive)
+  if (!probe_resident(src, S.rec)) {  // the OS took it: a later use misses (no copy from the drive)
     st.n_prob_reclaimed++;
     drop(L, s, true);
     free_slot(layer_pool[L], s);
-    return;
+    return false;
+  }
+  if (prom_copy_budget > 0 && prom_tok_bytes_ > 0 && prom_tok_bytes_ + (int64_t)S.rec > prom_copy_budget) {
+    st.n_promote_budget_deferred++;  // this token's copies are spent: at a later token (still a candidate)
+    return true;
   }
   const bool capped = !lcap.empty() && lheld[L] >= lcap[L];
   if ((capped || S.free_.empty()) && hazard_evict) {
@@ -699,7 +849,7 @@ void Cache::promote_one(int L, int s) {
       if (!(cs > vs + prom_margin)) {
         x.promote = false;
         st.n_promote_score_refused++;
-        return;
+        return false;
       }
     }
   }
@@ -709,9 +859,10 @@ void Cache::promote_one(int L, int s) {
   if (v < 0) {  // no slab slot to give now: stays in probation, tried again at its next reuse
     x.promote = false;
     st.n_promote_refused++;
-    return;
+    return false;
   }
   if (mem == Mem::PURGEABLE) touch_nonvolatile(L, v);
+  prom_tok_bytes_ += (int64_t)S.rec;
   // the slab slot is reserved (pinned, "in flight") until the copy lands; the record stays where it is meanwhile
   S.s[v] = Slot();
   S.s[v].pins = 1;
@@ -721,6 +872,7 @@ void Cache::promote_one(int L, int s) {
   prom_fl_.push_back({k, s, v, x.pseq});
   rd.copy_record(k, fds[L], (long)((size_t)e * S.rec), S.row(v), S.rec, src, &S.pending[v]);
   st.n_promote_started++;
+  return false;
 }
 
 // promotions whose copy landed: the record moves into its slab slot when its probation slot is not in use (else at a
@@ -800,6 +952,7 @@ Cache::~Cache() {
   free_region(core_slab, core_slab_bytes);
   for (size_t i = 0; i < fmap.size(); i++) munmap(fmap[i], fmap_bytes[i]);
   for (int fd : fds) close(fd);
+  for (int fd : fds_nc) close(fd);
   for (int p = 0; p < npools; p++) {
     free_region(P[p].slab, P[p].slab_bytes);
     for (auto r : P[p].preg) vm_deallocate(mach_task_self(), (vm_address_t)r, P[p].rec);
@@ -1127,13 +1280,13 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
   S.pending[slot].store(parts, std::memory_order_release);
   uint8_t* dst = mem == Mem::FILE || pr ? nullptr : S.row(slot);
   const uint8_t* view = !fmap.empty() ? fmap[L] + (size_t)e * R : nullptr;  // (FILE, or the spare tier's mapping)
-  // a slab read while the spare tier is on (probation full of pins): its buffered pread's pages dropped after it
-  const bool drop_view = dst && view && prob_slots_ && !spare_paused.load(std::memory_order_relaxed);
+  // a slab read while the spare tier is on: through the layer's F_NOCACHE descriptor, a DMA into the slab as without
+  // the tier (no copy through the file cache, no pages left there)
+  const int fd = dst && !fds_nc.empty() ? fds_nc[L] : fds[L];
   for (int i = 0; i < parts; i++) {
     size_t o = (size_t)i * piece, len = std::min(piece, R - o);
-    Readers::Job j{fds[L], (long)((size_t)e * R + o), dst ? dst + o : nullptr, len, layer_pool[L], slot};
+    Readers::Job j{fd, (long)((size_t)e * R + o), dst ? dst + o : nullptr, len, layer_pool[L], slot};
     if (view) j.view = view + o;
-    j.drop_view = drop_view;
     j.prob = pr;
     j.key = prob_slots_ ? L * NE + e : -1;
     j.step = urgent ? 0 : step;

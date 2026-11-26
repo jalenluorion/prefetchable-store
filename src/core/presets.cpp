@@ -402,6 +402,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     if (const Json* pr = member(sm, "promote"); pr && pr->kind == Json::OBJ) {
       if ((*pr)["uses"].kind == Json::NUM) p.spare_uses = (int)(*pr)["uses"].i(0);
       if ((*pr)["margin"].kind == Json::NUM) p.spare_margin = (*pr)["margin"].f(0);
+      if ((*pr)["copy_mb"].kind == Json::NUM) p.spare_copy_mb = (*pr)["copy_mb"].f(0);
     }
   }
   if (const Json* bg = prof("background"); bg && bg->kind == Json::OBJ) {  // per profile only (the drive decides)
@@ -500,7 +501,7 @@ std::string Resolved::json() const {
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   o << ",\"resident\":" << qq(resident) << ",\"resident_bits\":" << resident_bits;
   if (spare_mem)
-    o << ",\"spare_memory\":true,\"spare_probation_gb\":" << spare_gb << ",\"spare_promote\":{\"uses\":" << spare_uses << ",\"margin\":" << spare_margin << "}";
+    o << ",\"spare_memory\":true,\"spare_probation_gb\":" << spare_gb << ",\"spare_promote\":{\"uses\":" << spare_uses << ",\"margin\":" << spare_margin << ",\"copy_mb\":" << spare_copy_mb << "}";
   if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
   if (ctx > 0) o << ",\"ctx\":" << ctx;
   if (draft != "none") o << ",\"draft_max\":" << draft_max;  // (only while drafting: the block is unchanged with it off)
@@ -600,6 +601,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.spare_gb = spare_mem ? spare_gb : 0;
   x.spare_uses = spare_uses;
   x.spare_margin = spare_margin;
+  x.spare_copy_mb = spare_copy_mb;
   x.drive_gbs = drive_gbs;
   x.ctx = ctx_declared ? ctx : 0;
   return x;
@@ -677,6 +679,7 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   r.spare_gb = g.spare_gb && *g.spare_gb > 0 ? *g.spare_gb : pf && P.spare_gb > 0 ? P.spare_gb : r.spare_gb > 0 ? r.spare_gb : SPARE_GB_DEFAULT;
   r.spare_uses = g.spare_uses ? std::max(2, *g.spare_uses) : pf && P.spare_uses > 0 ? std::max(2, P.spare_uses) : r.spare_uses;
   r.spare_margin = g.spare_margin ? *g.spare_margin : pf && P.spare_margin == P.spare_margin ? P.spare_margin : r.spare_margin;
+  r.spare_copy_mb = g.spare_copy_mb ? *g.spare_copy_mb : pf && P.spare_copy_mb >= 0 ? P.spare_copy_mb : r.spare_copy_mb;
   r.drive_gbs = g.drive_gbs && *g.drive_gbs > 0 ? *g.drive_gbs : 0;  // bench only: never from a profile or a manifest
   // the context positions
   r.ctx_declared = pf && P.ctx > 0;
@@ -740,6 +743,7 @@ const RunFlag RUN_FLAGS[] = {
     {"--spare-gb", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x > 0 && ((g.spare_gb = x), true); }},
     {"--spare-uses", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && x >= 2 && ((g.spare_uses = x), true); }},
     {"--spare-margin", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && ((g.spare_margin = x), true); }},
+    {"--spare-copy-mb", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x >= 0 && ((g.spare_copy_mb = x), true); }},
     {"--drive-gbs", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x >= 0 && ((g.drive_gbs = x), true); }},
 };
 #undef RF_INT

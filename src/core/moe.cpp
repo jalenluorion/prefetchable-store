@@ -116,6 +116,7 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
   cache.prob_bytes = cache.file_under ? (int64_t)((o.spare_gb > 0 ? o.spare_gb : SPARE_GB_DEFAULT) * 1e9) : 0;
   cache.prom_uses = o.spare_uses;
   cache.prom_margin = o.spare_margin;
+  cache.prom_copy_budget = (int64_t)(std::max(0.0, o.spare_copy_mb) * 1e6);
   cache.defer_lock = o.cache_start_gb > 0 && o.cache_start_gb < o.cache_gb && o.mem == Mem::MLOCK;
   if (!cache.init(mi.layers, NE, K, mi.step_layer, mi.layer_fmt, rec, share, dir, mi.layer_file, o.cache_gb * 1e9, o.readers,
                   o.split, o.mem, o.skip_reads, err))

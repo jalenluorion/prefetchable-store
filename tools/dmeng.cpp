@@ -564,6 +564,7 @@ int main(int argc, char** argv) {
   co.spare_gb = ro.spare_gb;
   co.spare_uses = ro.spare_uses;
   co.spare_margin = ro.spare_margin;
+  co.spare_copy_mb = ro.spare_copy_mb;
   co.drive_gbs = ro.drive_gbs;
   co.skip_reads = a.skip_reads;
   co.loop_hold = a.loop_hold;
@@ -812,7 +813,7 @@ int main(int argc, char** argv) {
   auto& CS = C.cache.st;
   auto& RD = C.cache.rd;
   uint64_t dt0[7] = {0};
-  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0, pgin0 = 0, cpns0 = 0, cpn0 = 0, cpdr0 = 0;
+  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0, pgin0 = 0, cpns0 = 0, cpn0 = 0, cpdr0 = 0, flt0 = 0, rflt0 = 0, rpgin0 = 0;
   double fe_ms = 0;  // the front end's per-token work outside the model's step (sampling, records): stage "sample"
   auto reset_stats = [&]() {
     fe_ms = 0;
@@ -827,6 +828,9 @@ int main(int argc, char** argv) {
     fskip0 = RD.file_resident_skips.load();
     fskipb0 = RD.file_bytes_skipped.load();
     pgin0 = Cache::task_pageins();
+    flt0 = Cache::task_faults();
+    rflt0 = RD.reader_faults.load();
+    rpgin0 = RD.reader_pageins.load();
     cpns0 = RD.copy_ns.load();
     cpn0 = RD.copy_bytes.load();
     cpdr0 = RD.copy_drive_bytes.load();
@@ -882,7 +886,16 @@ int main(int argc, char** argv) {
        << ",\"purged\":" << CS.n_purged << ",\"held_at_end\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.held(p);
     js << "],\"held_gb\":" << C.cache.held_bytes() / 1e9 << ",\"mb_preads_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6)
-       << ",\"pageins\":" << Cache::task_pageins() - pgin0  // the process's page-ins in the loop (the readers never page in)
+       << ",\"pageins\":" << Cache::task_pageins() - pgin0  // the process's page-ins in the loop
+       // the compute's faults and page-ins: the process's less those the readers took bringing probation records in
+       // (with the tier off the readers take none: pread / DMA)
+       << ",\"faults_per_token\":" << per((double)(Cache::task_faults() - flt0))
+       << ",\"compute_faults_per_token\":" << per((double)(Cache::task_faults() - flt0) - (double)(RD.reader_faults.load() - rflt0))
+       << ",\"compute_pageins_per_token\":" << per((double)(Cache::task_pageins() - pgin0) - (double)(RD.reader_pageins.load() - rpgin0))
+       // the bytes: mb_issued_per_token = records named or missed x their size (= mb_read_per_token, the older name);
+       // the drive's = mb_preads_per_token (what the readers read; with the tier on, without the reads found resident and
+       // with the in-place re-reads of pinned records the OS reclaimed, which no issue counts)
+       << ",\"mb_issued_per_token\":" << per((CS.bytes_urgent + CS.bytes_pf) / 1e6)
        << ",\"slab_drops_per_token\":" << per(CS.n_slab_drops);  // slab records evicted or cut (the slab's churn, tier on or off)
     if (C.cache.mem == Mem::FILE) {
       js << ",\"file\":{\"check\":" << C.cache.file_check << ",\"evict_hint\":" << C.cache.file_evict_hint << ",\"skip_resident\":" << RD.file_skip_resident
@@ -905,7 +918,11 @@ int main(int argc, char** argv) {
          << ",\"mb_from_drive_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6) << ",\"reuses_per_token\":" << per(CS.n_prob_hit)
          << ",\"promotions_per_token\":" << per(CS.n_promoted) << ",\"promotions_refused_per_token\":" << per(CS.n_promote_refused)
          << ",\"promote_ms_per_token\":" << per(CS.promote_ms) << ",\"budget_drops_per_token\":" << per(CS.n_prob_budget_drops)
-         << ",\"promote_rule\":{\"uses\":" << C.cache.prom_uses << ",\"margin\":" << C.cache.prom_margin << "}"
+         << ",\"promote_rule\":{\"uses\":" << C.cache.prom_uses << ",\"margin\":" << C.cache.prom_margin << ",\"copy_mb\":" << C.cache.prom_copy_budget / 1e6 << "}"
+         << ",\"promotions_deferred_by_copy_budget_per_token\":" << per(CS.n_promote_budget_deferred)
+         << ",\"reader_faults_per_token\":" << per((double)(RD.reader_faults.load() - rflt0)) << ",\"reader_pageins_per_token\":" << per((double)(RD.reader_pageins.load() - rpgin0))
+         << ",\"probation_cap_gb_at_end\":" << [&] { double g = 0; for (int p = 0; p < C.cache.npools; p++) g += (double)C.cache.prob_cap(p) * C.cache.P[p].rec / 1e9; return g; }()
+         << ",\"pressure_shrinks\":" << C.cache.tier_shrinks << ",\"pressure_paused\":" << C.cache.tier_auto_paused
          << ",\"promotions_started_per_token\":" << per(CS.n_promote_started) << ",\"promotions_refused_by_score_per_token\":" << per(CS.n_promote_score_refused)
          << ",\"promotions_discarded_per_token\":" << per(CS.n_promote_discarded)
          << ",\"promote_score_candidate_mean\":" << CS.prom_score_cand / std::max<uint64_t>(1, CS.prom_score_n)

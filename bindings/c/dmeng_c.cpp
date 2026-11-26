@@ -459,6 +459,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   co.spare_gb = ro.spare_gb;                            // model_options "run:spare-gb=X"
   co.spare_uses = ro.spare_uses;                        // "run:spare-uses=N", "run:spare-margin=M"
   co.spare_margin = ro.spare_margin;
+  co.spare_copy_mb = ro.spare_copy_mb;
   ro.spare_mem = co.spare_mem;
   co.drive_gbs = ro.drive_gbs;  // model_options "run:drive-gbs=X" (bench only)
   e->C = std::make_unique<Core>();
@@ -959,7 +960,10 @@ int dm_counters(dm_engine* e, dm_counters_t* out) {
   out->bytes_named_unused = e->C->cache.st.n_pf_unused_evicted * (uint64_t)e->C->cache.P[0].rec;
   out->promotions = S.n_promoted;
   out->probation_reclaimed = S.n_prob_reclaimed;
-  out->pageins = Cache::task_pageins() - e->C->cache.pageins_at_init;
+  {  // the compute's: the process's less the readers' own (probation reads map their pages by touching them)
+    const uint64_t tp = Cache::task_pageins() - e->C->cache.pageins_at_init, rp = e->C->cache.rd.reader_pageins.load();
+    out->pageins = tp > rp ? tp - rp : 0;
+  }
   out->probation_bytes = (int64_t)e->C->cache.prob_held_bytes();
   return DM_OK;
 }
@@ -1015,7 +1019,8 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"gb_reuse_served\":" << Ca.st.bytes_prob_hit / 1e9 << ",\"gb_from_drive\":" << Ca.rd.bytes.load() / 1e9
       << ",\"promotions\":" << Ca.st.n_promoted << ",\"promotions_refused\":" << Ca.st.n_promote_refused
       << ",\"promotions_refused_by_score\":" << Ca.st.n_promote_score_refused << ",\"slab_drops\":" << Ca.st.n_slab_drops
-      << ",\"promote_copy_ms\":" << Ca.rd.copy_ns.load() / 1e6
+      << ",\"promote_copy_ms\":" << Ca.rd.copy_ns.load() / 1e6 << ",\"pressure_shrinks\":" << Ca.tier_shrinks
+      << ",\"pressure_paused\":" << Ca.tier_auto_paused << ",\"reader_pageins\":" << Ca.rd.reader_pageins.load()
       << ",\"reclaimed_before_reuse\":" << Ca.st.n_prob_reclaimed << ",\"budget_drops\":" << Ca.st.n_prob_budget_drops
       << ",\"promote_ms\":" << Ca.st.promote_ms << ",\"pageins\":" << Cache::task_pageins() - Ca.pageins_at_init << "}";
   s << "}";

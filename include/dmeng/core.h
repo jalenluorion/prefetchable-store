@@ -138,6 +138,7 @@ struct CoreOpts {
   double spare_gb = 0;     // its probation budget in GB (Cache::prob_bytes; --spare-gb; 0: SPARE_GB_DEFAULT)
   int spare_uses = 3;      // its promotion rule (Cache::prom_uses / prom_margin; --spare-uses, --spare-margin)
   double spare_margin = 0.1;
+  double spare_copy_mb = 32;  // its promotions' copies per token at most (MB; Cache::prom_copy_budget; --spare-copy-mb; 0: no limit)
   double drive_gbs = 0;    // bench only: the readers' combined drive rate capped at this many GB/s (Readers::drive_bps,
                            // --drive-gbs); 0 = off, the default, in no profile
   bool skip_reads = false;   // timing without reads (the slots keep whatever bytes they have)
