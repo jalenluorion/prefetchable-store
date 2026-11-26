@@ -406,6 +406,12 @@ enum SelfCheck {
             out["mem_after_chat"] = mem("after chat")
         }
         out["conversations_after"] = ConversationStore.loadAll().count
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-chat-only") {  // the chat rows only
+            out["mem_end"] = mem("selfcheck end")
+            out["memory_warnings"] = model.memoryWarnings
+            finish()
+            return
+        }
 
         // 3. Exact, then Fast: the engine reopened in the mode, greedy decoding of the Pittsburgh prompt (the Exact gate) and
         //    of the coding prompt
