@@ -792,12 +792,12 @@
   "gpu_min_wave": 128,
   "pack_min": 1,
   "dn_rows": 64,
-  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunks of 256 (at most a quarter of the scratch bound), spans as long as the 768 MB scratch bound allows after the sub-chunk and MoE-block buffers (a span reads each needed expert once: one span up to about 9,000 positions), the next layer named whole from 2,048 positions (the old runner's threshold), else the next layer's router picks on this layer's MoE inputs; the GPU's exact share from sub-chunks of 64; fast mode: the products and the experts on the GPU in half precision (fast: 1; exact mode never), checked by teacher forcing after a 7,610-token prompt (200 positions: top-1 agreement 0.985 with exact prefill + the same fast decode, NLL -0.026 +- 0.033); fast mode: a prompt of at most 64 positions (drop_upto) keeps the decode's leave-out rule (the old runner ran prompts under 48 tokens through its approximate decode): measured through the server on the recorded OpenCode session (3.0 GB): tool results of 20-59 new tokens 3.0-6.0 s to the first token against 3.7-7.4 s, a new thread's first message (22 new tokens) 3.8 s against 4.5 s (10.4-11.4 GB read against 13.1-14.1); the 600 decode positions after a 71-token prompt under the rule: top-1 agreement with exact 0.967 and NLL +0.013 against 0.964 and +0.016 after the lossless prompt; the exact path's experts in waves as they land (a wave on the GPU from 128 rows), every routed expert and the shared expert through the packed kernels from one user (the shared expert on the GPU's share too: it ran on the CPU for every position), down projections in 64-row jobs, as the 35B"
+  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunks of 256 (at most a quarter of the scratch bound), spans as long as the 768 MB scratch bound allows after the sub-chunk and MoE-block buffers (a span reads each needed expert once: one span up to about 9,000 positions), the next layer named whole from 2,048 positions, else the next layer's router picks on this layer's MoE inputs; the GPU's exact share from sub-chunks of 64; fast mode: the products and the experts on the GPU in half precision (fast: 1; exact mode never), checked by teacher forcing after a 7,610-token prompt (200 positions: top-1 agreement 0.985 with exact prefill + the same fast decode, NLL -0.026 +- 0.033); fast mode: a prompt of at most 64 positions (drop_upto) keeps the decode's leave-out rule: measured through the server on the recorded OpenCode session (3.0 GB): tool results of 20-59 new tokens 3.0-6.0 s to the first token against 3.7-7.4 s, a new thread's first message (22 new tokens) 3.8 s against 4.5 s (10.4-11.4 GB read against 13.1-14.1); the 600 decode positions after a 71-token prompt under the rule: top-1 agreement with exact 0.967 and NLL +0.013 against 0.964 and +0.016 after the lossless prompt; the exact path's experts in waves as they land (a wave on the GPU from 128 rows), every routed expert and the shared expert through the packed kernels from one user (the shared expert on the GPU's share too), down projections in 64-row jobs, as the 35B"
  },
  "drafting": {
   "cost_prior": null,
   "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it",
-  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: none (this family has no draft head: a profile declaring head fails at open)), resolved once for dmeng, dmserve and the C API (which has no drafting: a declared default stays off there, an explicit request is refused); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile until measured on the real model; this family has no multi-position verify pass yet, so a profile declaring either source fails at open"
+  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: none (this family has no draft head: a profile declaring head fails at open)), resolved once for dmeng, dmserve and the C API (the C API through dm_step_n); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile (not measured on the real model); this family has no multi-position verify pass, so a profile declaring either source fails at open"
  },
  "modes": {
   "exact": {
@@ -859,7 +859,7 @@
        5.71,
        6.13
       ],
-      "note": "sky: three runs, agreement 0.963-0.965; tok/s at other processes' 63% / 109% CPU"
+      "note": "a third text (a chat answer on why the sky is blue), three runs: agreement 0.963-0.965; tok/s at other processes' 63% / 109% CPU"
      },
      {
       "setting": "drop eps 0.18",
@@ -904,7 +904,7 @@
        0.992
       ],
       "pooled_agree": 0.98,
-      "note": "speed: run-ahead measured +4.6 to +10.5% by token-alternating A/B in one process (FINISH, 2026-11-24); kept"
+      "note": "speed: run-ahead measured +4.6 to +10.5% by token-alternating A/B in one process; kept"
      },
      {
       "setting": "drop eps 0.13, names top 6",
@@ -954,7 +954,7 @@
       "note": "two ABAB pairs against the default: wait for reads 58.1 / 57.0 ms per token against 55.9 / 58.0; no gain on the drive (the tok/s difference followed the other processes' CPU)"
      },
      {
-      "setting": "the old runner's settings (replace, never read on the spot, names top 10, no run-ahead, no background fetch)",
+      "setting": "replace on a miss, never read on the spot, names top 10, no run-ahead, no background reads",
       "mb_per_token": [
        612,
        null
@@ -985,7 +985,7 @@
      "the reference prompt (an explanation)",
      "code.ids (a code-review agent prompt)"
     ],
-    "earlier": "2026-11-25 morning, 3.2 GB, one 160-token text (+-0.02): eps 0.05 / 0.13 / 0.25 / 0.50: 628 / 462 / 315 / 214 MB, agreement 0.963 / 0.950 / 0.919 / 0.856; replace never-read 492 MB 0.938"
+    "single_text": "3.2 GB cache, one 160-token text (+-0.02): eps 0.05 / 0.13 / 0.25 / 0.50: 628 / 462 / 315 / 214 MB, agreement 0.963 / 0.950 / 0.919 / 0.856; replace never-read 492 MB 0.938"
    }
   }
  },

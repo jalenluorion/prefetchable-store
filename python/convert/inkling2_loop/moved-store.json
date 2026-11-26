@@ -2,7 +2,7 @@
  "format": "moved-store",
  "format_version": "1.0",
  "family": "inkling2_loop",
- "name": "Inkling-2-Mini-moved-store",
+ "name": "Inkling-2-Mini-prefetchable-store",
  "source": {
   "repo": "thinkingmachines/Inkling-2-Mini",
   "revision": "ed40e7da625f594fc9c4990f5f66be24873c22d7",
@@ -14,7 +14,7 @@
   "release_bytes": 19526019168
  },
  "converter": {
-  "code": "github.com/jalenluorion/moved-store python/convert/inkling2_loop/convert.py + store.py (same bytes as run)",
+  "code": "python/convert/inkling2_loop/convert.py + store.py (the same bytes as run)",
   "commit": null,
   "sha256": "a97f10475fdd8ba07a06e305b2ca702375a1d7484e5f4b2964964b6b8c20147d",
   "date": "2026-11-20"
@@ -154,7 +154,7 @@
    "precision": "f16+f32",
    "optional": true,
    "local": false,
-   "size_from": "converted on babel from the ink_r_best export"
+   "size_from": "converted from the router trainer's ink_r_best export"
   },
   {
    "path": "routers/mlp_k1_h512.safetensors",
@@ -164,7 +164,7 @@
    "precision": "f16+f32",
    "optional": true,
    "local": false,
-   "size_from": "converted on babel from the ink_r_best export"
+   "size_from": "converted from the router trainer's ink_r_best export"
   },
   {
    "path": "routers/mlp_k2_h512.safetensors",
@@ -174,7 +174,7 @@
    "precision": "f16+f32",
    "optional": true,
    "local": false,
-   "size_from": "converted on babel from the ink_r_best export"
+   "size_from": "converted from the router trainer's ink_r_best export"
   },
   {
    "path": "routers/mlp_k4_h512.safetensors",
@@ -184,7 +184,7 @@
    "precision": "f16+f32",
    "optional": true,
    "local": false,
-   "size_from": "converted on babel from the ink_r_best export"
+   "size_from": "converted from the router trainer's ink_r_best export"
   },
   {
    "path": "routers/mlp_k8_h512.safetensors",
@@ -194,7 +194,7 @@
    "precision": "f16+f32",
    "optional": true,
    "local": false,
-   "size_from": "converted on babel from the ink_r_best export"
+   "size_from": "converted from the router trainer's ink_r_best export"
   },
   {
    "path": "routers/xtok_s41_h512.safetensors",
@@ -766,7 +766,7 @@
     "run": "ink_r_best",
     "variant": "full_k1_h512",
     "tokens": 120000000,
-    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "code": "the router trainer (not in this repository): 8 x 1024 tokens per step, ink_r_main's data and schedule",
     "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
     "report": null,
     "exported_as": {
@@ -802,7 +802,7 @@
     "run": "ink_r_best",
     "variant": "full_k2_h512",
     "tokens": 120000000,
-    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "code": "the router trainer (not in this repository): 8 x 1024 tokens per step, ink_r_main's data and schedule",
     "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
     "report": null,
     "exported_as": {
@@ -838,7 +838,7 @@
     "run": "ink_r_best",
     "variant": "full_k4_h512",
     "tokens": 120000000,
-    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "code": "the router trainer (not in this repository): 8 x 1024 tokens per step, ink_r_main's data and schedule",
     "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
     "report": null,
     "exported_as": {
@@ -874,7 +874,7 @@
     "run": "ink_r_best",
     "variant": "full_k8_h512",
     "tokens": 120000000,
-    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "code": "the router trainer (not in this repository): 8 x 1024 tokens per step, ink_r_main's data and schedule",
     "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
     "report": null,
     "exported_as": {
@@ -910,7 +910,7 @@
     "run": "ink_r_best",
     "variant": "full_k16_h512",
     "tokens": 120000000,
-    "code": "jobs/babel/ink_router.py + jobs/babel/babel_ink_best.sh (8 x 1024 tokens per step, ink_r_main's data and schedule)",
+    "code": "the router trainer (not in this repository): 8 x 1024 tokens per step, ink_r_main's data and schedule",
     "objective": "KL(pi || softmax(z)), pi = 0.5 uniform over the released top-8 + 0.5 its renormalised weights",
     "report": null,
     "exported_as": {
@@ -945,7 +945,7 @@
    "training": {
     "run": "ink_r_main",
     "variant": "lin_k2",
-    "code": "jobs/babel/ink_router.py (linear form, no hidden layer)",
+    "code": "the router trainer (not in this repository): linear form, no hidden layer",
     "exported_as": {
      "file": "ink_router_lin_k2_fp16.npz",
      "sha256": "341be9e8d3bd6a5d56f39d5881018af7aa40d7ee5fdfb5de0ebdbfbe54af9d02"
@@ -978,7 +978,7 @@
    ],
    "engine_format": "dmres1",
    "sha256": "f87550c84cfcf721d2d643503583aba75a1f30069b24b18e389622c2ff04b4bd",
-   "reference": "engine/build_ink/resident_real_b8.bin (engine/ink/convert_ink.py --bits 8)",
+   "reference": "checked against the Python converter's file (python/derive/inkling2_loop.py --bits 8)",
    "path": "derived/resident_q8.dmres1.15a39fa8aa48.bin",
    "bytes": 1266515968
   },
@@ -1031,7 +1031,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "8bebfe9c25d5df48ca892d7fc1d553b01e1fbf2f9fc235111f01a7ec5f9114a0",
-   "made_by": "moved-store python/derive/inkling2_loop_xtok.py --from routers/xtok_s41_h512.safetensors --targets 0-5 --bits 8 (8-bit, the first six target applications; the engine itself does not derive this kind)",
+   "made_by": "python/derive/inkling2_loop_xtok.py --from routers/xtok_s41_h512.safetensors --targets 0-5 --bits 8 (8-bit, the first six target applications; the engine itself does not derive this kind)",
    "path": "derived/router.xtok_s41_h512.q8.dmr1.ba2c977e8db0.bin",
    "bytes": 20709376
   },
@@ -1042,7 +1042,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "2b394e3f397202183ed75f6cd9c9c1d58205fce896028f759f781cd7848aa97e",
-   "made_by": "moved-store python/derive/inkling2_loop_xtok.py --from routers/xtok_s47_h512.safetensors --targets 0-5 --bits 8 (8-bit, the first six target applications; the engine itself does not derive this kind)",
+   "made_by": "python/derive/inkling2_loop_xtok.py --from routers/xtok_s47_h512.safetensors --targets 0-5 --bits 8 (8-bit, the first six target applications; the engine itself does not derive this kind)",
    "path": "derived/router.xtok_s47_h512.q8.dmr1.1e0e7f1cfc2e.bin",
    "bytes": 20709376
   },
@@ -1053,7 +1053,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "cccfc6bd313a2058045b96a94c8d804ec87e3b18abcaa4c0b5cb7a21701975a3",
-   "reference": "local/inkling/model/routers/ink_r_main/ink_router_lin_k2_b8.dmr (whole-file identical)",
+   "reference": "whole-file identical to the Python converter's file (python/derive/inkling2_loop_routers.py)",
    "path": "derived/router.linear_k2.q8.dmr1.1e7849984cbb.bin",
    "bytes": 49152000
   },
@@ -1076,13 +1076,13 @@
  ],
  "legacy": [],
  "pending": [
-  "vision.safetensors (636,563,560 B) left out (recommendation: not uploaded); --with-vision lists it as an optional extra"
+  "vision.safetensors (636,563,560 B) is not in the weight repo (the store is text only)"
  ],
  "unknown": [
-  "vision.safetensors: listed in sha256.txt but not on the Mac"
+  "vision.safetensors: listed in the release's sha256.txt, not part of this store"
  ],
  "generated": {
-  "by": "moved-store release tools, from the manifest of 2026-11-21 plus the new parts",
+  "by": "from the manifest of 2026-11-21 with the new parts added",
   "date": "2026-11-26"
  },
  "modes": {
@@ -1105,7 +1105,7 @@
      "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights); each arm against exact on the device over the same 600 teacher-forced positions",
      "rows": [
       {
-       "setting": "w 0.10, waiting for reads in flight (the published rule)",
+       "setting": "w 0.10, waiting for reads in flight",
        "top1_agree": "592/600 = 0.987",
        "tok_s": "2.06-2.27"
       },
@@ -1130,13 +1130,13 @@
      "measured": "base M4, phone profile, 4.0 GB cache, the same 1,100 teacher-forced positions of exact's own answer to the code prompt",
      "rows": [
       {
-       "setting": "w 0.10, waiting for reads in flight (the published rule)",
+       "setting": "w 0.10, waiting for reads in flight",
        "top1_agree": 0.976,
        "nll_delta": 0.0075,
        "mb_per_token": 283
       },
       {
-       "setting": "w = mass = 0.13, never waiting (the previous line value)",
+       "setting": "w = mass = 0.13, never waiting",
        "top1_agree": 0.973,
        "nll_delta": 0.0081,
        "mb_per_token": 287
@@ -1185,12 +1185,12 @@
       }
      ]
     },
-    "previous_rule": {
-     "note": "the calibration of the previous line value (w = mass = 0.13, never waiting), kept as history",
+    "mac_capped_rule": {
+     "note": "the Mac comparison of the capped rule (w = mass = 0.13, never waiting) with the 0.10 threshold",
      "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
      "rows": [
       {
-       "setting": "leave-out rule 0.13 (this)",
+       "setting": "leave-out rule 0.13",
        "tok_s": [
         8.08,
         6.8
@@ -1209,7 +1209,7 @@
        ]
       },
       {
-       "setting": "weight 0.1, wait for reads in flight (before)",
+       "setting": "weight 0.1, wait for reads in flight",
        "tok_s": [
         6.47,
         7.24
@@ -1228,9 +1228,9 @@
        ]
       }
      ],
-     "reason": "at least as good as the rule before on the Mac (tok/s 7.44 against 6.86 mean, agreement 0.984 against 0.980); not yet measured on a phone"
+     "reason": "the capped rule at least as good as the 0.10 threshold on the Mac (tok/s 7.44 against 6.86 mean, agreement 0.984 against 0.980); not measured on a phone"
     },
-    "reason": "the owner's choice (2026-11-26), one rule for the Mac and the phones: threshold 0.15 in the form the phone measured; on the iPhone 3.15 tok/s against 2.06-2.27 at the published rule, top choice agreement 0.960 against 0.987"
+    "reason": "one rule for the Mac and the phones: threshold 0.15 in the form the phone measured; on the iPhone 3.15 tok/s against 2.06-2.27 at the published rule, top choice agreement 0.960 against 0.987"
    }
   }
  },
@@ -1257,7 +1257,7 @@
     },
     "calibration": {
      "measured": "base M4, 7.8 GB cache, the merged engine, on AC; fast = approx:drop:w=0.15. Fast against exact on the same 1,100 teacher-forced positions per text (agreement | NLL delta, nats | MB per token | tok/s): code: confidence 0.5 of 16 0.9755 | +0.0070 | 67.3 | 16.5; top 3 0.9745 | +0.0067 | 30.1 | 17.0; names off 0.9736 | +0.0052 | 11.4 | 19.6. Prose: confidence 0.9909 | +0.0050 | 34.0 | 19.4; top 3 0.9845 | +0.0051 | 12.0 | 20.5; off 0.9791 | +0.0129 | 5.8 | 21.2. Exact, two alternating runs each (tok/s, wait ms per token): prose 7.8 GB: confidence 17.45, 17.37 (9.8 ms); top 3 16.86, 17.19 (10.3); off 17.04, 16.09 (11.8). Code 6.0 GB: confidence 9.59, 9.73 (46.5 ms, 268 MB per token); top 3 9.94, 10.10 (42.3 ms, 236 MB); off 9.91, 10.03 (45.5 ms, 221 MB). Prose 6.0 GB: confidence 13.03, 13.78; top 3 13.57, 13.70; off 13.23, 13.50",
-     "reason": "in fast mode a name starts a read that the leave-out rule would otherwise skip and the step then waits for it, so a generous rule reads two to three times the bytes for the same quality; top 3 keeps the NLL and halves the bytes; in exact the rules tie, so exact keeps the published rule; the phone profiles are measured on the phone"
+     "reason": "in fast mode a name starts a read that the leave-out rule would otherwise skip and the step then waits for it, so a generous rule reads two to three times the bytes for the same quality; top 3 keeps the NLL and halves the bytes; in exact the rules tie, so exact keeps the confidence rule; the phone profiles are measured on the phone"
     }
    },
    "cache": "auto",
@@ -1467,7 +1467,7 @@
    "prefill": {
     "apart": 0,
     "calibration": {
-     "measured": "base M4 16 GB, AC, the merged build (next), mac profile; 400 tokens after the model's code prompt, cache 7.8 GB; MB read per token, the published engine's beside",
+     "measured": "base M4 16 GB, AC, mac profile; 400 tokens after the model's code prompt, cache 7.8 GB; MB read per token, the engine's first public release beside",
      "rows": [
       {
        "setting": "apart 1 (the model-level value)",
@@ -1484,7 +1484,7 @@
        }
       },
       {
-       "setting": "the published engine",
+       "setting": "the engine's first public release",
        "mb_per_token": {
         "exact": 147.4,
         "fast": 95.5
@@ -1703,7 +1703,7 @@
     "calibration": {
      "measured": "iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact ids identical either way: 0.65 / 0.65 took 48.7 / 61.1 s (exact / fast) against 40.0 / 50.2 s off from a nominal start, 56.5 / 67.1 against 44.8 / 54.5 s from serious, and left 0.12-0.22 GB more footprint; the projections alone 59.5 / 55.4 s",
      "reason": "off by measurement: 20% slower with the split (the CPU waits on the GPU's NVFP4 expert share); the same as the built-in CPU only, declared to keep the measurement beside it",
-     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class; the app has passed this share on phone so far, so the resolved behaviour on phones does not change"
+     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class"
     }
    },
    "run_ahead": {
@@ -1738,8 +1738,8 @@
     "target_gb": 2.96,
     "non_cache_gb": 1.26,
     "calibration": {
-     "measured": "iPhone 15 Plus (6 GB), phone-small, flash-last / release builds, 2026-11-26: footprint 2.90-2.98 GB in decode at a 1.70 GB cache, so 1.26 GB beside the cache (4-bit in-memory weights, router, state at 4,096 positions, checkpoints)",
-     "reason": "sized for an app footprint of 2.96 GB on the 6 GB class (the old app's footprint on this phone, the equal-footprint comparison of results/ios/p2/P2.md) instead of from the memory iOS reports at open; the target belongs to the device class, the non-cache footprint to the model: 2.96 - 1.26 = 1.70 GB"
+     "measured": "iPhone 15 Plus (6 GB), phone-small, 2026-11-26: footprint 2.90-2.98 GB in decode at a 1.70 GB cache, so 1.26 GB beside the cache (4-bit in-memory weights, router, state at 4,096 positions, checkpoints)",
+     "reason": "sized for an app footprint of 2.96 GB on the 6 GB class (the equal-footprint target of results/ios/p2/P2.md) instead of from the memory iOS reports at open; the target belongs to the device class, the non-cache footprint to the model: 2.96 - 1.26 = 1.70 GB"
     }
    },
    "parts": [
@@ -1920,7 +1920,7 @@
     }
    ],
    "bytes": 15526167637,
-   "status": "top choice equal to the exact 8-bit engine, prose / agent text: exact 0.934 / 0.961, fast at a 1.7 GB cache 0.911 / 0.943 (Mac); a device run is still to do",
+   "status": "top choice equal to the exact 8-bit engine, prose / agent text: exact 0.934 / 0.961, fast at a 1.7 GB cache 0.911 / 0.943 (Mac); not measured on the device",
    "experts": {
     "layer_format": [
      "nvfp4_g16",
@@ -2134,11 +2134,11 @@
   "dn_rows": 64,
   "apart": 1,
   "drop_upto": 64,
-  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, else (a span of one sub-chunk) its released router's picks on this application's MoE inputs (short_names, as the 35B and Flash-Next), the last span joined under a quarter span, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next; the experts in waves as they land (a wave on the GPU from 128 rows), packed kernels from one user where the format has them (NVFP4 keeps its own threshold; MXFP8 has none), down projections in 64-row jobs, as the 35B; the prompt kept apart from the decode's cache statistics (apart, the hazard policy only: placement), as Flash-Next; fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (drop_upto 64, the value Flash-Next declares, the old runner's threshold), longer prompts lossless (iPhone 15 Plus, phone-small, fast, against the lossless pass: a new chat's first token 15.9 -> 11.8 s, a follow-up 17.9 -> 6.8 s, 10.8 / 9.3 -> 6.0 / 4.8 GB read for 24 / 21 positions)"
+  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, else (a span of one sub-chunk) its released router's picks on this application's MoE inputs (short_names, as the 35B and Flash-Next), the last span joined under a quarter span, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next; the experts in waves as they land (a wave on the GPU from 128 rows), packed kernels from one user where the format has them (NVFP4 keeps its own threshold; MXFP8 has none), down projections in 64-row jobs, as the 35B; the prompt kept apart from the decode's cache statistics (apart, the hazard policy only: placement), as Flash-Next; fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (drop_upto 64, the value Flash-Next declares), longer prompts lossless (iPhone 15 Plus, phone-small, fast, against the lossless pass: a new chat's first token 15.9 -> 11.8 s, a follow-up 17.9 -> 6.8 s, 10.8 / 9.3 -> 6.0 / 4.8 GB read for 24 / 21 positions)"
  },
  "drafting": {
   "cost_prior": null,
-  "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it. The prior declared before (0, 1.0, 1.64, 2.07, 2.5, 2.95, 3.41, 3.86, 4.32, 'base M4, dmeng step costs') is the 35B's number for number; the published engine's code held the same array for Inkling (src/core/draft.cpp, DraftCtl::cost_prior, `ink` beside `q36`), and no Inkling measurement of pass costs is recorded: unmeasured",
-  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: the release's draft head (mtp.safetensors, the mac profile's optional part, with resident.safetensors)), resolved once for dmeng, dmserve and the C API (which has no drafting: a declared default stays off there, an explicit request is refused); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile until measured on the real model"
+  "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it. No Inkling measurement of pass costs is recorded.",
+  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: the release's draft head (mtp.safetensors, the mac profile's optional part, with resident.safetensors)), resolved once for dmeng, dmserve and the C API (the C API through dm_step_n); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile (not measured on the real model)"
  }
 }

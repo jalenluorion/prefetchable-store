@@ -2,7 +2,7 @@
  "format": "moved-store",
  "format_version": "1.0",
  "family": "qwen3_5_moe",
- "name": "Qwen3.6-35B-A3B-moved-store",
+ "name": "Qwen3.6-35B-A3B-prefetchable-store",
  "source": {
   "repo": "Qwen/Qwen3.6-35B-A3B",
   "revision": "345d467b117d1fd5eda9b879a5988de9ae5f47a7",
@@ -10,7 +10,7 @@
   "license_file": "LICENSE"
  },
  "converter": {
-  "code": "github.com/jalenluorion/moved-store python/convert/qwen3_5_moe/convert.py (the sha256 below is of the file as run; the published file differs only in its docstring)",
+  "code": "python/convert/qwen3_5_moe/convert.py (the sha256 below is of the file as run; this repository's copy differs only in its docstring)",
   "commit": null,
   "sha256": "bd3102cd23b561048bf7fcc20477bcdcbf49dce5bfe8d75753b9290a3fb638e8",
   "date": "2026-11-20"
@@ -181,7 +181,7 @@
    "precision": "f16+f32",
    "optional": true,
    "local": false,
-   "size_from": "converted on babel from routers/q36_router_full_k3_h512.npz"
+   "size_from": "converted from routers/q36_router_full_k3_h512.npz"
   },
   {
    "path": "routers/mlp_k4_h512.safetensors",
@@ -950,7 +950,7 @@
    ],
    "engine_format": "dmres1",
    "sha256": "38911cd1999715bd09e3af4ca19ee6bc8187b9237bb653620f37a28d8bf0921b",
-   "reference": "local/q36/model/dmeng_resident.bin (engine/python/convert.py resident)",
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py resident)",
    "path": "derived/resident_q8.dmres1.a603e898ddee.bin",
    "bytes": 2091827200
   },
@@ -961,7 +961,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "2f68c7ad9e1ebb4f4a69399235e8e0ca6473f4a3a2787dee21f95cee5f7f9c7f",
-   "reference": "local/q36/model/routers/lin/q36_router_lin_k1.dmr (today's Python converter)"
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py router)"
   },
   {
    "id": "router.linear_k2.q8",
@@ -970,7 +970,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "97f4e33a03c9d5bb910961cfab6b889b779843554553e5a6f73e5f974a9089d0",
-   "reference": "local/q36/model/routers/lin/q36_router_lin_k2.dmr (today's Python converter)",
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py router)",
    "path": "derived/router.linear_k2.q8.dmr1.efd45c78a56b.bin",
    "bytes": 68091904
   },
@@ -981,7 +981,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "acf8bdbd4834c6baa9842866d244b146ee16f7fd392eb8d5cb538cf905612ea5",
-   "reference": "local/q36/model/routers/lin/q36_router_lin_k3.dmr (today's Python converter)"
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py router)"
   },
   {
    "id": "router.linear_k4.q8",
@@ -990,7 +990,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "2fd00c2778b44cd8b24a929900ed5540c7be5d50457e6842ef57634b477af2d0",
-   "reference": "local/q36/model/routers/lin/q36_router_lin_k4.dmr (today's Python converter)"
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py router)"
   },
   {
    "id": "router.mlp_k1_h512.q8",
@@ -999,7 +999,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "46414b4f268a7a47ddbcde11806e0739342400eb2c566b5dc033b9639f547aa3",
-   "reference": "local/q36/model/routers/q36_router_full_k1_h512.dmr (today's Python converter)"
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py router)"
   },
   {
    "id": "router.mlp_k2_h512.q8",
@@ -1008,7 +1008,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "73c0e98d8f0e112d907ffd4227e0d5e8ce8098feff985a9b9374dbf5b97f22ee",
-   "reference": "local/q36/model/routers/q36_router_full_k2_h512.dmr (today's Python converter)"
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py router)"
   },
   {
    "id": "router.mlp_k3_h512.q8",
@@ -1025,7 +1025,7 @@
    ],
    "engine_format": "dmr1",
    "sha256": "ec34a89993500d69fb37739559bb8c2191a0fcf78fc5f8776d83ee4f36bbbe73",
-   "reference": "local/q36/model/routers/q36_router_full_k4_h512.dmr (today's Python converter)"
+   "reference": "checked against the Python converter's file (python/derive/qwen3_5_moe.py router)"
   }
  ],
  "legacy": [
@@ -1037,7 +1037,7 @@
  "pending": [],
  "unknown": [],
  "generated": {
-  "by": "moved-store release tools, from the manifest of 2026-11-21 plus the new parts",
+  "by": "from the manifest of 2026-11-21 with the new parts added",
   "date": "2026-11-26"
  },
  "modes": {
@@ -1060,7 +1060,7 @@
      "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights); agreement: each arm against exact on the device over the same 600 teacher-forced positions; speed: one launch on a cooled phone (thermal fair at the start, serious from the second arm on), the steady 200-token prompt, arms in the order 0.10, 0.15, 0.20, 0.10, 0.20, 0.15",
      "rows": [
       {
-       "setting": "w 0.10, waiting for reads in flight (the rule before)",
+       "setting": "w 0.10, waiting for reads in flight",
        "top1_agree": "591/600 = 0.985",
        "tok_s": [
         5.86,
@@ -1089,39 +1089,30 @@
       }
      ]
     },
-    "phone_earlier": {
+    "phone_w008": {
      "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), the same launch, 600 teacher-forced positions against exact on the device",
      "rows": [
       {
-       "setting": "weight 0.1, wait for reads in flight (the rule then)",
+       "setting": "weight 0.1, wait for reads in flight",
        "tok_s": 4.75,
        "mb_per_token": 112,
        "top1_agree": "589/600 = 0.982"
       },
       {
-       "setting": "weight 0.08, wait for reads in flight (approx:drop:w=0.08, the phone-small override declared before)",
+       "setting": "weight 0.08, wait for reads in flight (approx:drop:w=0.08)",
        "tok_s": "3.95-3.98",
        "mb_per_token": 159,
        "top1_agree": "590/600 = 0.983"
       }
      ],
      "reason": "no profile overrides this rule: on the 4-bit in-memory weights 0.08 read 159 against 112 MB per token and ran 3.95-3.98 against 4.75 tok/s for one more agreeing position in 600",
-     "note": "the earlier comparison (it removed the phone-small override w 0.08; the rule then was w 0.10)"
+     "note": "0.08 against 0.10 on phone-small: why no profile declares its own threshold"
     },
-    "mac": {
-     "measured": "base M4, 2,200 teacher-forced positions at 2.8 and 6.6 GB caches",
-     "rows": [
-      {
-       "setting": "w 0.10, 0.15 and others",
-       "status": "to be added (being measured)"
-      }
-     ]
-    },
-    "mac_earlier": {
+    "mac_capped_rule": {
      "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
      "rows": [
       {
-       "setting": "weight 0.1, wait for reads in flight (this)",
+       "setting": "weight 0.1, wait for reads in flight",
        "tok_s": [
         13.06,
         6.38
@@ -1140,7 +1131,7 @@
        ]
       },
       {
-       "setting": "leave-out rule 0.13: w = mass = 0.13, a pick in flight not waited for (formerly --mode fast-eps, removed)",
+       "setting": "leave-out rule 0.13: w = mass = 0.13, a pick in flight not waited for",
        "tok_s": [
         14.61,
         15.11
@@ -1160,9 +1151,9 @@
       }
      ],
      "reason": "the weight threshold kept over the capped leave-out rule: that rule measured worse on the iPhone (phone-small, 3.57 against 4.1 tok/s); on the Mac it ran faster (14.9 against 13.1 tok/s in the clean run; the 6.38 run had 400% other CPU) at agreement 0.980 against 0.982; one leave-out method for this model: a weight threshold with reads in flight waited for",
-     "note": "the earlier Mac comparison (w 0.10 against the capped rule 0.13), kept as history"
+     "note": "the Mac comparison of the 0.10 threshold with the capped rule 0.13"
     },
-    "reason": "the owner's choice (2026-11-26): the same form as Inkling's, a weight threshold of 0.15 with a pick whose read is in flight always waited for and no cap, on every profile; on the iPhone 7.39-7.88 against 5.83-5.86 tok/s at 0.10, top choice agreement 0.968 against 0.985"
+    "reason": "the same form as Inkling's, a weight threshold of 0.15 with a pick whose read is in flight always waited for and no cap, on every profile; on the iPhone 7.39-7.88 against 5.83-5.86 tok/s at 0.10, top choice agreement 0.968 against 0.985"
    }
   }
  },
@@ -1440,7 +1431,7 @@
    "prefill": {
     "apart": 0,
     "calibration": {
-     "measured": "base M4 16 GB, AC, the merged build (next), mac profile; 400 tokens after the model's code prompt, cache 6.6 GB; MB read per token, the published engine's beside",
+     "measured": "base M4 16 GB, AC, mac profile; 400 tokens after the model's code prompt, cache 6.6 GB; MB read per token, the engine's first public release beside",
      "rows": [
       {
        "setting": "apart 1 (the model-level value)",
@@ -1463,7 +1454,7 @@
        }
       },
       {
-       "setting": "the published engine",
+       "setting": "the engine's first public release",
        "mb_per_token": {
         "exact": 94.4,
         "fast": 65.8
@@ -1752,7 +1743,7 @@
     "calibration": {
      "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
      "reason": "the GPU split pays on this phone for this model",
-     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class; the app has passed this share on phone so far, so the resolved behaviour on phones does not change"
+     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class"
     }
    },
    "run_ahead": {
@@ -1787,8 +1778,8 @@
     },
     "calibration": {
      "measured": "iPhone 15 Plus, phone-small, cooled start, each arm twice in mixed order in one launch. Fast at w 0.15: top 3 8.99 and 8.62 tok/s, 77.6 MB per token (2.7 MB named and unused); the confidence rule 0.5 of 16 7.89 and 6.86 tok/s, 91 MB (5.7 unused); confidence 0.7 of 16 7.25 and 7.18 tok/s, 101.5 MB (5.3 unused). Exact, run-ahead on, 200 tokens per arm, exact ids identical in all six arms: top 3 3.35 and 3.00 tok/s, 234 MB per token; confidence 0.5 of 16 3.14 and 3.28 tok/s, 233 MB; top 5 2.85 and 3.11 tok/s, 234 MB",
-     "reason": "fast: top 3 is the fastest (above); exact: a tie on decode tok/s (3.17 against 3.21 mean), and top 3 has the lower hit rate (0.70 against 0.74), so exact keeps the published rule",
-     "earlier": "iPhone 15 Plus, phone-small, fast at threshold 0.08 with linear_k2, 8 readers, slab 1.485 GB, 200 tokens each, one run per cell, judged by counters (results/ios/p2/P2.md, names at threshold 0.08, 2026-11-23): plain top 3 4.33 tok/s, wait / compute 157 / 74 ms, 153 MB per token; the confidence rule (tau 0.5 over 16) 3.94 tok/s, 183 / 70 ms, 167 MB; plain top 2 4.06 tok/s; no names 3.92 tok/s"
+     "reason": "fast: top 3 is the fastest (above); exact: a tie on decode tok/s (3.17 against 3.21 mean), and top 3 has the lower hit rate (0.70 against 0.74), so exact keeps the confidence rule",
+     "threshold_0_08": "iPhone 15 Plus, phone-small, fast at threshold 0.08 with linear_k2, 8 readers, slab 1.485 GB, 200 tokens each, one run per cell, judged by counters (results/ios/p2/P2.md, names at threshold 0.08, 2026-11-23): plain top 3 4.33 tok/s, wait / compute 157 / 74 ms, 153 MB per token; the confidence rule (tau 0.5 over 16) 3.94 tok/s, 183 / 70 ms, 167 MB; plain top 2 4.06 tok/s; no names 3.92 tok/s"
     }
    },
    "cache": "slab",
@@ -1798,8 +1789,8 @@
     "target_gb": 2.96,
     "non_cache_gb": 1.54,
     "calibration": {
-     "measured": "iPhone 15 Plus (6 GB), phone-small, flash-last / release builds, 2026-11-26: the app footprint beside the expert cache in decode, 1.54 GB (4-bit in-memory weights, router, state, checkpoints); footprint 2.93-2.95 GB in decode at the 1.42 GB slab (results/ios/p2/P2.md)",
-     "reason": "sized for an app footprint of 2.96 GB on the 6 GB class (the old app's footprint on this phone, the equal-footprint comparison of results/ios/p2/P2.md) instead of from the memory iOS reports at open; the target belongs to the device class, the non-cache footprint to the model: 2.96 - 1.54 = 1.42 GB"
+     "measured": "iPhone 15 Plus (6 GB), phone-small, 2026-11-26: the app footprint beside the expert cache in decode, 1.54 GB (4-bit in-memory weights, router, state, checkpoints); footprint 2.93-2.95 GB in decode at the 1.42 GB slab (results/ios/p2/P2.md)",
+     "reason": "sized for an app footprint of 2.96 GB on the 6 GB class (the equal-footprint target of results/ios/p2/P2.md) instead of from the memory iOS reports at open; the target belongs to the device class, the non-cache footprint to the model: 2.96 - 1.54 = 1.42 GB"
     }
    },
    "parts": [
@@ -2050,7 +2041,7 @@
     }
    ],
    "bytes": 20352447020,
-   "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast at the threshold then declared (0.08) 0.891 / 0.881; not measured against this reference at the rule now in force (w 0.15; against exact on the device: modes.fast.calibration.phone)",
+   "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast at threshold 0.08 0.891 / 0.881; not measured against this reference at 0.15 ( against exact on the device: modes.fast.calibration.phone)",
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
    "prefill_gpu": {
@@ -2118,7 +2109,7 @@
   "notes": {
    "routers": "linear_k2 names experts 2 layers early; its engine file is derived/router.linear_k2.q8...bin",
    "names": "the confidence rule (tau 0.5 of 16 candidates) on every profile, as Inkling: measured on the base M4 (5.0 GB cache, exact, the code prompt and 200 tokens, two alternating pairs, AC, other processes 200-400% CPU): 128.5 / 128.7 MB per token, 8.14 / 13.23 tok/s, wait 11.9 / 13.8 ms against a top 8 143.4 / 143.5 MB, 9.13 / 11.16 tok/s, 14.7 / 13.9 ms: 10% fewer bytes, speed within the runs' spread",
-   "cross_token": "none yet",
+   "cross_token": "none",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
    "priority_reads": "speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out: the same for every family"
   }
@@ -2144,7 +2135,7 @@
   "lend": 1,
   "apart": 1,
   "drop_upto": 64,
-  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunk, span, names of the next layer (whole from 1000 positions, else its released router's picks), the last span joined under 64 positions, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256), the experts in waves as they land (a wave on the GPU from 128 rows), every expert and the shared expert through the packed kernels, down projections in 64-row jobs: the values this model's prefill was written and measured with (results/ios/p3-gpu/GPU-PREFILL.md); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next; the prompt kept apart from the decode's cache statistics (apart, the hazard policy only: placement), as Flash-Next; fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (drop_upto 64, the value Flash-Next declares, the old runner's threshold), longer prompts lossless"
+  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunk, span, names of the next layer (whole from 1000 positions, else its released router's picks), the last span joined under 64 positions, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256), the experts in waves as they land (a wave on the GPU from 128 rows), every expert and the shared expert through the packed kernels, down projections in 64-row jobs: the values this model's prefill was written and measured with (results/ios/p3-gpu/GPU-PREFILL.md); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next; the prompt kept apart from the decode's cache statistics (apart, the hazard policy only: placement), as Flash-Next; fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (drop_upto 64, the value Flash-Next declares), longer prompts lossless"
  },
  "drafting": {
   "cost_prior": {
@@ -2159,22 +2150,8 @@
     3.86,
     4.32
    ],
-   "measured": "base M4, dmeng step costs of passes of 1-8 positions (the drafting controller's prior as on main; a draft_cost.txt measured by the engine replaces it)"
+   "measured": "base M4, dmeng step costs of passes of 1-8 positions (the drafting controller's prior; a draft_cost.txt measured by the engine replaces it)"
   },
-  "cost_prior_alternative": {
-   "pass_ms_over_step_ms": [
-    0,
-    1.0,
-    1.15,
-    1.43,
-    1.7,
-    1.98,
-    2.25,
-    2.53,
-    2.8
-   ],
-   "estimated": "not used by the engine: from the measured parts of the verify pass after its fixes (the recurrent state streamed once per pass, the screened head, the packed gemm from 2 positions): 1.15 at 2 positions and 2.8 at 8, linear between; to replace the measured prior only after a real-model measurement"
-  },
-  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: none (this family has no draft head: a profile declaring head fails at open)), resolved once for dmeng, dmserve and the C API (which has no drafting: a declared default stays off there, an explicit request is refused); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile until measured on the real model"
+  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: none (this family has no draft head: a profile declaring head fails at open)), resolved once for dmeng, dmserve and the C API (the C API through dm_step_n); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile (not measured on the real model)"
  }
 }
