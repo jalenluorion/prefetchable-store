@@ -221,6 +221,7 @@ enum SelfCheck {
 
     private static func run(_ model: ChatModel) async {
         optsOverride = arg("-selfcheck-opts")  // model options for every open of this launch (a measurement's setting)
+        if let m = arg("-selfcheck-mode") { modeOverride = m; out["mode_override"] = m }  // the launch's mode (exact / fast)
         if let o = optsOverride { out["opts"] = o }
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-35b") {
             out["remove_35b"] = remove35B()
