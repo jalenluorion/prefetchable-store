@@ -54,6 +54,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "chunk": 256,
    "gpu_min": 256,
    "join": 0.25,
+   "short_names": "router",
    "span": 8192,
    "whole_from": 0
   },
