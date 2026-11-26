@@ -65,13 +65,11 @@ enum DmengLaunch {
         }
         return miss
     }
-    /// The expert cache on phone-small: sized for a 2.96 GB app footprint, less what the model holds beside the cache
-    /// (ModelKind.phoneSmallSlabGB: 1.42 GB for the 35B, 1.70 GB for Inkling). On larger phones the engine sizes it
-    /// from the memory iOS makes available (0 here); on the Mac 3.3 GB.
-    static let footprintTargetGB = 2.96
+    /// The expert cache: 0 on iOS, the profile's slab rule decides (phone-small: profiles.phone-small.cache_slab, the
+    /// footprint target less the model's measured non-cache footprint; phone: what iOS makes available); on the Mac 3.3 GB.
     static var cacheGB: Double {
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        return profile == "phone-small" ? kind.phoneSmallSlabGB : 0
+        return 0
         #else
         return 3.3
         #endif
