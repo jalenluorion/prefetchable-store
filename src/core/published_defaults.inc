@@ -105,6 +105,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "rule": "confidence",
      "tau": 0.5
     },
+    "prefill_gpu": {
+     "experts": 0,
+     "projections": 0
+    },
     "readers": 8,
     "resident": "resident_q8",
     "run_ahead": {
@@ -250,6 +254,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "candidates": 16,
      "rule": "confidence",
      "tau": 0.5
+    },
+    "prefill_gpu": {
+     "experts": 0.65,
+     "projections": 0.65
     },
     "readers": 8,
     "resident": "resident_q8",

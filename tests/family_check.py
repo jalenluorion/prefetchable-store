@@ -507,6 +507,10 @@ if wanted("presets"):
                               ("policy.slab_auto_gb", st["policy"].get("slab_auto_gb"), 5e-3)):
                 if g is None or abs(g - want_gb) > tol:
                     errs.append(f"{k}: {g!r} != {want_gb:.6f}")
+            # the profile's declared prompt GPU share through the C API as on an iPhone (phone and phone-small)
+            pg = man["profiles"][prof].get("prefill_gpu")
+            if pg and not any("without Metal" in n for n in json.loads(run([DMENG, "--model", M, "--profile", prof, "--print-defaults"]).stdout)["notes"]):
+                errs += sub({"projections": pg.get("projections", 0), "experts": pg.get("experts", 0)}, rs.get("prefill_gpu"))
             if e["rule"] == "available":
                 errs += sub(AV / 1e9, sr.get("available_gb")) + ([] if sr.get("resident_gb", 0) > 0 else ["resident_gb not > 0"])
             if errs:

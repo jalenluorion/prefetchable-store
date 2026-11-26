@@ -1685,6 +1685,15 @@
    "bytes": 21309272620,
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0.65,
+    "experts": 0.65,
+    "calibration": {
+     "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
+     "reason": "the GPU split pays on this phone for this model",
+     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class; the app has passed this share on phone so far, so the resolved behaviour on phones does not change"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,
@@ -1997,7 +2006,7 @@
     "experts": 0.65,
     "calibration": {
      "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
-     "reason": "the GPU split pays on this phone for this model; the phone profile is not measured and stays CPU only"
+     "reason": "the GPU split pays on this phone for this model"
     }
    },
    "ctx": {

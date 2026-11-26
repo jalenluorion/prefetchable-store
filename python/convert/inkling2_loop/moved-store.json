@@ -1603,6 +1603,15 @@
    "bytes": 17992385621,
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0,
+    "experts": 0,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact ids identical either way: 0.65 / 0.65 took 48.7 / 61.1 s (exact / fast) against 40.0 / 50.2 s off from a nominal start, 56.5 / 67.1 against 44.8 / 54.5 s from serious, and left 0.12-0.22 GB more footprint; the projections alone 59.5 / 55.4 s",
+     "reason": "off by measurement: 20% slower with the split (the CPU waits on the GPU's NVFP4 expert share); the same as the built-in CPU only, declared to keep the measurement beside it",
+     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class; the app has passed this share on phone so far, so the resolved behaviour on phones does not change"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,
