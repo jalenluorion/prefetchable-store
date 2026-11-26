@@ -496,8 +496,11 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.disk_dir && *o.disk_dir) so.disk_dir = o.disk_dir;
   if (o.disk_gb > 0) so.disk_gb = o.disk_gb;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-  so.ckpt_gb = 0.2;  // the phone's 4.27 GB limit: about 3 checkpoints and one short parked sequence
-  so.ckpt_min = 0;   // (the byte budget alone there)
+  // checkpoints in memory, one rule for every model, from its own checkpoint size: the pinned system boundary and the
+  // newest (the end of the last prompt), whatever their size (the 35B: 2 x 63 MB; Inkling: 2 x 173 MB); the rest come
+  // back from their disk copies. A caller's ckpt_gb > 0 still sets a byte budget instead.
+  so.ckpt_gb = 0;
+  so.ckpt_min = 2;
   so.park_gb = 0.3;
 #endif
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST

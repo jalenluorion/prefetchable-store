@@ -27,7 +27,7 @@ public struct DmengOptions: Sendable {
   public var derivedDir: String? = nil
   public var diskDir: String? = nil
   public var diskGB = 0.0
-  public var checkpointGB = 0.0            // 0: the platform default (0.25 macOS, 0.2 iOS)
+  public var checkpointGB = 0.0            // 0: the platform default (0.25 GB macOS; iOS: the pinned boundary and the newest)
   public var parkGB = 0.0                  // 0: the platform default (0.9 macOS, 0.3 iOS)
   public var ctx = 16384
   public var fileCheck = 1
