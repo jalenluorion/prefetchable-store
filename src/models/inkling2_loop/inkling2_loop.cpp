@@ -1199,12 +1199,10 @@ void Inkling::layer(int v, const float* m4) {
   }
   const bool three = W.global || m4;
   stage_mark(ST_NORMQ);
-  if (W.global) {
-    rmsnorm(qkv_in[0], W.lnq, H, c.eps, qn);
-    rmsnorm(qkv_in[1], W.lnk, H, c.eps, qn + H);
-    rmsnorm(qkv_in[2], W.lnv, H, c.eps, qn + 2 * H);
-  } else {
-    for (int i = 0; i < (three ? 3 : 1); i++) rmsnorm(qkv_in[i], W.ln_in, H, c.eps, qn + (size_t)i * H);
+  {  // the three inputs' norms side by side (rmsnorm_n: each rmsnorm's bits)
+    const float* nw[3] = {W.global ? W.lnq : W.ln_in, W.global ? W.lnk : W.ln_in, W.global ? W.lnv : W.ln_in};
+    float* no[3] = {qn, qn + H, qn + 2 * H};
+    rmsnorm_n(qkv_in, nw, three ? 3 : 1, H, c.eps, no);
   }
   const float* qi = qn;
   const float* ki = three ? qn + H : qn;
@@ -1593,9 +1591,10 @@ static void gates_n(Inkling& M, const Gate* const* G, int ng, const float* const
   const int H = c.H, RK = c.RANK;
   const int N = ng * n;  // input (gate g, position i) at g * n + i
   std::vector<float> cat((size_t)N * 2 * H), sv((size_t)N * RK), fg((size_t)N * 2 * H);
-  parallel_for(*M.core->pool, N, [&](int k) {
-    rmsnorm(hs[k], nullptr, H, 1e-6f, cat.data() + (size_t)k * 2 * H);
-    rmsnorm(mg[k], nullptr, H, 1e-6f, cat.data() + (size_t)k * 2 * H + H);
+  parallel_for(*M.core->pool, N, [&](int k) {  // the two norms side by side
+    const float* x2[2] = {hs[k], mg[k]};
+    float* o2[2] = {cat.data() + (size_t)k * 2 * H, cat.data() + (size_t)k * 2 * H + H};
+    rmsnorm_n(x2, nullptr, 2, H, 1e-6f, o2);
   });
   std::vector<const float*> xin(N), sin(N);
   std::vector<float*> so(N), fo(N), go(N);
@@ -1926,13 +1925,11 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
     const float* in0 = qkv_in[i];
     const float* in1 = qkv_in[(size_t)n + i];
     const float* in2 = qkv_in[(size_t)2 * n + i];
-    if (W.global) {
-      rmsnorm(in0, W.lnq, H, c.eps, p.qn);
-      rmsnorm(in1, W.lnk, H, c.eps, p.qn + H);
-      rmsnorm(in2, W.lnv, H, c.eps, p.qn + 2 * H);
-    } else {
+    {  // as the single step: the three norms side by side
       const float* ins[3] = {in0, in1, in2};
-      for (int b = 0; b < (three ? 3 : 1); b++) rmsnorm(ins[b], W.ln_in, H, c.eps, p.qn + (size_t)b * H);
+      const float* nw[3] = {W.global ? W.lnq : W.ln_in, W.global ? W.lnk : W.ln_in, W.global ? W.lnv : W.ln_in};
+      float* no[3] = {p.qn, p.qn + H, p.qn + 2 * H};
+      rmsnorm_n(ins, nw, three ? 3 : 1, H, c.eps, no);
     }
     PP& m = *pp[i];
     if (!ref) {
