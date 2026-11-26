@@ -105,6 +105,8 @@ struct ConversationRow: View {
                     let n = c.visible.filter { $0.role != .tool }.count
                     Text(n == 1 ? "1 message" : "\(n) messages")
                 }
+                Text("·")
+                Text(c.model.displayName)
                 if c.thinking { Image(systemName: "brain").imageScale(.small) }
             }
             .font(.caption)

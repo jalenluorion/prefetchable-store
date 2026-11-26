@@ -148,6 +148,14 @@ struct ChatView: View {
         .navigationTitle(m.conv.displayTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            // the title, and under it the model the chat is made with
+            ToolbarItem(placement: .principal) {
+                VStack(spacing: 0) {
+                    Text(m.conv.displayTitle).font(.headline).lineLimit(1)
+                    Text(m.conv.model.displayName).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .accessibilityElement(children: .combine)
+            }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 Menu {
                     Button { renameText = m.conv.title; renaming = true } label: { Label("Rename", systemImage: "pencil") }
