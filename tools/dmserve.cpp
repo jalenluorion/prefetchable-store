@@ -98,6 +98,9 @@ struct Args {
   int check_gen = 16, bench_rep = 1;
   int ref_chunk = 1;
   std::string draft = "none";  // draft and verify for greedy requests: none | lookup (controller) | fixed
+  int draft_ahead = 0, draft_ahead_bg = 1;
+  double draft_thr = 0.9;              // the model's draft head: as dmeng --draft-thr / --head-backoff
+  int head_backoff0 = 32, head_backoff_max = 256;
   int draft_max = 7, early = 0, probe_every = 48, verify_names = 1, draft_gate = 1, verify_old = 0, copy_free = 1;
   std::string draft_cost;  // the measured pass costs: read at start (when present), written after each drafted request
   double draft_margin = 0.05;
@@ -185,6 +188,8 @@ prompt path
 draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed)
   --draft none|lookup|fixed --draft-max N (7) --early N (0) --probe-every N (48) --verify-names 0|1 (default 1)
   --draft-cost F|none (default DIR/.dmeng/draft_cost.txt under a profile) --copy-free 0|1 (1) --verify-old 0|1 (0: A/B only)
+  --draft-ahead N --draft-ahead-bg 0|1   the read-ahead of copied drafts' next N positions (dmeng --help; 0 = off)
+  --draft-thr P --head-backoff B,M        the model's draft head (--draft head|both), as dmeng (0.9; 32,256)
 measurement
   --check IDS --ref-chunk N --gen N | --prefill-bench IDS --rep N --record-routing F | --check-ahead A B --check-ahead-len N
 )";
@@ -429,6 +434,14 @@ int main(int argc, char** argv) {
     else if (k == "--keep-scratch") a.keep_scratch = true;
     else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
+    else if (k == "--draft-ahead-bg") a.draft_ahead_bg = std::stoi(v());
+    else if (k == "--draft-thr") a.draft_thr = std::stod(v());
+    else if (k == "--head-backoff") {
+      const std::string b = v();
+      const size_t c = b.find(',');
+      a.head_backoff0 = std::stoi(b.substr(0, c));
+      a.head_backoff_max = c == std::string::npos ? a.head_backoff0 : std::stoi(b.substr(c + 1));
+    }
     else if (k == "--verify-old") a.verify_old = std::stoi(v());
     else if (k == "--copy-free") a.copy_free = std::stoi(v());
     else if (k == "--draft-cost") a.draft_cost = v();
@@ -498,6 +511,7 @@ int main(int argc, char** argv) {
   a.gpu_frac = ro.gpu_frac, a.gpu_experts = ro.gpu_experts;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
   a.readers = ro.readers, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early, a.chunk = ro.prefill_chunk;
+  a.draft_ahead = ro.draft_ahead;
   if (ro.bg_ranks > 0) {  // background reads are a dmeng option only: say so, never resolve to something not done
     fprintf(stderr, "dmserve: the profile's background reads (ranks %d) are not implemented in the server: off\n", ro.bg_ranks);
     ro.bg_ranks = 0;
@@ -674,6 +688,9 @@ int main(int argc, char** argv) {
       return 1;
     }
     hs.M = M.get();
+    hs.thr = (float)a.draft_thr;
+    hs.backoff0 = a.head_backoff0;
+    hs.backoff_max = a.head_backoff_max;
   }
   Drafter dr;
   dr.o.mode = a.draft == "head" || a.draft == "both" ? "lookup" : a.draft;
@@ -681,6 +698,9 @@ int main(int argc, char** argv) {
   if (hs.M) dr.extra.push_back(&hs);
   dr.o.max = a.draft_max;
   dr.o.early = a.early;
+  dr.o.ahead = a.draft == "none" ? 0 : std::max(0, a.draft_ahead);
+  dr.o.ahead_bg = a.draft_ahead_bg != 0;
+  dr.remb = [&](int32_t t, float* o) { return M->router_emb_row(t, o); };
   dr.o.probe_every = a.probe_every;
     dr.o.gate = a.draft_gate != 0;
     dr.o.margin = a.draft_margin;
@@ -689,7 +709,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "draft: drafting is not supported for this family (%s): the model has no multi-position verify pass\n", M->info().family.c_str());
     return 1;
   }
-  dr.init(M->info().family, a.early > 0 && a.draft != "none" ? &C : nullptr, draft_cost_prior(a.model));
+  dr.init(M->info().family, (a.early > 0 || dr.o.ahead > 0) && a.draft != "none" ? &C : nullptr, draft_cost_prior(a.model));
   dr.reads = &C;
   if (dr.on() && !a.draft_cost.empty()) {  // the pass costs an earlier session measured, in place of the family's prior
     struct stat sb;
@@ -976,7 +996,12 @@ int main(int argc, char** argv) {
     std::ostringstream s;
     s << "E " << r.rid << " " << reason << " {\"tokens\":" << ntok << ",\"ms_first_token\":" << first_ms << ",\"ms_decode\":" << dec_ms
       << ",\"decode_tok_s\":" << (ntok > 1 ? (ntok - 1) / (dec_ms / 1e3) : 0) << ",\"sample_ms_per_token\":" << samp_ms / std::max(1, ntok) << ",\"emit_ms_per_token\":" << out_ms / std::max(1, ntok)
-      << ",\"decode\":" << lm.stats_json() << ",\"draft\":" << (drafting ? dr.stats_json() : std::string("{}")) << ",\"decode_first50\":" << first50 << ",\"mb_by_step\":[" << [&] {
+      << ",\"decode\":" << lm.stats_json() << ",\"draft\":" << [&] {
+           if (!drafting) return std::string("{}");
+           std::string dj = dr.stats_json();
+           if (hs.M) dj.insert(dj.size() - 1, ",\"head\":" + hs.stats_json());  // the draft head's own counters (the session's)
+           return dj;
+         }() << ",\"decode_first50\":" << first50 << ",\"mb_by_step\":[" << [&] {
            std::ostringstream q;
            for (size_t i = 0; i < mb_tok.size(); i++) q << (i ? "," : "") << (int)(mb_tok[i] + 0.5f);
            return q.str();

@@ -65,6 +65,10 @@ struct Readers {
   // queued or in flight (names for a later token that must not delay this token's reads), at most max_bg at a time
   void submit_cls(const Job& j, int cls);
   bool promote(int pool, int slot);  // queued speculative parts of this slot go to the urgent queue; true if any
+  // queued background parts of this slot go to the speculative queue (a step names a record a background read holds:
+  // it is then read at a name's priority, not only in the drive's idle time); true if any
+  bool raise(int pool, int slot);
+  std::atomic<uint64_t> bg_raised{0};  // background reads raised so (statistics)
   bool cancel(int pool, int slot);   // remove a speculative read none of whose parts has started; true if removed
   // remove every speculative read serving a step <= `step` none of whose parts has started; their (pool, slot) out
   void cancel_stale(long step, std::vector<std::pair<int, int>>& out);
@@ -106,6 +110,7 @@ struct Readers {
   std::atomic<int>** pending_ = nullptr;
   bool stop_ = false, skip_ = false;
   int inflight_[3] = {0, 0, 0};
+  std::atomic<int> bg_n_{0};  // background jobs queued (raise's check without the lock)
   int64_t busy_t0_ = 0;
   uint64_t busy_wall_ns_ = 0;
   int64_t dt_last_ = 0;
@@ -473,7 +478,7 @@ struct Cache {
   int victim_in(int L, int reserve, bool capped);             // ... the layer's own records only when capped
   int pick_victim(int L, int reserve, double* val) const;     // value-ordered choice, no side effects; -1 if none
   void evict(int L, int slot);                                // take a slot chosen by pick_victim
-  int steal(int L);                                           // a miss with every slot pinned: a slot held only by names
+  int steal(int L);  // a miss with every slot pinned: a slot held only by names (landed, else one whose read has not started)
   void issue(int L, int slot, int e, bool urgent, long step = 0, float pp = 0.f);
   void wait(int L, int slot);
   // a wait longer than park_us (DMENG_WAIT_PARK_US; < 0 never) calls on_long_wait once (the core parks its pool's idle

@@ -148,6 +148,9 @@ class Model {
   // the top-1 softmax probability into *conf.
   virtual const float* final_hidden(int i) const { return nullptr; }
   virtual bool embed_row(int32_t tok, float* out) const { return false; }
+  // a token's `emb` input of the early-address routers (router_emb() as a step of that token would give it), for names
+  // ahead of the step (the drafter's read-ahead); default: the raw embedding row
+  virtual bool router_emb_row(int32_t tok, float* out) const { return embed_row(tok, out); }
   virtual int head_argmax(const float* hn, float* conf) { return -1; }
 
   // EXTENSION: tokenizer and chat formatter (per family), checked against the release.

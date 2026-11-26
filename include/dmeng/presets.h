@@ -114,7 +114,7 @@ struct Given {
   std::optional<int> run_ahead, run_ahead_depth, ra_max_tok;
   std::optional<double> ra_budget;
   std::optional<bool> ra_sat_skip;
-  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts, early;
+  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts, early, draft_ahead;
   std::optional<std::string> draft;    // none | lookup | fixed | head | both
   bool recording = false;  // a routing record is written (dmeng --record): single steps unless a chunk is given
 };
@@ -123,7 +123,7 @@ struct Given {
 // function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
 // --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
 // --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
-// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N --draft-ahead N; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
 // run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
 // and err on a malformed value).
 std::string run_flag_name(const std::string& flag);
@@ -155,6 +155,7 @@ struct RunOpts {
   // positions ahead (a model's draft head is asked for explicitly: --draft head|both)
   std::string draft = "none";
   int early = 0;
+  int draft_ahead = 0;  // --draft-ahead N: the read-ahead of copied drafts' next positions (DraftOpts::ahead; 0 off)
   std::vector<std::string> notes;
   // the "resolved" block of every run's JSON (the cache's size once a front end has computed it)
   Resolved resolved(double cache_gb_in_force) const;

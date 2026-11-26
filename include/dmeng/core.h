@@ -11,6 +11,7 @@
 #pragma once
 #include <TargetConditionals.h>
 
+#include <array>
 #include <atomic>
 #include <functional>
 
@@ -388,6 +389,14 @@ struct Hook {
   virtual void chunk_after_router(Core&, int step, int n) {}            // the chunk's own misses have been issued
   virtual void chunk_after_moe(Core&, int step, int n, const int32_t* pk) {}  // [n][K] released picks
   virtual void chunk_release(Core&, int step, int n) {}                 // the step has run for every position
+  // Read-ahead for drafted positions (Drafter, draft.h): positions core.pos + off[i] (later than the step running next)
+  // whose tokens are known before the pass that computes them (a copied span's next tokens); embs[i]: each one's router
+  // embedding (Model::router_emb_row). The steps a hook can name from that embedding and the last committed position's
+  // state alone (the trained routers: the targets under their lag, whose input has no lagged state), each with that
+  // position's own step time as its deadline, in the reads class the caller set (Cache::read_bg). Each name's (layer, slot, expert) goes to out: the
+  // caller holds the pins and drops them (a rejected draft: its reads cancelled if not started), position by position:
+  // per_pos[i] = the entries of position i (they come in position order). Names only.
+  virtual void name_ahead(Core&, int n, const float* const* embs, const int* off, std::vector<std::array<int, 3>>& out, int* per_pos) {}
 };
 
 }  // namespace dm

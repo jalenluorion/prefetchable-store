@@ -133,6 +133,16 @@ struct Routers : Naming {
   void chunk_rows(Core& c, int step, int n, const XQ* const* xq, const float* const* x, std::vector<JobN>& jobs) override;
   void chunk_after_router(Core& c, int step, int n) override;
   void chunk_after_moe(Core& c, int step, int n, const int32_t* pk) override;
+  // read-ahead (Hook::name_ahead): the targets under the lag (their whole input is [emb_i, prev]), as chunk_start names
+  // them for a pass's own positions (the chunk's buffers; called before the pass's chunk_start), the naming rule's
+  // experts named directly in the cache
+  void name_ahead(Core& c, int n, const float* const* embs, const int* off, std::vector<std::array<int, 3>>& out, int* per_pos) override;
+  double ahead_calls = 0, ahead_pos = 0, ahead_names = 0, ahead_ms = 0;
+  // z (pre + biases + the lag block if given + the MLP path) of target t and its top 16 (n16) with their softmax q and
+  // calibration bins when the rule needs them; single: a one-position step (the keep-score's router row, the heavy
+  // head's positives first)
+  void score_z(Core& c, int t, const float* pre, const float* lagr, bool single, int* n16, float* q16, int* b16);
+  bool take(int j, const int* b16, const float* q16) const;  // the naming rule: rank j of a scored target is named
   void token_start(Core& c, int tok, const float* emb) override;
   void before_moe(Core& c, int step, const float* x) override;
   void observe(Core& c, int step, const float* x) override;
@@ -200,6 +210,9 @@ struct Xtok : Naming {
   void chunk_release(Core& c, int step, int n) override {
     Naming::chunk_release(c, step, n);
     if (inner) inner->chunk_release(c, step, n);
+  }
+  void name_ahead(Core& c, int n, const float* const* embs, const int* off, std::vector<std::array<int, 3>>& out, int* per_pos) override {
+    if (inner) inner->name_ahead(c, n, embs, off, out, per_pos);
   }
   void after_router(Core& c, int step) override;
   void after_moe(Core& c, int step, const int32_t* picks, const float* w) override;

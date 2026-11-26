@@ -670,13 +670,14 @@ void Drafter::init(const std::string& family, Core* c, const std::vector<double>
   ctl.fixed = o.mode == "fixed";
   o.max = std::max(1, std::min(o.max, DraftCtl::DMAX - 1));
   core = c;
-  if (core && o.early > 0) core->pick_log = &pick_log;
+  if (core && (o.early > 0 || o.ahead > 0)) core->pick_log = &pick_log;
   for (int k = 0; k <= DraftCtl::DMAX; k++) rho0_[k] = pr[k];
   family_ = family;
 }
 
 void Drafter::reset_stats() {
   steps = tokens = verifies = drafted = acc_total = early_names = early_cancelled = prenamed = explored = probes_held = copy_free_runs = 0;
+  ah_pos = ah_names = ah_dropped = ah_cancelled = ah_spent = ah_used = 0;
   for (int k = 0; k < 2; k++) rd_steps[k] = rd_tok[k] = rd_miss[k] = rd_late[k] = rd_urg[k] = rd_pf[k] = rd_pos[k] = 0;
   ms_steps = 0;
   std::fill(std::begin(by_n), std::end(by_n), 0);
@@ -692,6 +693,83 @@ void Drafter::end() {
   for (auto& kv : ea_held_)
     for (auto& x : kv.second) core->cache.unpin_pf(x[0], x[1], x[2]);
   ea_held_.clear();
+  for (auto& kv : ah_held_)
+    for (auto& x : kv.second.second) ah_cancelled += core->cache.drop_name(x[0], x[1], x[2]);
+  ah_held_.clear();
+}
+
+// Read-ahead: a pass of L drafts at positions p .. p + L names the experts of the draft's next positions
+// p + L + 1 .. p + L + o.ahead (draft tokens L .. L + ahead - 1: a copy or a tool-call fragment continued, known before
+// the pass that verifies them) from the routers on their embeddings and the committed position's state, in the background class unless
+// o.ahead_bg is off, so they are read while this pass computes and the drive has nothing more urgent. A held position
+// whose token is no longer the one proposed for it (a rejected or changed draft) is dropped: its reads are cancelled if
+// they have not started, its pins go. Names only: the released routers decide every pick.
+void Drafter::read_ahead(const Draft& d, int L, long p, int budget) {
+  Core& C = *core;
+  std::vector<std::pair<long, int32_t>> want;
+  if (L > 0)
+    for (int k = 0; k < (int)d.toks.size() && k < L + o.ahead && k + 1 < budget; k++) want.push_back({p + 1 + k, d.toks[k]});
+  for (auto it = ah_held_.begin(); it != ah_held_.end();) {
+    const auto w = std::find_if(want.begin(), want.end(), [&](const std::pair<long, int32_t>& x) { return x.first == it->first; });
+    if (w == want.end() || w->second != it->second.first) {
+      for (auto& x : it->second.second) ah_cancelled += C.cache.drop_name(x[0], x[1], x[2]);
+      ah_dropped++;
+      it = ah_held_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (!C.hook || !remb) return;
+  std::vector<std::pair<long, int32_t>> fresh;
+  for (auto& w : want)
+    if (w.first > p + L && !ah_held_.count(w.first)) fresh.push_back(w);  // (positions of this pass: named inside it)
+  if (fresh.empty()) return;
+  const int H = C.H, n = (int)std::min<size_t>(fresh.size(), 16);
+  std::vector<float> e((size_t)n * H);
+  std::vector<const float*> ep(n);
+  std::vector<int> off(n);
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    if (!remb(fresh[i].second, e.data() + (size_t)m * H)) continue;
+    ep[m] = e.data() + (size_t)m * H;
+    off[m] = (int)(fresh[i].first - p);
+    fresh[m++] = fresh[i];
+  }
+  if (!m) return;
+  std::vector<std::array<int, 3>> got;
+  std::vector<int> per(m, 0);
+  const bool rb = C.cache.read_bg;
+  C.cache.read_bg = o.ahead_bg;
+  C.hook->name_ahead(C, m, ep.data(), off.data(), got, per.data());
+  C.cache.read_bg = rb;
+  size_t k = 0;
+  for (int i = 0; i < m; i++) {
+    auto& h = ah_held_[fresh[i].first];
+    h.first = fresh[i].second;
+    h.second.assign(got.begin() + k, got.begin() + k + per[i]);
+    k += per[i];
+  }
+  ah_pos += m;
+  ah_names += (long)got.size();
+}
+
+void Drafter::ahead_spend(long upto) {
+  const size_t row = (size_t)core->steps * core->K;
+  for (auto it = ah_held_.begin(); it != ah_held_.end() && it->first < upto;) {
+    const long q = it->first;
+    const int16_t* pk = (size_t)(q + 1) * row <= pick_log.size() ? pick_log.data() + (size_t)q * row : nullptr;
+    for (auto& x : it->second.second) {
+      core->cache.unpin_pf(x[0], x[1], x[2]);
+      ah_spent++;
+      if (pk && pk[0] >= 0)
+        for (int s = 0; s < core->steps; s++)
+          if (core->mi.step_layer[s] == x[0] && std::find(pk + (size_t)s * core->K, pk + (size_t)(s + 1) * core->K, (int16_t)x[2]) != pk + (size_t)(s + 1) * core->K) {
+            ah_used++;
+            break;
+          }
+    }
+    it = ah_held_.erase(it);
+  }
 }
 
 // the step runs positions p .. p + L; the source positions src - 1 .. ran the same tokens before, so their released picks
@@ -830,7 +908,10 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
       if (srcs_[s] == &lookup && !o.lookup) continue;
       if (!srcs_[s]->ask(hist, bs >= 0 && bl > 0 ? bg : 0)) continue;
       auto tp = std::chrono::steady_clock::now();
-      const bool got = srcs_[s]->propose(hist, maxL, cand) && !cand.toks.empty();
+      // (a source whose proposals cost nothing per token, the lookup and the tool-call fragments: its tokens past the
+      // pass too, for the read-ahead; the controller looks at maxL of them)
+      const int want_n = !srcs_[s]->timed && core && o.ahead > 0 ? std::min(maxL + o.ahead, budget - 1) : maxL;
+      const bool got = srcs_[s]->propose(hist, want_n, cand) && !cand.toks.empty();
       if (srcs_[s]->timed) t_timed += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tp).count();
       if (!got) {
         if (srcs_[s]->timed) asked.push_back({(double)s, 0, 1.0});  // ran, no draft: a lost try
@@ -918,6 +999,7 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
   const bool pre = L == 0 && bs >= 0 && o.gate && !ctl.fixed && ctl.since_probe + 1 >= ctl.probe_every && probe_ok(1);
   if (pre) prenamed++;
   if (core && o.early > 0) early(L > 0 ? d : pre ? (dl.src >= 1 ? dl : d) : Draft(), L, p);
+  if (core && o.ahead > 0) read_ahead(L > 0 ? d : Draft(), L, p, budget);
   int n = 1, acc = 0;
   uint64_t r0[4] = {0, 0, 0, 0};
   double w0 = 0, ra0 = 0;
@@ -961,6 +1043,7 @@ int Drafter::step(DraftTarget& T, const std::vector<int32_t>& hist, int vocab, i
       if (bs < 4) by_src_steps[bs]++, by_src_acc[bs] += acc;
     }
   }
+  if (core && o.ahead > 0) ahead_spend(T.pos());
   if (core && o.early > 0)  // names of committed positions are spent
     for (auto it = ea_held_.begin(); it != ea_held_.end();) {
       if (it->first.first < T.pos()) {
@@ -1067,6 +1150,12 @@ std::string Drafter::stats_json() const {
   if (o.early > 0)
     o2 << ",\"early\":" << o.early << ",\"early_names_per_step\":" << (double)early_names / std::max<long>(1, steps)
        << ",\"early_reads_cancelled\":" << early_cancelled;
+  if (o.ahead > 0)
+    o2 << ",\"read_ahead\":{\"ahead\":" << o.ahead << ",\"background\":" << (o.ahead_bg ? "true" : "false") << ",\"positions\":" << ah_pos
+       << ",\"names\":" << ah_names << ",\"names_per_position\":" << (double)ah_names / std::max<long>(1, ah_pos) << ",\"positions_dropped\":" << ah_dropped
+       << ",\"reads_cancelled\":" << ah_cancelled << ",\"names_spent\":" << ah_spent << ",\"names_used\":" << ah_used
+       << ",\"used_share\":" << (double)ah_used / std::max<long>(1, ah_spent) << ",\"background_raised\":"
+       << (core ? core->cache.rd.bg_raised.load() : 0) << "}";
   if (reads) {
     o2 << ",\"reads\":{";
     for (int k = 0; k < 2; k++) {

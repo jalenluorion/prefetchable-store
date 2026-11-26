@@ -514,6 +514,7 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   else if (pf) r.drafts = P.drafts ? 1 : 0;
   r.draft = g.draft ? *g.draft : r.drafts > 0 ? "lookup" : r.draft;
   r.early = g.early ? *g.early : r.drafts > 0 ? 4 : r.early;
+  if (g.draft_ahead) r.draft_ahead = *g.draft_ahead;
   return true;
 }
 
@@ -567,6 +568,7 @@ const RunFlag RUN_FLAGS[] = {
     {"--drafts", nullptr, RF_INT(drafts)},
     {"--draft", nullptr, RF_STR(draft)},
     {"--early", nullptr, RF_INT(early)},
+    {"--draft-ahead", nullptr, RF_INT(draft_ahead)},
 };
 #undef RF_INT
 #undef RF_DBL
