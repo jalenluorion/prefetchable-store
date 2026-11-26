@@ -26,7 +26,7 @@ struct Preset {
   int cand = 16;
   std::string xtok_id, xtok;       // cross-token routers ("" = none)
   double xtok_tau = 0.5;
-  bool rd_prio = false;            // speculative reads by priority (with the cross-token names)
+  bool rd_prio = false;            // speculative reads by priority (defaults.priority_reads; with names)
   std::string evict = "auto";
   std::string layer_caps;          // per-layer slot caps (CoreOpts::layer_caps): "" = the core's rule (auto)
   bool drafts = false;
