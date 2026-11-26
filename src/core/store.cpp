@@ -834,9 +834,12 @@ bool Cache::read_bg_value(int L, int e, double value, long until) {
   } else {
     PolicyTimer pt(st.policy_ms);
     hz_tick(tok_now);
-    // the reserve a name leaves in its layer (2K + holds; with :fit, what the cap leaves after a step's names and holds)
+    // the reserve: a name pins its slot until its step runs, so names leave 2K + the holds unpinned; a background read
+    // pins nothing (a step's miss takes its slot once landed, or borrows past a capped layer's cap while it is in flight),
+    // so in a layer at its cap it leaves K: the 2K + holds of a name refused every background read in the
+    // layers the routers had just named (8 of a 20-slot cap pinned at the 35B's phone size)
     int reserve = 2 * K + extra_reserve[layer_pool[L]];
-    if (capped && cap_fit) reserve = std::min(reserve, std::max(0, lcap[L] - K - (layer_hold.empty() ? 0 : layer_hold[L])));
+    if (capped) reserve = std::min(reserve, K);
     v = hz_victim(L, capped, reserve);
     if (v < 0) return false;
     const Slot& x = S.s[v];

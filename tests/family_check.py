@@ -461,10 +461,15 @@ if wanted("background"):
                                      "--layer-caps", caps, "--bg-ranks", bg, n=64)
                     b = js.get("drive", {}).get("background", {})
                     got[(caps, bg)] = (out, b.get("issued_per_token", 0.0), b.get("used_per_token", 0.0))
+            # the confidence rule (Inkling's names) under caps: the ranks it left unnamed
+            out, js = greedy("bg_uniform_conf", "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--rt-tau", "0.5", "--layer-caps", "uniform",
+                             "--bg-ranks", "16", n=64)
+            b = js.get("drive", {}).get("background", {})
+            got[("uniform, confidence rule", "16")] = (out, b.get("issued_per_token", 0.0), b.get("used_per_token", 0.0))
             if len({v[0] for v in got.values()}) != 1:
                 bad.append("ids differ with background reads")
             # (how many are issued depends on the drive's idle time and the policy's values, so it is reported, not required;
-            # the fixed reserve, 2K + holds unpinned, refuses a background read as it refuses a name at 2K + 4 slots)
+            # under caps a background read leaves K unpinned in its layer, a name 2K + holds)
             verdict("background", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") + "issued / used per token: " +
                     ", ".join(f"{c} {v[1]:.2f} / {v[2]:.2f}" for (c, bg), v in got.items() if bg != "0") + "; ids identical")
         except Exception as e:

@@ -552,7 +552,10 @@ void Routers::token_start(Core& c, int tok, const float* e) {
 }
 
 void Routers::fill_bg(Core& c, int from, int to) {
-  if (bg_ranks <= m || !active || tau >= 0) return;
+  // the ranks past the naming rule's: past the top m, or (the confidence rule) every one of the top bg_ranks the rule left
+  // unnamed (a record held already, named or not, is skipped below)
+  const int r0 = tau < 0 ? m : 0;
+  if (bg_ranks <= r0 || !active) return;
   Readers& rd = c.cache.rd;
   const int per = std::max(1, c.cache.bg_split);
   if (rd.bg_queued() >= bg_queue * per || !rd.bg_open()) return;
@@ -563,7 +566,7 @@ void Routers::fill_bg(Core& c, int from, int to) {
     const int* n = nm.data() + (size_t)t * 16;
     if (n[0] < 0) continue;  // not named yet
     const int L = c.mi.step_layer[t];
-    for (int r = m; r < D; r++) {
+    for (int r = r0; r < D; r++) {
       if (c.cache.slot_of(L, n[r]) >= 0) continue;
       const double v = (rk_h[r] + 1.0) / (rk_n[r] + 2.0);
       if (++tries > 32) return;
