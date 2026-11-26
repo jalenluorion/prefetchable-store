@@ -13,7 +13,7 @@ for r in $(seq 1 $REPS); do
     n=${a%%=*}_r$r; b=${a#*=}
     [ -f $O/$n.json ] && continue
     rm -rf $O/disk_$n; mkdir -p $O/disk_$n
-    DISK_GB=8 FOOT_GB=13.5 SWAP_MB=2000 POLL_S=2 python3 $G $O/$n.log 2400 -- python3 $WD $O/$n.json $RQ -- $b --disk $O/disk_$n "$@" > /dev/null
+    DISK_GB=8 FOOT_GB=13.5 SWAP_MB=2000 POLL_S=2 python3 $G $O/$n.log 2400 -- python3 $WD $O/$n.json $RQ -- ${=b} --disk $O/disk_$n "$@" > /dev/null
     rm -rf $O/disk_$n
     echo "$n: $(grep -o '"killed_by_guard": [^,]*' $O/$n.log | tail -1), others $(grep -o '"others_cpu_pct_mean": [^,]*' $O/$n.log | tail -1)"
   done
