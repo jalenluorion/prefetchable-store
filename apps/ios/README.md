@@ -9,7 +9,8 @@ What the app does:
 - **Two models.** Qwen3.6-35B-A3B and Inkling 2 Mini, one open at a time, switched in Settings.
 - **In-app download.** Each model comes from its Hugging Face repo in the profile that fits the phone, every file
   checked against its SHA-256, resumable, in the background.
-- **Exact or Fast.** Exact gives the model's own choices; Fast leaves out a few low-weight experts and replies sooner.
+- **Fast or Exact.** Fast, the default, leaves out a few low-weight experts and replies sooner; Exact gives answers
+  identical to the full model's, more slowly.
 - **Reads while you type.** The app processes your message in the background as you write it, so a reply starts
   sooner after you send.
 - **Chats on the phone.** Saved conversations, thinking on or off per chat, Markdown replies, export as Markdown or
@@ -105,9 +106,14 @@ profile (the table above) and starts when you tap **Download**.
 
 ## Using the app
 
-**Exact and Fast** are under Settings › Model › Mode, one setting per model. The default is Fast on both profiles
-(`phone` and `phone-small`) for both models; Exact stays your choice. A change applies the next time you open the app
-(or when you switch models).
+**Fast and Exact** are under Settings › Model › Mode, one setting per model. Fast is the default for both models on
+every phone; choose Exact for answers identical to the full model's, at a slower speed. A change applies the next time
+you open the app (or when you switch models).
+
+**Spare memory.** On a phone with at least 11 GB of memory, the app keeps recently used parts of the model in memory
+the system has spare, so fewer are read from storage (Settings › Diagnostics › Use spare memory for the model's files,
+on by default there; it pauses for the rest of the session after a memory warning). **Copy diagnostics** in the same
+screen copies the last reply's numbers and the engine's settings as text.
 
 **The other model.** Settings › Model files shows one model's files at a time: choose the other model in its picker
 and tap **Download**. Once both are on the phone, a **Model** picker appears in Settings; choosing a model closes the open

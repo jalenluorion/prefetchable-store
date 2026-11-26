@@ -126,8 +126,8 @@ struct SettingsView: View {
                 Text("Model files")
             }
             Picker("Mode", selection: engineMode) {
+                Text("Fast (default)").tag("fast")
                 Text("Exact").tag("exact")
-                Text("Fast").tag("fast")
             }
             Button("Delete model", role: .destructive) { confirmDeleteModel = true }
                 .disabled(presentBytes == 0)
@@ -150,8 +150,8 @@ struct SettingsView: View {
         } footer: {
             Text((switching ? "Switching to \(modelShown.displayName)…\n" : "")
                  + (engineMode.wrappedValue == "fast"
-                    ? "Fast: replies come sooner. Answers can differ a little from Exact.\nApplies the next time you open the app."
-                    : "Exact: the full model, every time. Replies are slower.\nApplies the next time you open the app."))
+                    ? "Fast: replies come sooner. Answers can differ a little from the full model's.\nApplies the next time you open the app."
+                    : "Exact: answers identical to the full model's. Replies are slower.\nApplies the next time you open the app."))
         }
     }
 
