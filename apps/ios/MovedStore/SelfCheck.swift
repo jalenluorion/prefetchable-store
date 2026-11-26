@@ -107,12 +107,13 @@ enum SelfCheck {
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
         for u in (try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
             where u.lastPathComponent.hasPrefix("CFNetworkDownload_") && u.lastPathComponent.hasSuffix(".tmp") { rm(u) }
-        let states = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app").appendingPathComponent("dmeng-prefix")
-        for d in (try? fm.contentsOfDirectory(at: states, includingPropertiesForKeys: nil)) ?? [] {
+        for d in ModelKind.allCases.flatMap({ (try? fm.contentsOfDirectory(at: DmengLaunch.prefixDir($0), includingPropertiesForKeys: nil)) ?? [] }) {
             for u in (try? fm.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? [] {
                 let size = ((try? fm.attributesOfItem(atPath: u.path))?[.size] as? NSNumber)?.int64Value ?? -1
-                if u.lastPathComponent.hasSuffix(".tmp") || (u.lastPathComponent.hasSuffix(".bin") && size == 0) { rm(u) }
+                let since = Double(arg("-selfcheck-states-since") ?? "") ?? .infinity
+                let mt = ((try? fm.attributesOfItem(atPath: u.path))?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                let mine = u.lastPathComponent.hasSuffix(".bin") && !u.lastPathComponent.hasSuffix(".pin.bin") && mt >= since
+                if u.lastPathComponent.hasSuffix(".tmp") || (u.lastPathComponent.hasSuffix(".bin") && size == 0) || mine { rm(u) }
             }
         }
         return removed
@@ -121,10 +122,8 @@ enum SelfCheck {
     /// The saved chat states (not the pinned system-prompt states) in the app's state folders, by path.
     static func chatStates() -> Set<String> {
         let fm = FileManager.default
-        let states = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app").appendingPathComponent("dmeng-prefix")
         var r = Set<String>()
-        for d in (try? fm.contentsOfDirectory(at: states, includingPropertiesForKeys: nil)) ?? [] {
+        for d in ModelKind.allCases.flatMap({ (try? fm.contentsOfDirectory(at: DmengLaunch.prefixDir($0), includingPropertiesForKeys: nil)) ?? [] }) {
             for u in (try? fm.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? []
                 where u.lastPathComponent.hasSuffix(".bin") && !u.lastPathComponent.hasSuffix(".pin.bin") { r.insert(u.path) }
         }
