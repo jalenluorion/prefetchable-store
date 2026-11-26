@@ -10,7 +10,7 @@
 // (single quarters from 8 per thread left) | twojoins (the step split into two calls) | split1 (every expert its own call) | warm (the previous application's
 // records again) | reader (a concurrent reader: F_NOCACHE preads of another layer file at the given rate) | stream (the
 // same matrices' rows claimed 64 at a time, no activation, no dependency: the kernels' streaming rate in this process).
-// The name matches engine/bench/guard.py's model-process pattern, so the queue waits for it. No model process.
+// The name (bench_kmulti_*) lets a guard script treat it as a model process (bench/README.md). No model process.
 #include <fcntl.h>
 #include <pthread.h>
 #include <pthread/qos.h>

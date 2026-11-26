@@ -10,7 +10,7 @@
 //   Draft j (j = 1..7, the token at p+1+j) = argmax over the unpadded vocab of 30 tanh(head(h_j + hidden_out(latent_j)) / 30),
 //   latent_j from the Markov RNN over [state, markov_w1[previous token], h_j, f_rnn(p)]; previous token of draft 1 = t[p+1].
 //
-// The arithmetic follows the MLX reference (engine/ink/mtp_accept.py): every op's output rounded to bf16 where MLX's is,
+// The arithmetic follows the MLX reference (tests/inkling2_loop/draft_ref_mlx_run.py): every op's output rounded to bf16 where MLX's is,
 // fp32 inside norms, RoPE, softmax and the RNN gate. Matrix products: bf16 x bf16 with fp32 sums (BFMMLA, ink_draft.cpp).
 // The output layer is the target's own. Two ways to apply it (option `exact`):
 //   exact = false (decoding): head(h_j) + F latent_j + c, F = unembed . hidden_out.W [VU, 256] and c = unembed .

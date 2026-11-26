@@ -3,7 +3,7 @@
 // one thread in cache (a 2304 x 2304 gate-up matrix, repeated), GB/s on all threads streaming over a set of experts larger
 // than the caches (rows claimed 64 at a time, gate-up then down of each expert), and agreement with the engine's kernel
 // (bits) or, for the candidates that round differently, the error of both against a float64 reference on real records.
-// The name matches engine/bench/guard.py's model-process pattern, so the queue waits for it. No model process.
+// The name (bench_kmulti_*) lets a guard script treat it as a model process (bench/README.md). No model process.
 //   bench_kmulti_nv MODEL_DIR [threads] [reps]
 //
 // Candidates (NVFP4):

@@ -268,7 +268,7 @@ if wanted("checkpoint"):
         verdict("checkpoint", "FAIL", str(e)[-400:])
 
 # ---------------------------------------------------------------------------------------------- server
-DRIVE = os.path.join(REPO, "bench", "drafts", "worker_drive.py")
+DRIVE = os.path.join(REPO, "tests", "worker_drive.py")
 
 
 def worker(name, reqs, *flags, model=None, profile="none"):

@@ -3,7 +3,7 @@
 // mode with mv_aff4's operation order), alone and side by side: which cores and units together read the most expert bytes
 // per second when the kernel is instruction-bound. Weights: 384 MB of real code bytes from the store's layer files (any
 // layer file of the model folder) as 2048-input rows, fp16 scales and biases; every SME row checked bit for bit against
-// mv_aff4. No model process. The name matches engine/bench/guard.py's model-process pattern, so the queue waits for it.
+// mv_aff4. No model process. The name (bench_kmulti_*) lets a guard script treat it as a model process (bench/README.md).
 //   bench_kmulti_sme4 LAYER_FILE [seconds per cell]
 #include <arm_neon.h>
 #include <arm_sme.h>
