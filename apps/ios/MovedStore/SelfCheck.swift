@@ -220,6 +220,8 @@ enum SelfCheck {
     }
 
     private static func run(_ model: ChatModel) async {
+        optsOverride = arg("-selfcheck-opts")  // model options for every open of this launch (a measurement's setting)
+        if let o = optsOverride { out["opts"] = o }
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-35b") {
             out["remove_35b"] = remove35B()
             finish()
@@ -259,7 +261,7 @@ enum SelfCheck {
             // caches are warmer for a later arm)
             for (arm, opts) in [("default", nil), ("lever", arg("-selfcheck-lever-opts")), ("default2", nil)] as [(String, String?)] {
                 modeOverride = mode
-                optsOverride = opts
+                optsOverride = opts ?? arg("-selfcheck-opts")
                 await d.unload()
                 model.engineState = .idle
                 let tl = Date()
