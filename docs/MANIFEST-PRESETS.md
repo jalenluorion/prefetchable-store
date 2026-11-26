@@ -56,7 +56,7 @@ The same for all three now (each declared in its manifest's `prefill` or `defaul
 sub-chunk (`short_names: router`), the GPU's share from sub-chunks of 64 (`gpu_min`), the prompt's scratch bound of
 768 MB with equal spans and the scratch lent by the cache (`scratch_mb`, `lend`), the prompt kept apart from the decode's
 cache (`apart`), waves / packed kernels from one user / 64-row down jobs (`waves`, `pack_min`, `dn_rows`), fast mode's
-leave-out rule kept for prompts of at most 64 positions (`drop_upto`), the batched lossless prompt in fast mode, priority
+leave-out rule kept for prompts of at most 64 positions (`drop_upto`; the 35B on the Mac, one run each beside 400% other CPU, top-1 agreement with exact over the 983 teacher-forced positions after a 24-token prompt: 0.974 with the rule against 0.978 lossless, inside fast mode's run-to-run spread of 0.975-0.985; Inkling and the 48-token rule run not measured), the batched lossless prompt in fast mode, priority
 reads for speculative reads (`defaults.priority_reads`), packed affine kernels in verify passes (the core's default),
 the declared sub-chunk and span in every front end. The iOS app sets some values of its own (the 35B's prompt GPU share
 0.65 / 0.65, its fast threshold 0.08 and a top 3 in fast mode): those are the app's, not the engine's profiles.
