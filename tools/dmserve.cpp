@@ -432,7 +432,6 @@ int main(int argc, char** argv) {
     else if (k == "--gpu-min-wave") a.gpu_min_wave = std::stoi(v());
     else if (k == "--ref-no-gpu") a.ref_no_gpu = true;
     else if (k == "--keep-scratch") a.keep_scratch = true;
-    else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
     else if (k == "--draft-thr") a.draft_thr = std::stod(v());
     else if (k == "--head-backoff") {
@@ -514,6 +513,7 @@ int main(int argc, char** argv) {
   a.gpu_frac = ro.gpu_frac, a.gpu_experts = ro.gpu_experts;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
   a.readers = ro.readers, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early, a.chunk = ro.prefill_chunk;
+  a.draft_max = ro.draft_max;  // (--draft-max is a run setting: explicit, else the profile's drafts.max, else 7)
   if (ro.bg_ranks > 0) {  // background reads are a dmeng option only: say so, never resolve to something not done
     fprintf(stderr, "dmserve: the profile's background reads (ranks %d) are not implemented in the server: off\n", ro.bg_ranks);
     ro.bg_ranks = 0;

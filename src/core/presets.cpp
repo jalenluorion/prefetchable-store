@@ -356,9 +356,15 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
       p.draft_lookup = dr->b;
     } else if (dr->kind == Json::OBJ) {
       for (auto& kv : dr->obj)
-        if (kv.first != "lookup" && kv.first != "head") return (err = "profile " + p.profile + ": drafts." + kv.first + ": not a drafting source (lookup, head)"), false;
+        if (kv.first != "lookup" && kv.first != "head" && kv.first != "max")
+          return (err = "profile " + p.profile + ": drafts." + kv.first + ": not a drafting source (lookup, head) nor the pass width (max)"), false;
       p.draft_lookup = (*dr)["lookup"].kind == Json::BOOL && (*dr)["lookup"].b;
       p.draft_head = (*dr)["head"].kind == Json::BOOL && (*dr)["head"].b;
+      if (const Json* mx = dr->get("max")) {  // the most drafts one pass verifies on this device class (the pass width less one)
+        const double v = mx->kind == Json::NUM ? mx->f(0) : 0;
+        if (v < 1 || v > 7 || v != (int)v) return (err = "profile " + p.profile + ": drafts.max must be an integer 1..7"), false;
+        p.draft_max = (int)v;
+      }
     } else {
       return (err = "profile " + p.profile + ": drafts must be {\"lookup\": bool, \"head\": bool}"), false;
     }
@@ -447,6 +453,7 @@ std::string Preset::json() const {
                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
     << ",\"eviction\":" << q(evict) << ",\"layer_caps\":" << q(layer_caps) << ",\"drafts\":{\"lookup\":" << (draft_lookup ? "true" : "false") << ",\"head\":" << (draft_head ? "true" : "false")
+    << (draft_max > 0 ? ",\"max\":" + std::to_string(draft_max) : std::string())  // (declared only)
     << "},\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
@@ -487,6 +494,7 @@ std::string Resolved::json() const {
   if (spare_mem) o << ",\"spare_memory\":true";
   if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
   if (ctx > 0) o << ",\"ctx\":" << ctx;
+  if (draft != "none") o << ",\"draft_max\":" << draft_max;  // (only while drafting: the block is unchanged with it off)
   o << "}";
   return o.str();
 }
@@ -562,6 +570,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   if (slab_on) x.slab = slab.json();
   x.evict = evict;
   x.draft = draft;
+  x.draft_max = draft_max;
   x.gpu_frac = gpu_frac;
   x.gpu_experts = gpu_experts;
   x.run_ahead = run_ahead > 0 ? run_ahead : 0;
@@ -643,6 +652,9 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   else if (g.drafts) r.draft = *g.drafts > 0 ? "lookup" : "none";
   else if (pf) r.draft = P.draft_lookup && P.draft_head ? "both" : P.draft_lookup ? "lookup" : P.draft_head ? "head" : "none";
   r.drafts = r.draft != "none" ? 1 : 0;
+  if (g.draft_max) r.draft_max = *g.draft_max;
+  else if (pf && P.draft_max > 0) r.draft_max = P.draft_max;
+  r.draft_max = std::max(1, std::min(7, r.draft_max));
   // no early names under --drafts 1: on the real 35B and Inkling (agent turns, 6.6 / 7.8 GB) naming the lookup source's
   // picks 4 positions ahead read 40-70 MB per token more than plain decoding and cancelled the passes' gain (early 0: fewer
   // MB per token than plain decoding at the same tokens per step); --early N still sets it
@@ -705,6 +717,7 @@ const RunFlag RUN_FLAGS[] = {
     {"--bg-gate", nullptr, RF_INT(bg_gate)},
     {"--drafts", nullptr, RF_INT(drafts)},
     {"--draft", nullptr, RF_STR(draft)},
+    {"--draft-max", nullptr, RF_INT(draft_max)},
     {"--early", nullptr, RF_INT(early)},
     {"--spare-mem", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.spare_mem = x != 0), true); }},
     {"--drive-gbs", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x >= 0 && ((g.drive_gbs = x), true); }},

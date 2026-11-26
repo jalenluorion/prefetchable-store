@@ -57,6 +57,9 @@ struct Preset {
   // drafting by default (a profile's "drafts": {"lookup": B, "head": B}; an older manifest's bool: the lookup drafts):
   // the lookup and tool-call drafts, the model's own draft head; off in every built-in profile
   bool draft_lookup = false, draft_head = false;
+  // the most drafts one pass verifies (a profile's "drafts": {..., "max": N}, 1..7; 0 = undeclared: the front end's 7):
+  // the pass width is 1 + N positions
+  int draft_max = 0;
   // the batched prefill's exact CPU + GPU split (Metal builds): shares of the attention projections' and the experts'
   // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for both models, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)
   double gpu_frac = 0, gpu_experts = 0;
@@ -100,6 +103,7 @@ struct Resolved {
   std::string profile, mode, routers, xtok, evict;  // mode: the engine's mode string; routers / xtok: "" = none
   int m = 0, cand = 0;
   std::string draft = "none";  // the drafting in force: none | lookup | fixed | head | both (JSON: "drafts": {"lookup", "head"})
+  int draft_max = 7;           // drafts per pass at most (JSON "draft_max", written only while drafting is on)
   double tau = -1, cache_gb = 0, gpu_frac = 0, gpu_experts = 0;  // tau as the routers use it: >= 0 the confidence rule
   int run_ahead = 0, run_ahead_depth = 1;                         // picks named by the run-ahead (0 = off), its depth
   double ra_budget = 0;                                           // its limits (0 / 0 / false: none)
@@ -166,7 +170,7 @@ struct Given {
   std::optional<int> run_ahead, run_ahead_depth, ra_max_tok;
   std::optional<double> ra_budget;
   std::optional<bool> ra_sat_skip;
-  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts, early;
+  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts, early, draft_max;
   std::optional<std::string> draft;    // none | lookup | fixed | head | both
   bool recording = false;  // a routing record is written (dmeng --record): single steps unless a chunk is given
 };
@@ -175,7 +179,7 @@ struct Given {
 // function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
 // --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
 // --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
-// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N --spare-mem 0|1 --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --draft-max N --early N --spare-mem 0|1 --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
 // run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
 // and err on a malformed value).
 std::string run_flag_name(const std::string& flag);
@@ -208,6 +212,7 @@ struct RunOpts {
   // drafting, once for every front end: an explicit --draft MODE; else --drafts 0|1 (1: the lookup and tool-call drafts);
   // else the profile's declared drafts (Preset::draft_lookup / draft_head: lookup, head or both); drafts = draft != none
   std::string draft = "none";
+  int draft_max = 7;  // drafts per pass at most: explicit --draft-max, else the profile's drafts.max, else 7 (clamped to 1..7)
   int early = 0;
   bool spare_mem = false;  // the OS file cache under the slab (CoreOpts::spare_mem): explicit, else the profile's rule
   double drive_gbs = 0;    // bench only (CoreOpts::drive_gbs): explicit only, 0 = off

@@ -466,7 +466,6 @@ int main(int argc, char** argv) {
     else if (k == "--taps-out") a.taps_out = v();
     else if (k == "--state-check") a.state_check = true;
     else if (k == "--xtok-bg") a.xtok_bg = v();
-    else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--draft-thr") a.draft_thr = std::stod(v());
     else if (k == "--draft-exact") a.draft_exact = std::stoi(v());
     else if (k == "--draft-q8") a.draft_q8 = std::stoi(v());
@@ -550,6 +549,7 @@ int main(int argc, char** argv) {
   a.prefill_gpu_frac = ro.gpu_frac, a.prefill_gpu_experts = ro.gpu_experts, a.prefill_chunk = ro.prefill_chunk;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
   a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early;
+  a.draft_max = ro.draft_max;  // (--draft-max is a run setting: explicit, else the profile's drafts.max, else 7)
   LoadOpts lo;
   std::string family;
   if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings, profiled ? P.profile : ""))
