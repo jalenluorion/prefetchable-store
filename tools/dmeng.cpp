@@ -686,7 +686,9 @@ int main(int argc, char** argv) {
   C.cache.rd.excl = a.rd_excl != 0;
   C.cache.name_gate = a.name_gate != 0;
   if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;
-  if (a.bg_ranks > 0 && C.hook == &rts) {  // background reads: the routers' next ranks for the drive's idle time
+  // the in-token routers in the chain (alone, or wrapped by the cross-token routers: Inkling's profiles)
+  const bool rts_on = C.hook == &rts || (C.hook == &xt && xt.inner == &rts) || (C.hook == &xb && (xb.inner == &rts || (xb.inner == &xt && xt.inner == &rts)));
+  if (a.bg_ranks > 0 && rts_on) {  // background reads: the routers' next ranks for the drive's idle time
     rts.bg_ranks = a.bg_ranks;
     rts.bg_queue = std::max(1, a.bg_queue);
     rts.bg_margin = a.bg_margin;
