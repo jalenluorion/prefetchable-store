@@ -52,7 +52,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   },
   "prefill": {
    "chunk": 256,
-   "gpu_min": 256,
+   "gpu_min": 64,
    "join": 0.25,
    "short_names": "router",
    "span": 8192,
@@ -163,7 +163,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   "prefill": {
    "chunk": 512,
    "dn_rows": 64,
-   "gpu_min": 256,
+   "gpu_min": 64,
    "gpu_min_wave": 128,
    "join": 0,
    "pack_min": 1,
