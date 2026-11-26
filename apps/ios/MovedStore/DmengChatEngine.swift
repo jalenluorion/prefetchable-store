@@ -132,8 +132,6 @@ enum DmengLaunch {
         get { UserDefaults.standard.object(forKey: spareMemoryKey) as? Bool }
         set { UserDefaults.standard.set(newValue, forKey: spareMemoryKey) }
     }
-    /// The 35B's early router (the manifest's linear_k2); Inkling takes its profile's routers.
-    static let defaultRouters = "linear_k2"
     /// The selected model's saved states (one folder per model: a 35B state is never offered to Inkling).
     static var diskDir: URL { prefixDir(kind) }
     static func prefixDir(_ k: ModelKind) -> URL {
@@ -388,9 +386,9 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let q = kind == .qwen36
         var o = DmengOptions()
         o.cacheBytes = Int64(DmengLaunch.cacheGB * 1e9)
-        // the 35B names its experts with the manifest's linear_k2 router; Inkling takes its profile's routers (naming one
-        // here would turn the profile's cross-token router and its priority reads off)
-        o.routersId = q ? DmengLaunch.defaultRouters : nil
+        // both models take their profile's routers (naming one here would turn the profile's names rule, cross-token router
+        // and priority reads off)
+        o.routersId = nil
         o.routerM = 0
         o.threads = 0
         o.readers = 0  // the profile's: phone and phone-small declare 8 (4 readers 0.745 GB/s, 8 readers 0.84 on the phone's drive)
@@ -445,21 +443,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.layerCaps = 0  // the core's auto
         o.plan = 0
         o.planU = 0
-        o.routerTau = 0
+        o.routerTau = 0  // the profile's names rule (per mode where declared)
         o.routerCand = 0
-        #if os(iOS) && !targetEnvironment(macCatalyst)
-        // the 35B: Fast names linear_k2's plain top 3 per step, Exact the confidence rule (tau 0.5 over 16); Inkling: the
-        // profile's names rule (the confidence rule, tau 0.5 over 16, in both modes)
-        if q {
-            if exact {
-                o.routerTau = 0.5
-                o.routerCand = 16
-            } else {
-                o.routerM = 3
-                o.routerTau = -1
-            }
-        }
-        #endif
         o.split = 1
         // passed as "exact" explicitly: the engine's profile would otherwise choose its own default mode (phone-small: fast)
         o.mode = DmengLaunch.engineMode ?? "exact"
