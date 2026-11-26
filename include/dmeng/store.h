@@ -20,9 +20,10 @@
 //
 // Spare memory: a probation tier under the slab (Cache::file_under, CoreOpts::spare_mem / spare_gb; a locked, plain or
 // purgeable slab). A record lives in ONE place, the slab or the OS file cache, never both:
-//  - a read (a miss, a name, a background read) lands in probation: a slot past the slab's (index >= SlotPool::n, no
-//    memory of its own) whose record a reader brings into the file cache by a buffered pread into its scratch buffer and
-//    a touch of every page of the mapping (the reader does the I/O and the soft faults); the compute reads the record
+//  - a read (a miss, a name, a background read) that would displace a slab record (no free slab slot below the layer's
+//    cap) lands in probation instead: a slot past the slab's (index >= SlotPool::n, no memory of its own) whose record
+//    a reader brings into the file cache by a buffered pread into its scratch buffer and a touch of every page of the
+//    mapping (the reader does the I/O and the soft faults); the compute reads the record
 //    through the read-only mapping of its layer file (rec()). The slab is not given a copy.
 //  - its reuse promotes it: a use at a later token than its first use (the statistics' clock: a multi-position pass is
 //    one token, so a prompt's positions and a looped layer's passes inside one token are one use) marks it; at the next

@@ -751,7 +751,9 @@ void Cache::pre_use(int L, const int32_t* picks, int n, long t) {
 
 int Cache::victim(int L, int reserve, int fit_names) {
   PolicyTimer pt(st.policy_ms);
-  if (prob_slots_ && !prob_bypass_ && prob_on()) {  // the spare tier: every read lands in probation (the slab untouched)
+  // the spare tier: a read that would displace a slab record lands in probation instead (the slab untouched); a free
+  // slab slot below the layer's cap is still taken first (nothing displaced, the record in one place)
+  if (prob_slots_ && !prob_bypass_ && prob_on() && (pool(L).free_.empty() || (!lcap.empty() && lheld[L] >= lcap[L]))) {
     const int v = prob_take(L);
     if (v >= 0) return v;
   }
@@ -1157,7 +1159,7 @@ bool Cache::read_bg_value(int L, int e, double value, long until) {
   // reserve, the same value test); below its cap the pool's choice, as without caps
   const bool capped = !lcap.empty() && lheld[L] >= lcap[L];
   int v = -1;
-  if (prob_on()) v = prob_take(L);  // the spare tier: into probation (no slab record displaced: no value test)
+  if (prob_on() && (capped || S.free_.empty())) v = prob_take(L);  // the spare tier: into probation (no value test)
   if (v >= 0) {
   } else if (!capped && !S.free_.empty()) {
     v = S.free_.back();

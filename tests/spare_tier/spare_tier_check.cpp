@@ -2,8 +2,9 @@
 //
 //   spare_tier_check [DIR]      (DIR: a scratch folder, default $TMPDIR; prints PASS / FAIL lines, exit 1 on a failure)
 //
-// A read lands in probation (a slot past the slab, the record read through the mapping, its pages resident and mapped
-// by the reader: no page-in when the compute reads it); its reuse at a later token promotes it into the slab at the next
+// A read takes a free slab slot first (its file pages dropped after it); with the slab full it lands in probation (a
+// slot past the slab, the record read through the mapping, its pages resident and mapped by the reader: no page-in
+// when the compute reads it); its reuse at a later token promotes it into the slab at the next
 // step boundary (the slab's bytes are the file's, the file pages are dropped); a reuse inside one token does not; the
 // budget drops the oldest unpinned probation record's pages; a record whose pages the OS reclaimed is a miss at its use
 // (unpinned) or read again in place (pinned); a pause drains probation and later reads go to the slab; with the tier off
@@ -88,6 +89,17 @@ static void done(Cache& c, int L, int s, long t) {  // the step's use and unpin 
   c.use(L, s, t, t * 2 + L);
   c.unpin(L, s);
 }
+// reads into the slab's free slots (each used once at token 0) until it is full; true if every one went to the slab with
+// the file's bytes and left no file pages behind
+static bool fill_slab(Cache& c, int L, const std::vector<int>& es, size_t R) {
+  bool ok = true;
+  for (int e : es) {
+    const int s = miss(c, L, e, 0);
+    ok &= s >= 0 && s < c.pool(L).n && same_as_file(c.rec(L, s), L, e, R) && none_resident(c.fmap[L] + (size_t)e * R, R);
+    done(c, L, s, 0);
+  }
+  return ok && c.pool(L).free_.empty();
+}
 
 int main(int argc, char** argv) {
   std::string dir = argc > 1 ? argv[1] : (getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
@@ -108,13 +120,15 @@ int main(int argc, char** argv) {
     c.enable_hazard();
     SlotPool& S = c.P[0];
     check(S.n == 8 && S.np == 6 && c.prob_on() && c.fmap.size() == 2, "the tier on: 8 slab slots, 6 probation slots, the files mapped");
-    // a miss lands in probation, read through the mapping
+    // free slab slots are taken first (nothing displaced; the slab read leaves no file pages: one place)
+    check(fill_slab(c, 0, {4, 5, 6, 7, 8, 10, 12, 13}, R0) && c.prob_held(0) == 0, "free slab slots first: the slab's bytes, no file pages left");
+    // with the slab full, a miss lands in probation, read through the mapping
     const uint64_t b0 = c.rd.bytes.load();
     int s = miss(c, 0, 3, 0);
     const uint8_t* view = c.fmap[0] + 3 * R0;
     check(s >= S.n && c.rec(0, s) == view && same_as_file(c.rec(0, s), 0, 3, R0), "a miss lands in probation: the record is the mapping's, the file's bytes");
     check(c.rd.bytes.load() - b0 == R0 && resident(view, R0), "the reader read it from the drive into the file cache (pages resident)");
-    check(c.held(0) == 0 && c.prob_held(0) == 1 && c.prob_held_bytes() == R0, "the slab holds nothing; probation holds one record");
+    check(c.held(0) == 8 && c.prob_held(0) == 1 && c.prob_held_bytes() == R0, "the slab's 8 untouched; probation holds one record");
     // the compute reads it: no page-in (the reader mapped every page)
     {
       const uint64_t p0 = Cache::task_pageins();
@@ -149,7 +163,7 @@ int main(int argc, char** argv) {
     const int ps = c.slot_of(0, 3);
     check(ps >= 0 && ps < S.n && same_as_file(c.rec(0, ps), 0, 3, R0) && c.rec(0, ps) == S.row(ps), "promoted: a slab slot with the file's bytes");
     check(none_resident(view, R0), "promoted: its file pages dropped (one place)");
-    check(c.st.n_promoted == 1 && c.held(0) == 1 && c.prob_held(0) == 0 && !c.tier_due(), "promotions 1; slab 1, probation 0");
+    check(c.st.n_promoted == 1 && c.held(0) == 8 && c.prob_held(0) == 0 && !c.tier_due(), "promotions 1 (a slab record evicted for it); slab 8, probation 0");
     // the budget: 7 more reads into a probation of 6 drop the oldest's pages
     int sl[7];
     for (int i = 0; i < 7; i++) {
@@ -159,7 +173,7 @@ int main(int argc, char** argv) {
     c.rd.drops_flush();
     const uint8_t* v10 = c.fmap[1];
     check(c.slot_of(1, 0) < 0 && none_resident(v10, R0) && c.st.n_prob_budget_drops == 1, "the budget: the oldest probation record dropped, its pages too");
-    check(c.prob_held(0) == 6 && c.held(0) == 1, "probation holds its budget (6), the slab is untouched");
+    check(c.prob_held(0) == 6 && c.held(0) == 8, "probation holds its budget (6), the slab is untouched");
     for (int i = 1; i < 7; i++) check(c.slot_of(1, i) >= S.n, ("record " + std::to_string(i) + " in probation").c_str());
     // the OS reclaims a probation record: unpinned, its use is a miss; pinned, it is read again in place
     const uint8_t* v11 = c.fmap[1] + 1 * R0;
@@ -224,6 +238,7 @@ int main(int argc, char** argv) {
       return 1;
     }
     check(c.P[0].np > 0 && c.P[1].np > 0, "two pools: each has probation slots");
+    check(fill_slab(c, 0, {8, 9, 10, 11, 12, 13}, R0) && fill_slab(c, 1, {4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, R1), "two pools: both slabs filled");
     const int a = miss(c, 0, 1, 0), b = miss(c, 1, 2, 0);
     check(a >= c.P[0].n && b >= c.P[1].n && same_as_file(c.rec(1, b), 1, 2, R1), "two pools: reads land in each pool's probation");
     done(c, 0, a, 0);
