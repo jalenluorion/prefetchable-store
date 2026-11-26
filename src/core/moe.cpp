@@ -845,7 +845,9 @@ void Core::lossless(int step, const float* x, float* y, const MoeView& v) {
     const int e = pk[j];
     int s = cache.slot_of(L, e);
     S.n_pick_r[reg]++;
-    if (pass > 0 && std::find(ut.begin(), ut.end(), e) != ut.end()) S.n_reuse_hit++;
+    const bool reused = pass > 0 && std::find(ut.begin(), ut.end(), e) != ut.end();
+    if (reused) S.n_reuse_hit++;
+    if (reused && s < 0) S.n_reuse_reread++;
     if (s >= 0 && cache.mem == Mem::PURGEABLE) {
       cache.touch_nonvolatile(L, s);
       s = cache.slot_of(L, e);

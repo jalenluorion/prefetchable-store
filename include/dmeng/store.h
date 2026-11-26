@@ -148,6 +148,7 @@ struct CacheStats {
   uint64_t miss_pbin[6] = {0};          // misses by a planner's probability for them: none, <.1, <.3, <.5, <.7, >=.7
   uint64_t n_hit_r[2] = {0}, n_pick_r[2] = {0};  // [looped steps, other steps]
   uint64_t n_reuse_hit = 0;             // looped layers: a pick already used by an earlier pass of the same token
+  uint64_t n_reuse_reread = 0;          // ... of those, not in memory any more: read again within the token
   uint64_t bytes_urgent = 0, bytes_pf = 0;
   double wait_ms = 0, wait_ms_miss = 0, wait_ms_late = 0;
   double wait_ms_runnable = 0;  // lossless step: waits for a pick while another pick of the same layer had landed, not yet run

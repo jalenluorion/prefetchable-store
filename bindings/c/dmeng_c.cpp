@@ -58,7 +58,8 @@ struct dm_engine {
   std::unique_ptr<ModelLM> lm;
   std::unique_ptr<PrefixCache> pc;
   std::string err, stats, routers_path, res_file, last_prefill = "{}";  // the caller's strings are not kept (only copies)
-  std::string cache_why = "null";  // the automatic cache rule's numbers (memwatch.h auto_cache_gb), as dmeng and dmserve print them
+  std::string cache_why = "null";
+  int64_t rs_steps_loop = 0;  // decode steps at the last stats call (the loop / background counters' denominator)  // the automatic cache rule's numbers (memwatch.h auto_cache_gb), as dmeng and dmserve print them
   dm_open_opts o{};
   qos_class_t qos = QOS_CLASS_USER_INTERACTIVE;
   uint64_t rs_urgent = 0, rs_pf = 0, rs_pf_n = 0, rs_unused = 0, rs_busy = 0, rs_bytes = 0, rs_steps = 0;  // reads at the last stats call
@@ -815,6 +816,17 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"weight_left_out_per_token_p90\":" << (w.empty() ? 0.0 : (double)w[std::min(w.size() - 1, (size_t)(0.9 * w.size()))])
       << ",\"steps_with_a_drop_share\":" << N.steps_replaced / std::max(1.0, N.steps) << ",\"picks_left_out_per_token\":" << N.n_replaced / nt
       << ",\"picks_read_and_waited_per_token\":" << (N.n_read_now + N.n_late_waited) / nt << "}";
+  }
+  {  // looped layers (Inkling's passes) and background reads, per decode token since the last stats call
+    const CacheStats& S = e->C->cache.st;
+    const double nt = std::max(1.0, (double)(e->steps - e->rs_steps_loop));
+    const double rec = (double)e->C->cache.P[0].rec;
+    s << ",\"loop\":{\"looped_picks_per_token\":" << S.n_pick_r[0] / nt << ",\"hit_rate_looped\":" << (double)S.n_hit_r[0] / std::max<uint64_t>(1, S.n_pick_r[0])
+      << ",\"hit_rate_other\":" << (double)S.n_hit_r[1] / std::max<uint64_t>(1, S.n_pick_r[1]) << ",\"picks_used_by_an_earlier_pass_per_token\":" << S.n_reuse_hit / nt
+      << ",\"reread_within_token_per_token\":" << S.n_reuse_reread / nt << ",\"reread_mb_per_token_approx\":" << S.n_reuse_reread * rec / 1e6 / nt
+      << "},\"background_reads\":{\"issued_per_token\":" << S.n_bg_issued / nt << ",\"refused_per_token\":" << S.n_bg_refused / nt
+      << ",\"used_per_token\":" << S.n_bg_used / nt << ",\"mb_per_token\":" << S.bytes_bg / 1e6 / nt << ",\"caps_active\":" << !e->C->cache.lcap.empty() << "}";
+    e->rs_steps_loop = e->steps;
   }
   if (e->C->run_ahead) s << ",\"run_ahead\":" << e->C->ra_json();  // cumulative since open (dmeng's counters)
   {  // the readers' wall time by reads in flight since the last stats call (per token: dmeng's read_queue counters)
