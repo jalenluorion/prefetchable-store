@@ -36,8 +36,6 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     /// The engine's saved states (Application Support/<bundle>/<name>): one folder per model, so a state computed with
     /// one model's weights is never offered to the other.
     var prefixDirName: String { self == .qwen36 ? "dmeng-prefix" : "dmeng-prefix-inkling" }
-    /// Positions the engine reserves. Inkling on phone-small: 4096 (16K would reserve 0.54 GB of attention cache).
-    func ctx(profile: String) -> Int { self == .inkling && profile == "phone-small" ? 4096 : 16384 }
     /// The mode setting's key: one per model (each model has its default per profile).
     var modeKey: String { self == .qwen36 ? "engine.mode" : "engine.mode.inkling" }
     /// Fast on both phone profiles (phone, phone-small), for both models; Exact elsewhere (the manifests' profiles agree).

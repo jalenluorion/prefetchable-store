@@ -435,7 +435,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.checkpointGB = 0
         o.parkGB = 0.001
         #endif
-        o.ctx = kind.ctx(profile: DmengLaunch.profile)
+        o.ctx = 0  // the profile's positions (Inkling's phone-small: 4096), else the engine's 16384
         // Inkling: the profile named explicitly (its phone-small set's NVFP4 layers 20-23 come from the profile's experts
         // override); the 35B: the C API's own choice from the memory available at open
         if kind == .inkling { o.profile = DmengLaunch.profile }
