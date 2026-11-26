@@ -656,6 +656,27 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
   return ok;
 }
 
+const float* Flash::final_hidden(int i) const {
+  if (i < 0) return head_in.size() == (size_t)c.H ? head_in.data() : nullptr;
+  return V && i < V->n ? V->fx.data() + (size_t)i * c.H : nullptr;
+}
+
+int Flash::head_argmax(const float* hn, float* conf) {
+  if (dh_x.cap < c.H) dh_x.init(c.H, prec);
+  dh_x.prep(hn, c.H);
+  dh_lg.resize(c.V);
+  const int VO = mi.vocab_out > 0 ? mi.vocab_out : c.V;
+  Job jh = {&head, &dh_x.q, hn, dh_lg.data()};  // the full head (the confidence needs every logit)
+  run_rows(*core->pool, &jh, 1, 64, ref);
+  int id = 0;
+  for (int r = 1; r < VO; r++)
+    if (dh_lg[r] > dh_lg[id]) id = r;
+  double zs = 0;
+  for (int r = 0; r < VO; r++) zs += std::exp((double)(dh_lg[r] - dh_lg[id]));
+  if (conf) *conf = (float)(1.0 / zs);
+  return id;
+}
+
 const float* Flash::logits_at(int i) const { return V && i >= 0 && i < V->n ? V->lg.data() + (size_t)i * c.V : nullptr; }
 
 bool Flash::verify(State& s0, const int32_t* ids, int n, Want want) {
