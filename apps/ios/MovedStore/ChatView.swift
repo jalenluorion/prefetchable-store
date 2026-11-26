@@ -92,33 +92,40 @@ struct ChatView: View {
                             .modifier(UITestRowProbe(id: r.message.id))
                             #endif
                     }
-                    Color.clear.frame(height: 1).id(bottomID)
+                    // the end of the list (its height is the list's bottom margin, so a scroll to it and the scroll view's
+                    // own bottom are the same place); on iOS 17 its appearance is the follow state (FollowTracking)
+                    Color.clear.frame(height: 8).id(bottomID)
                         .onAppear { if FollowTracking.legacy { atBottom = true; follow = true } }
-                        .onDisappear { if FollowTracking.legacy { atBottom = false } }
+                        .onDisappear { if FollowTracking.legacy { atBottom = false; follow = false } }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
-                .padding(.bottom, 8)
                 #if UITEST
                 .coordinateSpace(name: UITest.contentSpace)
                 #endif
             }
+            // each chat its own scroll view, which opens at its bottom (FollowTracking's initial anchor)
+            .id(m.conv.id)
             .scrollDismissesKeyboard(.interactively)
-            .modifier(FollowTracking(follow: $follow, atBottom: $atBottom))
+            .modifier(FollowTracking(follow: $follow, atBottom: $atBottom, pin: { scrollToLatest(proxy) }))
             #if UITEST
             .onChange(of: follow) { _, v in UITest.rec.follow = v; UITest.rec.mark("follow \(v)") }
             .onChange(of: atBottom) { _, v in UITest.rec.atBottom = v }
             #endif
             .onChange(of: m.conv.messages.last) { _, _ in
-                // Tool rounds replace the last row as streaming updates it. Use the same scroll
-                // transaction for both so an animated row change cannot compete with token updates.
-                if follow { scrollToLatest(proxy) }
+                // iOS 17: follow the stream by scrolling to the end after each update (iOS 18 pins the bottom itself)
+                if FollowTracking.legacy && follow { scrollToLatest(proxy) }
+            }
+            .onChange(of: m.streamingID) { _, _ in
+                // iOS 17: the caption and sources appear when the reply ends, after its last update
+                if FollowTracking.legacy && follow { DispatchQueue.main.async { scrollToLatest(proxy) } }
             }
             .onChange(of: m.conv.id) { _, _ in
                 follow = true
-                scrollToLatest(proxy)
+                atBottom = true
+                if FollowTracking.legacy { scrollToLatest(proxy) }
             }
-            .onAppear { scrollToLatest(proxy) }
+            .onAppear { if FollowTracking.legacy { scrollToLatest(proxy) } }
             .overlay(alignment: .bottomTrailing) {
                 if !atBottom && !m.conv.visible.isEmpty {
                     Button {
@@ -264,12 +271,25 @@ struct ChatView: View {
     }
 }
 
-/// Auto-scroll: follow the stream while the view is at the bottom; stop when the user scrolls up; resume at the bottom.
-/// iOS 18+ reads the scroll geometry and phase; on iOS 17 the bottom marker's appearance stands in (always follows).
+/// Auto-scroll: the view stays at the bottom while it follows; a drag up stops following, a drag or the arrow back to the
+/// bottom resumes it.
+///
+/// iOS 18: the scroll view keeps its own bottom when its content or its size changes (a streamed line, the thinking
+/// block collapsing, a tool card, the caption and sources at the end, the keyboard, the composer growing): the size
+/// change anchor is the bottom while following and the top otherwise, so a reader's position stays where it is. The
+/// follow state is read from the distance to the bottom whenever it changes during a drag, never while content
+/// arrives; nothing scrolls while a finger is down. When following and not at the bottom (a message sent while scrolled
+/// up), the view goes there without animation. A chat opens at its bottom.
+/// iOS 17: the end marker's appearance is the follow state, and each update scrolls to it.
 struct FollowTracking: ViewModifier {
     @Binding var follow: Bool
     @Binding var atBottom: Bool
+    var pin: () -> Void
     @State private var userScrolling = false
+    @State private var idle = true
+    @State private var distance: CGFloat = 0
+    /// Within this distance of the bottom, the view counts as at the bottom.
+    static let near: CGFloat = 24
 
     static var legacy: Bool {
         #if UITEST
@@ -282,14 +302,26 @@ struct FollowTracking: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *), !Self.legacy {
             content
+                .defaultScrollAnchor(.bottom, for: .initialOffset)
+                // the bottom anchor holds the view at the bottom on every layout, so it is off while a finger is down
+                .defaultScrollAnchor(follow && !userScrolling ? .bottom : .top, for: .sizeChanges)
                 .onScrollPhaseChange { _, p in
                     userScrolling = p == .tracking || p == .interacting || p == .decelerating
+                    idle = p == .idle
+                    if userScrolling { follow = distance <= Self.near }
+                    if idle && follow && distance > 1 { pin() }  // let go near the bottom: settle on it
                 }
-                .onScrollGeometryChange(for: Bool.self) { g in
-                    g.contentOffset.y >= g.contentSize.height - g.containerSize.height + g.contentInsets.bottom - 48
-                } action: { _, bottom in
-                    atBottom = bottom
-                    if bottom { follow = true } else if userScrolling { follow = false }
+                .onScrollGeometryChange(for: CGFloat.self) { g in
+                    // containerSize is the area inside the insets (the navigation bar above, the composer and the
+                    // keyboard below): the offset at the bottom is content - container - top inset
+                    g.contentSize.height - g.containerSize.height - g.contentInsets.top - g.contentOffset.y
+                } action: { _, d in
+                    distance = d
+                    atBottom = d <= Self.near
+                    #if UITEST
+                    UITest.rec.geoDist = d
+                    #endif
+                    if userScrolling { follow = atBottom } else if idle && follow && d > 1 { pin() }
                 }
         } else {
             content
