@@ -124,6 +124,16 @@ enum DmengLaunch {
         let has4 = ["/derived", "/.dmeng"].contains { ((try? FileManager.default.contentsOfDirectory(atPath: dir + $0)) ?? []).contains { $0.hasPrefix("resident_q4.") } }
         return profile == "phone-small" && has4 ? 4 : 8
     }
+    /// Spare memory for the model's files (the system's file cache under the expert cache): the engine's phone profile
+    /// turns it on where the phone has at least 11 GB of memory. The switch (Diagnostics) is offered only there; a
+    /// choice made with it is passed to the engine as an explicit override at the next open, else the engine's rule holds.
+    static let spareMemoryKey = "engine.spareMemory"
+    static var spareMemoryOffered: Bool { isPhone && ProcessInfo.processInfo.physicalMemory >= 11_000_000_000 }
+    /// The user's choice, nil when never set (the engine's rule).
+    static var spareMemoryChoice: Bool? {
+        get { UserDefaults.standard.object(forKey: spareMemoryKey) as? Bool }
+        set { UserDefaults.standard.set(newValue, forKey: spareMemoryKey) }
+    }
     /// The 35B's early router (the manifest's linear_k2); Inkling takes its profile's routers.
     static let defaultRouters = "linear_k2"
     /// The selected model's saved states (one folder per model: a 35B state is never offered to Inkling).
@@ -159,6 +169,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     private var _replyRows: [(String, String)] = []
     /// The last finished reply from the engine's counters (dm_counters deltas over the reply's decode), plain words.
     var replyRows: [(String, String)] { lock.withLock { _replyRows } }
+    /// Spare memory as the engine resolved it at open (nil before a model is open).
+    var spareMemoryResolved: Bool? {
+        lock.withLock { model == nil ? nil : (resolvedAtOpen["spare_memory"] as? Bool) == true }
+    }
 
     /// Rows for one reply: the counters at the decode's start and end, its tokens and seconds.
     static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, seconds: Double) -> [(String, String)] {
@@ -223,6 +237,9 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                   ("prompt GPU share", num(gpu["projections"]) > 0 || num(gpu["experts"]) > 0
                       ? String(format: "projections %.2f, experts %.2f", num(gpu["projections"]), num(gpu["experts"])) : "off"),
                   ("background reads", Int(num(bg["ranks"])) > 0 ? "ranks to \(Int(num(bg["ranks"])))" : "off"),
+                  ("spare memory", (r["spare_memory"] as? Bool) == true
+                      ? (m.counters.spare_memory == 2 ? "paused after a memory warning" : "on (model files kept in the system's spare memory)")
+                      : "off"),
                   ("context", "\(i.max_ctx) positions")]
         }
         s += [("sampling", GenSettings.current(defaults: lock.withLock { codec }?.generationDefaults ?? .modelDefault).label),
@@ -385,6 +402,9 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         #if SELFCHECK
         if let x = SelfCheck.optsOverride { o.modelOptions = x }  // a lever's model options / run flags (this process only)
         #endif
+        if DmengLaunch.spareMemoryOffered, let on = DmengLaunch.spareMemoryChoice {  // the switch, as an explicit override
+            o.modelOptions = [o.modelOptions, "run:spare-mem=\(on ? 1 : 0)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ";")
+        }
         // run-ahead (while a step waits on a read, the next layer's router runs on the experts in memory and its reads are
         // issued; the real pass recomputes exactly): the 35B in Exact 8 picks, depth 1, speculative work <= 0.2 x compute,
         // none while every reader is busy; off in Fast; Inkling: the profile's (0)
