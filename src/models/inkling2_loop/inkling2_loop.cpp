@@ -2462,7 +2462,10 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
   S = (IState*)&s0;
   // with the exact greedy head on, the next token is greedy(): the prompt's last logits are the full head's, so their
   // argmax (lowest index on a tie) is it (it was left at the previous step's value: -1 after a cold prefill)
-  if (po.chunk <= 1 || core->ns.on || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n)) {
+  // fast mode (approx:drop): the prompt runs the batched pass losslessly, as the 35B's and Flash-Next's prefills do
+  // (prefill_spans turns the leave-out rule off for the prompt, short prompts under drop_upto aside): a span reads each
+  // layer's union once, where single fast steps read every position's misses (P2: 462 positions in 230 s on the phone)
+  if (po.chunk <= 1 || (core->ns.on && !core->ns.drop) || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n)) {
     const bool r = Model::prefill(s0, ids, n, want_logits, capture, sink, st, cancel);  // single steps
     if (r && fast_head && want_logits) greedy_ = argmax(lgts.data(), c.VU);
     return r;
