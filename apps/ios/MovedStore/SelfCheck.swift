@@ -454,10 +454,10 @@ enum SelfCheck {
         out["engine_default"] = model.engineState.label
         if model.engineState == .ready {
             out["resolved_default"] = resolved((model.engine as? DmengChatEngine)?.selfCheckStats ?? "")
-            out["spare_memory_offered"] = DmengLaunch.spareMemoryOffered
+            out["spare_memory_offered"] = (model.engine as? DmengChatEngine)?.spareMemoryOffered ?? false
             out["spare_memory_choice"] = DmengLaunch.spareMemoryChoice ?? NSNull()
             out["spare_memory_resolved"] = (model.engine as? DmengChatEngine)?.spareMemoryResolved ?? NSNull()
-            log("SELFCHECK spare memory: switch \(DmengLaunch.spareMemoryOffered ? "offered" : "not offered"), choice \(DmengLaunch.spareMemoryChoice.map { "\($0)" } ?? "none"), resolved \((model.engine as? DmengChatEngine)?.spareMemoryResolved.map { "\($0)" } ?? "?")")
+            log("SELFCHECK spare memory: switch \((model.engine as? DmengChatEngine)?.spareMemoryOffered == true ? "offered" : "not offered"), choice \(DmengLaunch.spareMemoryChoice.map { "\($0)" } ?? "none"), resolved \((model.engine as? DmengChatEngine)?.spareMemoryResolved.map { "\($0)" } ?? "?")")
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             let statesBefore = chatStates()
             var th = thermal()

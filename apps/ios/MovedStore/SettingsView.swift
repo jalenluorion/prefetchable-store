@@ -419,7 +419,7 @@ struct DiagnosticsView: View {
                     Text("From the engine's own counters for the most recent reply.")
                 }
             }
-            if DmengLaunch.spareMemoryOffered {
+            if (m.engine as? DmengChatEngine)?.spareMemoryOffered == true {
                 Section {
                     Toggle("Use spare memory for the model's files", isOn: spareMemory)
                 } footer: {

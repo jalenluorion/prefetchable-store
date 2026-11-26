@@ -122,11 +122,11 @@ enum DmengLaunch {
         let has4 = ["/derived", "/.dmeng"].contains { ((try? FileManager.default.contentsOfDirectory(atPath: dir + $0)) ?? []).contains { $0.hasPrefix("resident_q4.") } }
         return profile == "phone-small" && has4 ? 4 : 8
     }
-    /// Spare memory for the model's files (the system's file cache under the expert cache): the engine's phone profile
-    /// turns it on where the phone has at least 11 GB of memory. The switch (Diagnostics) is offered only there; a
-    /// choice made with it is passed to the engine as an explicit override at the next open, else the engine's rule holds.
+    /// Spare memory for the model's files (the system's file cache under the expert cache): on where the engine's profile
+    /// turns it on (its spare_memory rule, by the device's physical memory). The switch (Diagnostics) is offered where the
+    /// engine turned it on at this open, or once a choice was made with it (DmengChatEngine.spareMemoryOffered); a choice
+    /// is passed to the engine as an explicit override at the next open on a phone, else the engine's rule holds.
     static let spareMemoryKey = "engine.spareMemory"
-    static var spareMemoryOffered: Bool { isPhone && ProcessInfo.processInfo.physicalMemory >= 11_000_000_000 }
     /// The user's choice, nil when never set (the engine's rule).
     static var spareMemoryChoice: Bool? {
         get { UserDefaults.standard.object(forKey: spareMemoryKey) as? Bool }
@@ -247,6 +247,11 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     /// Spare memory as the engine resolved it at open (nil before a model is open).
     var spareMemoryResolved: Bool? {
         lock.withLock { model == nil ? nil : (resolvedAtOpen["spare_memory"] as? Bool) == true }
+    }
+    /// The spare-memory switch is offered (a phone, a model open): where the engine turned spare memory on at this open,
+    /// or where a choice was made with the switch (it turned it off, or kept it on).
+    var spareMemoryOffered: Bool {
+        DmengLaunch.isPhone && (spareMemoryResolved == true || (spareMemoryResolved != nil && DmengLaunch.spareMemoryChoice != nil))
     }
 
     /// Rows for one reply: the counters at the decode's start and end, its tokens and seconds.
@@ -476,7 +481,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         #if SELFCHECK
         if let x = SelfCheck.optsOverride { o.modelOptions = x }  // a lever's model options / run flags (this process only)
         #endif
-        if DmengLaunch.spareMemoryOffered, let on = DmengLaunch.spareMemoryChoice {  // the switch, as an explicit override
+        if DmengLaunch.isPhone, let on = DmengLaunch.spareMemoryChoice {  // the switch, as an explicit override
             o.modelOptions = [o.modelOptions, "run:spare-mem=\(on ? 1 : 0)"].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ";")
         }
         // run-ahead (while a step waits on a read, the next layer's router runs on the experts in memory and its reads are
@@ -958,7 +963,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                             prefillStats: ["prefill_s": sr.msPrefill / 1000, "prefill_mb_read": sr.mbRead,
                                            "prefill_reused": Double(sr.reused), "prefill_computed": Double(sr.computed)])
         let rows = Self.replyRows(c0, cEnd, tokens: new.count, speed: sp, storeResident: m.storeResidentBytes,
-                                  bigMemory: DmengLaunch.spareMemoryOffered)
+                                  bigMemory: spareMemoryOffered)
         lock.withLock { _last = d; _replyRows = rows }
         log("DMENG REPLY ids " + new.map(String.init).joined(separator: ","))
         if ink { log("DMENG REPLY raw " + (lead + c.decode(new)).debugDescription + " (stop: \(reason.rawValue)\(stopId.map { ", token \($0)" } ?? ""))") }
