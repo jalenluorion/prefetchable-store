@@ -533,8 +533,9 @@ if wanted("presets"):
                     bad.append(f"{prof} prefill {fe}: {g} != {want}")
             ncell += 1
         # a profile's own mode declaration (profiles.<p>.modes.fast) over the model-level modes.fast, in a temporary
-        # manifest: that profile resolves to its string, every other profile to the model-level one, in all three front
-        # ends ("preset": engine_mode, engine_mode_from; "resolved": mode); an explicit engine string is kept as given
+        # manifest: that profile resolves to its string, every other profile to the folder's own declaration (the 35B's
+        # phone-small: approx:drop:w=0.08) or the model-level one, in all three front ends ("preset": engine_mode,
+        # engine_mode_from; "resolved": mode); an explicit engine string is kept as given
         OVER = "approx:drop:w=0.15:mass=0.15:late=-1"
         op = "phone" if "phone" in man["profiles"] else next(iter(man["profiles"]))
 
@@ -564,7 +565,11 @@ if wanted("presets"):
             d = json.loads(ready[0][6:]) if ready else None
             return (d["preset"], d["resolved"]) if d else r.stderr[-200:]
 
-        cases = [(prof, "fast", (OVER, f"profiles.{op}.modes.fast") if prof == op else (model_fast, "modes.fast")) for prof in man["profiles"]]
+        def own_fast(prof):  # the folder's own declaration of a profile's fast mode (the 35B's phone-small), else the model-level one
+            e = man["profiles"][prof].get("modes", {}).get("fast", {}).get("engine")
+            return (e, f"profiles.{prof}.modes.fast") if e else (model_fast, "modes.fast")
+
+        cases = [(prof, "fast", (OVER, f"profiles.{op}.modes.fast") if prof == op else own_fast(prof)) for prof in man["profiles"]]
         cases.append((op, "approx:drop:w=0.2", ("approx:drop:w=0.2", "given")))  # an explicit engine string wins
         for prof, mode, (s, src) in cases:
             for fe in ("dmeng", "capi", "dmserve"):

@@ -1698,6 +1698,16 @@
   "phone-small": {
    "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
    "mode": "fast",
+   "modes": {
+    "fast": {
+     "definition": "the model-level fast mode with the leave-out threshold of this profile's calibrated 4-bit in-memory weights: a picked expert not in memory is waited for if its routing weight is over 0.08 or its read is in flight, otherwise left out",
+     "engine": "approx:drop:w=0.08",
+     "calibration": {
+      "measured": "top choice equal to the exact 8-bit engine, prose / agent text, the calibrated 4-bit in-memory weights (engine session, Mac): 0.900 / 0.885 at threshold 0.08, 0.888 / 0.878 at 0.09, 0.860 / 0.873 at 0.10 (the model-level value); exact 0.913 / 0.884; on the iPhone 15 Plus (phone-small, 1.42 GB slab, 400 tokens of prose) 3.52 tok/s at 0.08 (results/ios/p2/P2.md)",
+      "reason": "0.10 gives up 0.04 of prose agreement on these weights; 0.08 keeps fast within 0.013 of exact; the 8-bit profiles keep the model-level threshold"
+     }
+    }
+   },
    "drafts": {
     "lookup": false,
     "head": false

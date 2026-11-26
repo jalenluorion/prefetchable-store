@@ -268,6 +268,11 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "lookup": false
     },
     "mode": "fast",
+    "modes": {
+     "fast": {
+      "engine": "approx:drop:w=0.08"
+     }
+    },
     "names": {
      "exact": {
       "candidates": 16,
