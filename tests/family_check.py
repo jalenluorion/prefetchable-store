@@ -251,7 +251,12 @@ def declared(name, drafts):
     shutil.rmtree(F, ignore_errors=True)
     os.makedirs(F)
     for e in os.listdir(M):
-        if e != "moved-store.json":
+        if e == ".dmeng":  # its own engine folder (the server writes its prefix cache and hot set there), the derived files linked
+            os.makedirs(os.path.join(F, e))
+            for d in os.listdir(os.path.join(M, e)):
+                if d.endswith(".bin"):
+                    os.symlink(os.path.join(M, e, d), os.path.join(F, e, d))
+        elif e != "moved-store.json":
             os.symlink(os.path.join(M, e), os.path.join(F, e))
     m2 = json.loads(json.dumps(man))
     for pv in m2["profiles"].values():
