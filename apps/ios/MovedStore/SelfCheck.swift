@@ -12,6 +12,13 @@ enum SelfCheck {
     static let requested = ProcessInfo.processInfo.arguments.contains("-selfcheck")
     /// Read by DmengLaunch.userMode: the Exact pass's mode for this process only (never saved).
     nonisolated(unsafe) static var modeOverride: String?
+    /// A lever's model options for the engine's next open (-selfcheck-lever-opts), this process only.
+    nonisolated(unsafe) static var optsOverride: String?
+    static func arg(_ name: String) -> String? {
+        let a = ProcessInfo.processInfo.arguments
+        guard let i = a.firstIndex(of: name), i + 1 < a.count else { return nil }
+        return a[i + 1]
+    }
     /// Documents/selfcheck-ids.txt (comma-separated ids) if present, else the Pittsburgh prompt.
     static let builtInIds = [760, 3712, 314, 279, 3177, 314, 26635, 11690, 440]
     static let exactTokens = 400
@@ -145,6 +152,49 @@ enum SelfCheck {
             out["free_after_cleanup"] = freeGB()
         }
         log("SELFCHECK screen \(out["first_screen"]!) model \(kind.rawValue) profile \(DmengLaunch.profile) mode \(DmengLaunch.userMode)")
+
+        // -selfcheck-lever NAME -selfcheck-lever-opts "OPTS" [-selfcheck-lever-mode fast|exact] [-selfcheck-lever-tokens N]:
+        // one launch, the engine opened twice in the mode (default, then with OPTS as its model options / run: flags); per
+        // arm a cold short prompt (the coding prompt's first 48 ids: a short batch) and the Pittsburgh prompt decoded
+        // greedily for N tokens (200), with the decode's counters
+        if let lever = arg("-selfcheck-lever"), let d = model.engine as? DmengChatEngine {
+            let mode = arg("-selfcheck-lever-mode") ?? "fast"
+            let n = Int(arg("-selfcheck-lever-tokens") ?? "") ?? 200
+            out["lever"] = lever
+            out["lever_opts"] = arg("-selfcheck-lever-opts") ?? ""
+            out["lever_mode"] = mode
+            var arms: [String: Any] = [:]
+            for (arm, opts) in [("default", nil), ("lever", arg("-selfcheck-lever-opts"))] as [(String, String?)] {
+                modeOverride = mode
+                optsOverride = opts
+                await d.unload()
+                model.engineState = .idle
+                let tl = Date()
+                await model.load()
+                var r: [String: Any] = ["engine": model.engineState.label, "load_s": Date().timeIntervalSince(tl)]
+                if model.engineState == .ready {
+                    r["resolved"] = resolved(d.selfCheckStats)
+                    let th = thermal()
+                    if let g = try? await d.selfCheckGreedy(Array(codeIds.prefix(48)), n: 1) {
+                        r["short_prefill_s"] = g.prefillSeconds
+                        r["short_prefill"] = json(g.prefillJSON)
+                    }
+                    if let g = try? await d.selfCheckGreedy(builtInIds, n: n) {
+                        r["pitt"] = ["tokens": g.ids.count, "decode_s": g.seconds, "tok_per_s": Double(g.ids.count) / max(1e-9, g.seconds),
+                                     "ids": g.ids, "stats": json(g.decodeStats)] as [String: Any]
+                        log("SELFCHECK lever \(lever) \(arm): \(String(format: "%.2f", Double(g.ids.count) / max(1e-9, g.seconds))) tok/s")
+                    }
+                    r["thermal"] = "\(th) -> \(thermal())"
+                    r["mem"] = mem("lever \(arm)")
+                }
+                arms[arm] = r
+            }
+            modeOverride = nil
+            optsOverride = nil
+            out["arms"] = arms
+            finish()
+            return
+        }
 
         // -selfcheck-memrow: only the memory of one long prompt (the coding prompt, 357 ids) in the default mode: the
         // footprint before it, its highest value while the prompt is read (sampled every 50 ms) and after ~10 s of decode

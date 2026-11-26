@@ -332,6 +332,9 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         // the readers' disk I/O one tier below the app's own on the phone, so the UI's page faults do not wait behind
         // queued expert reads
         o.readerIOLow = DmengLaunch.isPhone
+        #if SELFCHECK
+        if let x = SelfCheck.optsOverride { o.modelOptions = x }  // a lever's model options / run flags (this process only)
+        #endif
         // run-ahead (while a step waits on a read, the next layer's router runs on the experts in memory and its reads are
         // issued; the real pass recomputes exactly): the 35B in Exact 8 picks, depth 1, speculative work <= 0.2 x compute,
         // none while every reader is busy; off in Fast; Inkling: the profile's (0)
@@ -608,7 +611,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     private var isCancelled: Bool { lock.withLock { cancelled } }
 
     #if SELFCHECK
-    struct Greedy: Sendable { var ids: [Int]; var source: String; var seconds: Double; var prefillSeconds: Double = 0; var decodeStats: String = "" }
+    struct Greedy: Sendable { var ids: [Int]; var source: String; var seconds: Double; var prefillSeconds: Double = 0; var decodeStats: String = ""; var prefillJSON: String = "" }
     /// SelfCheck: greedy decoding of raw prompt ids on the open model (sync, then argmax / step, as a reply does). The
     /// engine's counters are restarted after the sync, so `decodeStats` (dm_stats_json) covers the decode steps only.
     func selfCheckGreedy(_ prompt: [Int], n: Int) async throws -> Greedy {
@@ -618,6 +621,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
             let tp = Date()
             let sr = try m.sync(prompt.map { Int32($0) }, logits: &logits)
             let prefillSeconds = Date().timeIntervalSince(tp)
+            let pj = m.lastPrefillJSON
             _ = m.statsJSON()
             var out: [Int] = []
             let t0 = Date()
@@ -628,7 +632,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                 guard try m.step(tk, logits: &logits) else { break }
             }
             let secs = Date().timeIntervalSince(t0)
-            return Greedy(ids: out, source: sr.source, seconds: secs, prefillSeconds: prefillSeconds, decodeStats: m.statsJSON())
+            return Greedy(ids: out, source: sr.source, seconds: secs, prefillSeconds: prefillSeconds, decodeStats: m.statsJSON(), prefillJSON: pj)
         }
     }
     var selfCheckStats: String { lock.withLock { model }?.statsJSON() ?? "" }

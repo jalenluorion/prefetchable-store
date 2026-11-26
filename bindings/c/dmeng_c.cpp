@@ -227,6 +227,24 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.run_ahead_max != 0) F("--run-ahead-max", std::to_string(std::max(0, o.run_ahead_max)));
   if (o.run_ahead_sat_skip != 0) F("--run-ahead-sat-skip", o.run_ahead_sat_skip > 0 ? "1" : "0");
   if (o.readers > 0) F("--readers", std::to_string(o.readers));
+  // model_options entries "run:--FLAG=VALUE": any dmeng run flag (presets.h run_flag), read after the fields above (so a
+  // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode fast-eps, --rd-prio)
+  std::string model_opts;
+  {
+    const std::string mo = o.model_options ? o.model_options : "";
+    for (size_t i = 0; i < mo.size();) {
+      size_t j = mo.find(';', i);
+      if (j == std::string::npos) j = mo.size();
+      const std::string kv = mo.substr(i, j - i);
+      if (kv.rfind("run:", 0) == 0) {
+        const size_t q = kv.find('=');
+        F(kv.substr(4, q == std::string::npos ? std::string::npos : q - 4).c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
+      } else if (!kv.empty()) {
+        model_opts += (model_opts.empty() ? "" : ";") + kv;
+      }
+      i = j + 1;
+    }
+  }
   if (!err.empty()) {
     g_err = "options: " + err;
     return nullptr;
@@ -245,10 +263,6 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (ro.drafts > 0) {  // (no drafting in the C API: a manifest default cannot turn on what this front end does not do)
     ro.notes.push_back("drafts: the C API has no drafting, off");
     ro.drafts = 0;
-  }
-  if (ro.bg_ranks > 0) {
-    ro.notes.push_back("background reads: not in the C API, off");
-    ro.bg_ranks = 0;
   }
   // the prompt's sub-chunk is the model's own here (the C API does not set it; dmeng and dmserve use 512): printed as 0
   ro.prefill_chunk = 0;
@@ -384,6 +398,16 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     if (ro.tau > 0) e->R->tau = ro.tau;
     e->R->cand = ro.cand;
     e->C->hook = e->R.get();
+    if (ro.bg_ranks > 0) {  // background reads: the routers' next ranks for the drive's idle time (as dmeng; its defaults)
+      e->R->bg_ranks = ro.bg_ranks;
+      e->R->bg_queue = 2;
+      e->C->cache.rd.bg_spec_gate = std::max(0, ro.bg_gate);
+      e->C->cache.bg_split = 2;
+      e->C->cache.rd.max_bg = 1;
+    }
+  } else if (ro.bg_ranks > 0) {
+    fprintf(stderr, "dmeng: background reads need the routers: off\n");
+    ro.bg_ranks = 0;
   }
   const std::string xtok = ro.xtok;
   if (!xtok.empty()) {  // cross-token routers: the next token's first steps, from a late step of this one
@@ -441,7 +465,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (pt > 0 && pt != e->C->o.threads) e->prefill_pool.reset(new Pool(pt, -1, (int)e->qos));
   {  // the model's own options ("name=value;..."); iOS default: free the batched prefill's scratch after each prompt
      // (P2: a 357-token prompt left ~0.35 GB of footprint behind for the rest of the session)
-    std::string mo = o.model_options ? o.model_options : "";
+    std::string mo = model_opts;  // (the run: entries were read above)
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
     if (mo.find("prefill_release") == std::string::npos) mo = "prefill_release=1" + std::string(mo.empty() ? "" : ";") + mo;
 #endif
