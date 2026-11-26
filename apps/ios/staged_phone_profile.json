@@ -1,0 +1,16 @@
+{
+  "note": "STAGED for the engine session (not published): the per-model values the app still sets for phone-small, as manifest properties of each model's profiles.phone-small, with the measurement that keeps each difference (iPhone 15 Plus, 2026-11-26, flash-last / release builds). The published Hub manifests are not edited without Jalen's word.",
+  "qwen3_5_moe": {
+    "profiles.phone-small.non_cache_gb": {"value": 1.54, "why": "footprint beside the expert cache in decode, measured; cache = 2.96 GB target - 1.54 = 1.42 GB"},
+    "profiles.phone-small.fast_engine": {"value": "approx:drop:w=0.08", "why": "the calibrated 4-bit in-memory weights' threshold (agreement 0.900 / 0.885 prose / agent at 0.08 vs 0.860 / 0.873 at 0.10, engine session, Mac)"},
+    "profiles.phone-small.names": {"value": {"exact": {"rule": "confidence", "tau": 0.5, "candidates": 16}, "fast": {"rule": "top", "m": 3}}, "why": "app-set today; the profile's confidence rule in Fast is NOT yet measured on the phone for the 35B (waits for its restore)"},
+    "ctx": {"value": 16384, "why": "KV reserve 0.336 GB at 16K"},
+    "ios_prefill_gpu": {"value": [0.65, 0.65], "why": "472-token first token 24.6 -> 19.5 s"}
+  },
+  "inkling2_loop": {
+    "profiles.phone-small.non_cache_gb": {"value": 1.26, "why": "footprint 2.90-2.98 GB at a 1.70 GB cache in decode; cache = 2.96 - 1.26 = 1.70 GB"},
+    "profiles.phone-small.fast_engine": {"value": "approx:drop", "why": "w = 0.08 measured on the phone: 1.80 tok/s, 371 MB/token, weight left out 2.62 against 2.48 / 2.37 tok/s, 268 MB, 4.79 at the default (0.10); one shared value would cost Inkling 26% of Fast's speed"},
+    "ctx": {"value": 4096, "why": "KV reserve 0.54 GB at 16K, 0.135 GB at 4K; a shared rule (KV reserve <= 0.34 GB) would give 8K (0.27 GB) and needs a footprint measurement first"},
+    "ios_prefill_gpu": {"value": "off", "why": "0.65 / 0.65 measured 20% slower on the 462-token prompt at the same thermal state (48.7 / 61.1 vs 40.0 / 50.2 s nominal; 56.5 / 67.1 vs 44.8 / 54.5 s serious); projections alone 59.5 / 55.4 s; exact ids identical"}
+  }
+}
