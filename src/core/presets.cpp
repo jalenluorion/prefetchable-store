@@ -40,6 +40,7 @@ static const char* BUILTIN = R"({
   "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
           "run_ahead": {"picks": "top_k", "depth": 1}},
   "phone": {"mode": "fast", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+            "spare_memory": {"min_physical_gb": 11.0},
             "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
   "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
                   "readers": 8, "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
@@ -384,7 +385,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   }
   if (const Json* rd = prof("readers"); rd && rd->kind == Json::NUM) p.readers = (int)rd->i(0);
   // the OS file cache under the slab (store.h, Cache::file_under): on where the device has at least min_physical_gb of
-  // physical memory; undeclared = off (every built-in profile: off for now, results in the commit that set it)
+  // physical memory (the phone: 11, the 12 GB class; a 6 or 8 GB phone has no spare pages); undeclared = off
   if (const Json* sm = prof("spare_memory"); sm && sm->kind == Json::OBJ && (*sm)["min_physical_gb"].kind == Json::NUM) {
     p.spare_min_gb = (*sm)["min_physical_gb"].f(0);
     const double phys = physical_memory_bytes();

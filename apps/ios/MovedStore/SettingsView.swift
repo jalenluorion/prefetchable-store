@@ -361,7 +361,7 @@ struct DiagnosticsView: View {
     @State private var copied = false
     @State private var spareChoice = DmengLaunch.spareMemoryChoice
     var spareMemory: Binding<Bool> {
-        Binding(get: { spareChoice ?? (m.engine as? DmengChatEngine)?.spareMemoryResolved ?? false },
+        Binding(get: { spareChoice ?? (m.engine as? DmengChatEngine)?.spareMemoryResolved ?? true },
                 set: { DmengLaunch.spareMemoryChoice = $0; spareChoice = $0 })
     }
 
@@ -424,7 +424,7 @@ struct DiagnosticsView: View {
                     Toggle("Use spare memory for the model's files", isOn: spareMemory)
                 } footer: {
                     Text("Keeps recently used parts of the model in memory the system has spare, so fewer are read from storage. "
-                         + "Off by default. Applies the next time you open the app.")
+                         + "On by default on this phone. Applies the next time you open the app.")
                 }
             }
             Section {

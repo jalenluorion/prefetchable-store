@@ -122,9 +122,9 @@ enum DmengLaunch {
         let has4 = ["/derived", "/.dmeng"].contains { ((try? FileManager.default.contentsOfDirectory(atPath: dir + $0)) ?? []).contains { $0.hasPrefix("resident_q4.") } }
         return profile == "phone-small" && has4 ? 4 : 8
     }
-    /// Spare memory for the model's files (the system's file cache under the expert cache): off by default; the
-    /// switch (Diagnostics) is offered on phones with at least 11 GB of memory, and a choice made with it is passed to
-    /// the engine as an explicit override at the next open.
+    /// Spare memory for the model's files (the system's file cache under the expert cache): the engine's phone profile
+    /// turns it on where the phone has at least 11 GB of memory. The switch (Diagnostics) is offered only there; a
+    /// choice made with it is passed to the engine as an explicit override at the next open, else the engine's rule holds.
     static let spareMemoryKey = "engine.spareMemory"
     static var spareMemoryOffered: Bool { isPhone && ProcessInfo.processInfo.physicalMemory >= 11_000_000_000 }
     /// The user's choice, nil when never set (the engine's rule).
