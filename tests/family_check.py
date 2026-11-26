@@ -567,9 +567,11 @@ if wanted("counters"):
                 bad.append(f"{nm}: stages sum to {tot:.4f} of {ms:.4f} ms")
             if abs(ident) > 1e-3 * ms:
                 bad.append(f"{nm}: compute + wait + run-ahead != time")
-        # the server's decode statistics: the same stage names, and MB per token equal to dmeng's on the same request
+        # the server's decode statistics: the same stage names, and MB per token equal to dmeng's on the same request (the
+        # server with its prompt scratch kept, as dmeng: a prompt's scratch lent by the cache, PrefillOpts::lend, lowers
+        # the cache for the prompt and the decode re-reads what it gave back)
         p = ids[300][:120]
-        w = worker("cnt", [{"ids": p, "max_new": 60}])
+        w = worker("cnt", [{"ids": p, "max_new": 60}], "--keep-scratch")
         dec = w[0]["E"]["json"].get("decode") or {}
         if list((dec.get("ms_per_step") or {}).keys()) != STAGES:
             bad.append(f"server stage names {list((dec.get('ms_per_step') or {}).keys())}")
