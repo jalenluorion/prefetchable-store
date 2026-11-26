@@ -976,7 +976,9 @@ int main(int argc, char** argv) {
             r.bg_ranks = rts.bg_ranks;
             r.cache = a.cache_auto ? r.cache : "fixed";
             r.rd_prio = C.cache.rd.prio ? 1 : 0;  // in force
-            return r.resolved(a.cache_gb).json();
+            Resolved x = r.resolved(a.cache_gb);
+            x.set_resident(lo.resident_id);  // the in-memory weights opened
+            return x.json();
           }() << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
        << "\",\"m\":" << (a.prefetch == "router" ? a.m : 0) << ",\"cache_gb\":" << a.cache_gb << ",\"slots\":[";

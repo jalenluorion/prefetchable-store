@@ -760,7 +760,9 @@ int main(int argc, char** argv) {
            r.drafts = a.draft != "none" ? 1 : 0;
            r.cache = a.cache_auto ? r.cache : "fixed";
            r.rd_prio = C.cache.rd.prio ? 1 : 0;  // in force
-           return r.resolved(a.cache_gb).json();
+           Resolved x = r.resolved(a.cache_gb);
+           x.set_resident(lo.resident_id);  // the in-memory weights opened
+           return x.json();
          }()
       << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << ",\"routers_file_mb\":" << [&] {
            struct stat rs;

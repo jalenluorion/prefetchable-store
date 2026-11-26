@@ -124,6 +124,11 @@ struct Resolved {
   bool spare_mem = false;  // written only when on (the block is unchanged with it off)
   int ctx = 0;             // the context positions in force, written only when the profile declares a ctx (else 0)
   double drive_gbs = 0;    // bench only (--drive-gbs): written only when set (the block is unchanged without it)
+  // the in-memory weights the front end opened (LoadOpts::resident_id: resident_q8 | resident_q4, "" = another file
+  // given) and their precision (8 | 4; 0 = another file); written by the front end after the model is loaded
+  std::string resident;
+  int resident_bits = 0;
+  void set_resident(const std::string& id) { resident = id, resident_bits = id == "resident_q4" ? 4 : id == "resident_q8" ? 8 : 0; }
   std::string json() const;
 };
 

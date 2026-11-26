@@ -44,7 +44,10 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   lo.dir = dir;
   lo.res_mem = res_mem;
   lo.cfg.clear();
-  if (!exists(dir + "/moved-store.json")) {  // no manifest: the resident file says everything
+  lo.resident_id = resident.empty() ? "resident_q8" : "";  // a given file: its id by the derived naming, else ""
+  for (const char* id : {"resident_q8", "resident_q4"})
+    if (!resident.empty() && resident.substr(resident.rfind('/') + 1).rfind(std::string(id) + ".", 0) == 0) lo.resident_id = id;
+  if (!exists(dir + "/moved-store.json")) {  // no manifest: the resident file says everything (the 8-bit one by default)
     lo.resident = resident.empty() ? dir + "/dmeng_resident.bin" : resident;
     family = detect_family(lo.resident, err);
     lo.prefill = declared_prefill(dir, family, profile);  // the family's published values (and its profile's)
@@ -70,6 +73,12 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   lo.prefill = declared_prefill(dir, family, profile);  // the manifest's "prefill" (else the published), the profile's over it
   if (!resident.empty()) {
     lo.resident = resident;
+    for (const char* id : {"resident_q8", "resident_q4"}) {  // the given file is the manifest's derived file of that id
+      const ms::Derived* di = m.derived_of(id);
+      const ms::Derived* d8 = m.derived_of("resident_q8");
+      const ms::Derived dd = di ? *di : ms::Derived{id, "dmres1", "", d8 ? d8->from : std::vector<std::string>{"resident.safetensors"}, ""};
+      if (resident == m.shipped_path(dd) || resident == m.derived_path(dd)) lo.resident_id = id;
+    }
     return true;
   }
   const ms::Derived* d = m.derived_of("resident_q8");

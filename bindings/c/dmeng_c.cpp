@@ -656,6 +656,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   }
   ro.routers = e->R || e->PL ? e->routers_path : "";
   e->res = ro.resolved(co.cache_gb);
+  e->res.set_resident(lo.resident_id);  // the in-memory weights opened (resident_bits 0: the profile's file)
   return e.release();
 }
 
@@ -1017,7 +1018,7 @@ const char* dm_stats_json(dm_engine* e) {
     << ",\"plan\":" << e->o.plan << ",\"routers\":\"" << e->routers_path << "\",\"router_m\":" << (e->R ? e->R->m : 0)
     << ",\"mode\":\"" << (e->C->ns.on ? "approx" : "lossless") << "\",\"preset\":" << e->preset_json << ",\"prefill_declared\":" << e->prefill_json << ",\"xtok\":" << (e->X ? "true" : "false") << ",\"router_tau\":" << (e->R ? e->R->tau : 0) << ",\"split\":" << e->C->o.split
     << ",\"prefill_threads\":" << (e->prefill_pool ? e->prefill_pool->size() : e->C->o.threads)
-    << ",\"resident_bits\":" << (e->o.resident_bits == 4 ? 4 : 8) << ",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9 << ",\"slab_rule\":" << e->slab_json
+    << ",\"resident_bits\":" << e->res.resident_bits << ",\"resident\":\"" << e->res.resident << "\",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9 << ",\"slab_rule\":" << e->slab_json
     << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode;
   if (e->dr) s << ",\"draft\":\"" << e->res.draft << "\",\"draft_max\":" << e->dr->o.max << ",\"draft_early\":" << e->dr->o.early;  // (with drafting only)
   s << "}";

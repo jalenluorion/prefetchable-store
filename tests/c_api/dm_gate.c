@@ -6,7 +6,7 @@
  *   dm_gate --model DIR --prompt-ids FILE --n 400 --out OUT.ids [--mem file|mlock|plain] [--cache-gb 3.3]
  *           [--routers-id mlp_k2_h512] [--threads 8] [--readers 4] [--json OUT.json] [--embeddings F]
  *           [--file-adapt 1 --file-min-gb G] [--file-core-gb G] [--model-options S] [--file-hint 0|1|2]
- *           [--profile P] [--ctx N (0: the profile's ctx, else 16384)]
+ *           [--profile P] [--ctx N (0: the profile's ctx, else 16384)] [--resident-bits 0|8|4]
  *
  * --arms LIST (with --warm-n N): arms of one prompt in ONE process, each its own dm_open .. dm_close, in order, after a
  * warm-up open of N tokens (tier off): "off" (spare memory off: run:spare-mem=0), "on" (run:spare-mem=1), "nothing"
@@ -365,6 +365,7 @@ int main(int argc, char** argv) {
   const char *arms = NULL, *alt_model = NULL;  /* --arms off,on,nothing (one process) */
   int warm_n = 50, file_hint = 0, measure_after = 0, force_exact = 0;
   const char *resident = NULL, *mode = NULL;  /* --resident FILE (e.g. the 4-bit resident_q4), --mode approx:drop */
+  int resident_bits = 0;                      /* --resident-bits 0|8|4 (dm_open_opts.resident_bits; 0: the profile's) */
   const char* model_options = NULL;           /* --model-options "k=v;run:FLAG=VALUE" (dm_open_opts.model_options) */
   double gpu_frac = 0, gpu_experts = 0;      /* --gpu-frac F --gpu-experts F: the prefill's exact GPU split */
   int gpu_min = 0, prefill_threads = 0;      /* --gpu-min N (sub-chunks of at least N positions), --prefill-threads N */
@@ -420,6 +421,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--embeddings")) emb = v, i++;
     else if (!strcmp(k, "--policy-probe")) policy_probe = v, i++;
     else if (!strcmp(k, "--resident")) resident = v, i++;
+    else if (!strcmp(k, "--resident-bits")) resident_bits = atoi(v), i++;
     else if (!strcmp(k, "--model-options")) model_options = v, i++;
     else if (!strcmp(k, "--mode")) mode = v, i++;
     else if (!strcmp(k, "--gpu-frac")) gpu_frac = atof(v), i++;
@@ -512,6 +514,7 @@ int main(int argc, char** argv) {
   o.run_ahead_sat_skip = ra_sat;
   o.embeddings = emb;
   o.resident = resident;
+  o.resident_bits = resident_bits;
   if (model_options) o.model_options = model_options;
   o.mode = mode;
   o.file_adapt = adapt;

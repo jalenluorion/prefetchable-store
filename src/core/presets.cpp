@@ -491,6 +491,7 @@ std::string Resolved::json() const {
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
+  o << ",\"resident\":" << qq(resident) << ",\"resident_bits\":" << resident_bits;
   if (spare_mem) o << ",\"spare_memory\":true";
   if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
   if (ctx > 0) o << ",\"ctx\":" << ctx;

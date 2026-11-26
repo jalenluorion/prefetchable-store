@@ -479,7 +479,7 @@ if wanted("presets"):
                 return [] if g is not None and abs(float(g) - float(e)) < 1e-6 else [f"{k}: {g!r} != {e!r}"]
             return [] if g == e else [f"{k}: {g!r} != {e!r}"]
 
-        bad, ncell, cross = [], 0, []
+        bad, ncell, cross, n_capi_prio = [], 0, [], 0
         FRONT_SPECIFIC = set()  # (the prompt's sub-chunk is the model's declared one in all three: printed as 0)
 
         def slab_rule(prof):
@@ -543,7 +543,13 @@ if wanted("presets"):
                     e = sub(exp, g)
                     if e:
                         bad.append(f"{prof} {nm} {fe}: {'; '.join(e)}")
-                norm = {fe: json.dumps({k: v for k, v in g.items() if k not in FRONT_SPECIFIC and not (k == "cache_gb" and g.get("cache_auto"))}, sort_keys=True)
+                # priority reads in force: the C API's own rule (dmeng_c.cpp) leaves them off in exact mode with in-token
+                # routers only, where dmeng and dmserve apply defaults.priority_reads (left as it runs until measured)
+                capi_prio = all(isinstance(g, dict) for g in got.values()) and got["capi"].get("mode") == "lossless" and not got["capi"].get("cross_token") \
+                    and (got["capi"].get("priority_reads"), got["dmeng"].get("priority_reads"), got["dmserve"].get("priority_reads")) == (0, 1, 1)
+                n_capi_prio += capi_prio
+                norm = {fe: json.dumps({k: v for k, v in g.items() if k not in FRONT_SPECIFIC and not (k == "cache_gb" and g.get("cache_auto"))
+                                        and not (capi_prio and k == "priority_reads")}, sort_keys=True)
                         for fe, g in got.items()}
                 if len(set(norm.values())) > 1:
                     keys = set().union(*[g.keys() for g in got.values()]) - FRONT_SPECIFIC
@@ -707,7 +713,41 @@ if wanted("presets"):
                         if e:
                             bad.append(f"{prof} names --mode {mode} {fe}{' (per-mode test manifest)' if fold == FO else ''}: {'; '.join(e)}")
                     ncell += 1
-        detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])})"
+        # the in-memory weights opened: where phone-small declares the 4-bit file (resident_q4) and the folder holds it, the
+        # C API's resident_bits 0 (the profile decides) opens it and reports it (policy.resident_bits / policy.resident,
+        # resolved.resident_bits / resolved.resident), as dmeng and dmserve do; an explicit resident_bits 8 still wins;
+        # without the file the profile falls back to the 8-bit one, and says so
+        if man["profiles"].get("phone-small", {}).get("resident") == "resident_q4":
+            RQ = declared("rq4")
+            r = run([os.path.join(B, "ms_derive"), "resident", RQ, "--bits", "4"])
+            if r.returncode:
+                bad.append(f"ms_derive resident --bits 4: {r.stderr[-200:]}")
+            for fold, bits, want in ((RQ, 0, 4), (RQ, 8, 8), (M, 0, 8)):
+                if os.path.exists(j):
+                    os.remove(j)
+                r = run([DMGATE, "--model", fold, "--profile", "phone-small", "--resident-bits", str(bits), "--prompt-ids", ip, "--n", "2", "--threads", "2",
+                         "--cache-gb", "auto", "--json", j])
+                d = json.load(open(j))["stats"] if r.returncode == 0 else None
+                got = (d["policy"].get("resident_bits"), d["policy"].get("resident"), d["resolved"].get("resident_bits"), d["resolved"].get("resident")) if d else r.stderr[-200:]
+                wid = "resident_q4" if want == 4 else "resident_q8"
+                if got != (want, wid, want, wid):
+                    bad.append(f"phone-small resident_bits {bits}{' (no 4-bit file)' if fold == M else ''} capi: {got} != {(want, wid, want, wid)}")
+                ncell += 1
+            for fe in ("dmeng", "dmserve"):  # the profile's file, opened and reported the same way
+                if os.path.exists(j):
+                    os.remove(j)
+                if fe == "dmeng":
+                    r = run([DMENG, "--model", RQ, "--profile", "phone-small", "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
+                    g = json.load(open(j))["resolved"] if r.returncode == 0 else None
+                else:
+                    r = run([DMSERVE, "--model", RQ, "--profile", "phone-small", "--threads", "2"], inp="", timeout=120)
+                    ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+                    g = json.loads(ready[0][6:])["resolved"] if ready else None
+                got = (g.get("resident_bits"), g.get("resident")) if g else r.stderr[-200:]
+                if got != (4, "resident_q4"):
+                    bad.append(f"phone-small resident {fe}: {got} != (4, 'resident_q4')")
+            ncell += 1
+        detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])}); priority reads off in the C API's exact mode only (in-token routers): {n_capi_prio} cells"
         verdict("presets", "FAIL" if bad or cross else "PASS", detail + ("" if not bad else " | precedence: " + " || ".join(bad[:6]))
                 + ("" if not cross else " | front ends differ: " + " || ".join(cross[:6])))
     except Exception as e:

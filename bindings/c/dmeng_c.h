@@ -118,7 +118,9 @@ typedef struct dm_open_opts {
   int resident_bits;       /* 0 = the profile's (8-bit; phone-small 35B: 4-bit when the file is there); 8 = the 8-bit
                               resident (resident_q8); 4 = the 4-bit variant resident_q4
                               (<derived_dir>/resident_q4.dmres1.<12 hex of resident.safetensors' sha256>.bin, made by
-                              `ms_derive resident DIR --bits 4`; for memory-limited devices: tokens differ from 8-bit) */
+                              `ms_derive resident DIR --bits 4`; for memory-limited devices: tokens differ from 8-bit).
+                              The file opened is reported in dm_stats_json: policy.resident_bits / policy.resident and
+                              resolved.resident_bits / resolved.resident (8 | 4; 0 and "" for another file given) */
   int prefill_threads;     /* compute threads during dm_sync (the prompt's prefill); 0 = threads (P2: 6 measured slower
                               than 4 on the 15 Plus for a 472-token prompt with the 4-bit resident) */
   int disk_min;            /* prefix cache: write a disk copy for a marked prefix of at least this many positions;
