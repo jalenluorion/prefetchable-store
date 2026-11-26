@@ -531,9 +531,10 @@ if wanted("presets"):
         # the prompt path's values under each profile: the profile's own prefill block over the model-level one, the same
         # in all three front ends (their "prefill_declared")
         for prof in man["profiles"]:
-            want = {**{k: v for k, v in man.get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")},
+            # (want_pf: not `want`, the --only filter every later check reads)
+            want_pf = {**{k: v for k, v in man.get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")},
                     **{k: v for k, v in man["profiles"][prof].get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")}}
-            want = {k: str(int(v)) if isinstance(v, bool) else (f"{v:.17g}" if isinstance(v, (int, float)) else v) for k, v in want.items()}
+            want_pf = {k: str(int(v)) if isinstance(v, bool) else (f"{v:.17g}" if isinstance(v, (int, float)) else v) for k, v in want_pf.items()}
             got = {}
             r = run([DMENG, "--model", M, "--profile", prof, "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
             got["dmeng"] = json.load(open(j)).get("prefill_declared") if r.returncode == 0 else r.stderr[-200:]
@@ -543,8 +544,8 @@ if wanted("presets"):
             ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
             got["dmserve"] = json.loads(ready[0][6:]).get("prefill_declared") if ready else r.stderr[-200:]
             for fe, g in got.items():
-                if g != want:
-                    bad.append(f"{prof} prefill {fe}: {g} != {want}")
+                if g != want_pf:
+                    bad.append(f"{prof} prefill {fe}: {g} != {want_pf}")
             ncell += 1
         # a profile's own mode declaration (profiles.<p>.modes.fast) over the model-level modes.fast, in a temporary
         # manifest: that profile resolves to its string, every other profile to the folder's own declaration if it has one
