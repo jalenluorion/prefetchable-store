@@ -29,6 +29,7 @@
 		B10000000000000000000014 /* TextCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000014 /* TextCodec.swift */; };
 		B10000000000000000000015 /* Tools.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000015 /* Tools.swift */; };
 		B10000000000000000000030 /* SelfCheck.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000030 /* SelfCheck.swift */; };
+		B10000000000000000000031 /* UITest.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000031 /* UITest.swift */; };
 		B10000000000000000000065 /* AppIcon60x60@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000065 /* AppIcon60x60@2x.png */; };
 		B10000000000000000000066 /* AppIcon60x60@3x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000066 /* AppIcon60x60@3x.png */; };
 		B10000000000000000000067 /* LaunchLogo@2x.png in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000067 /* LaunchLogo@2x.png */; };
@@ -60,6 +61,7 @@
 		B20000000000000000000014 /* TextCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextCodec.swift; sourceTree = "<group>"; };
 		B20000000000000000000015 /* Tools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tools.swift; sourceTree = "<group>"; };
 		B20000000000000000000030 /* SelfCheck.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfCheck.swift; sourceTree = "<group>"; };
+		B20000000000000000000031 /* UITest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UITest.swift; sourceTree = "<group>"; };
 		B20000000000000000000065 /* AppIcon60x60@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "AppIcon60x60@2x.png"; path = "Icons/AppIcon60x60@2x.png"; sourceTree = "<group>"; };
 		B20000000000000000000066 /* AppIcon60x60@3x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "AppIcon60x60@3x.png"; path = "Icons/AppIcon60x60@3x.png"; sourceTree = "<group>"; };
 		B20000000000000000000067 /* LaunchLogo@2x.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "LaunchLogo@2x.png"; path = "Icons/LaunchLogo@2x.png"; sourceTree = "<group>"; };
@@ -115,6 +117,7 @@
 				B20000000000000000000014 /* TextCodec.swift */,
 				B20000000000000000000015 /* Tools.swift */,
 				B20000000000000000000030 /* SelfCheck.swift */,
+				B20000000000000000000031 /* UITest.swift */,
 				B20000000000000000000065 /* AppIcon60x60@2x.png */,
 				B20000000000000000000066 /* AppIcon60x60@3x.png */,
 				B20000000000000000000067 /* LaunchLogo@2x.png */,
@@ -235,6 +238,7 @@
 				B10000000000000000000014 /* TextCodec.swift in Sources */,
 				B10000000000000000000015 /* Tools.swift in Sources */,
 				B10000000000000000000030 /* SelfCheck.swift in Sources */,
+				B10000000000000000000031 /* UITest.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -283,7 +287,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MovedStore/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Prefetchable Store";
+				INFOPLIST_KEY_CFBundleDisplayName = PhoneStore;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -311,7 +315,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MovedStore/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Prefetchable Store";
+				INFOPLIST_KEY_CFBundleDisplayName = PhoneStore;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

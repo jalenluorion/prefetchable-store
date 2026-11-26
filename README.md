@@ -59,7 +59,7 @@ build/dmeng --model model --chat --prompt "Explain what a mixture of experts is.
 The Python runner it was first published with is [reference/flash](reference/flash)
 (`cd reference/flash && pip install -r requirements.txt && python mlx_run.py --dir ../../model --prompt "..." --max-new 200`).
 
-**On an iPhone.** [apps/ios](apps/ios/README.md) is a chat app that runs either model on the phone: open
+**On an iPhone.** [apps/ios](apps/ios/README.md) is PhoneStore, a chat app that runs either model on the phone: open
 `apps/ios/MovedStore.xcodeproj` in Xcode, set your own signing team and bundle identifier, and run it on an iPhone with
 an A16 chip or newer. The app downloads the model from the Hub in the profile that fits the phone (15.5 to 21.3 GB)
 and checks every file.
