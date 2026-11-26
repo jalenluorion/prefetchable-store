@@ -55,21 +55,6 @@ struct Oracle : Naming {
   int cn = 0;
 };
 
-// The free baseline ("transplant k1"): step s + 1's released router, run on step s's MoE input in step s's router
-// fork-join, names step s + 1's top m experts. No trained weights; step 0 is not named.
-struct Transplant : Naming {
-  int m = 8;
-  int pending = -1;
-  std::vector<float> lg;
-  std::vector<int> nm;  // [steps, 8] this token's names
-  double t_ms = 0, calls = 0, hit8 = 0;
-  void router_rows(Core& c, int step, const float* x, std::vector<Job>& jobs) override;
-  void after_router(Core& c, int step) override;
-  void after_moe(Core& c, int step, const int32_t* picks, const float* w) override;
-  void reset_stats() override { t_ms = calls = hit8 = 0; }
-  std::string stats_json(Core& c, int ntok) override;
-};
-
 // Trained lag-k routers, one per target step, on x = [rmsnorm_w(emb), h_prev, h_lag] (h_lag absent for t < lag):
 //   z = lin(x) [+ m2 gelu(m1 x + b1) + b2]   (the "lin" rows and "m1" rows are one matrix `pre` over the first two blocks
 //   plus `lagm` over the third), named experts = the top m of z, or (tau >= 0) every one of the top `cand` whose
@@ -114,6 +99,8 @@ struct Routers : Naming {
   Routers* heavy = nullptr;
   std::vector<float> zlast;
   bool load(const std::string& path, Core& c, std::string& err);
+  // load, take the names rule (m; tau > 0: the confidence rule over cand) and become the core's hook (every front end)
+  bool attach(const std::string& path, Core& c, int m, double tau, int cand, std::string& err);
   void finish(Core& c, int t, bool with_lag);
   // z = pre + biases (+ lag) of target t -> names for position p (deadline: see Naming::name); writes n16 / q16 / b16
   void finish_z(Core& c, int t, const float* pre, const float* lagr, int p, long deadline, int* n16, float* q16, int* b16);
@@ -177,6 +164,8 @@ struct Xtok : Naming {
   double cal_n[16][16] = {{0}}, cal_h[16][16] = {{0}};
   double cnt[2] = {0, 0}, calls = 0, t_ms = 0, named = 0;
   bool load(const std::string& path, Core& c, std::string& err);
+  // load, take the threshold and wrap the core's hook (inner = the hook so far): every front end
+  bool wrap(const std::string& path, Core& c, double threshold, std::string& err);
   void token_start(Core& c, int tok, const float* emb) override;
   void before_moe(Core& c, int step, const float* x) override;
   void observe(Core& c, int step, const float* x) override;

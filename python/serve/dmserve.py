@@ -100,8 +100,7 @@ import chat_format as CF  # noqa: E402
 sys.path.insert(0, HERE)
 import agent_profile as PR  # noqa: E402
 # the profile, mode and drafts go to the worker, which resolves the defaults (a worker flag after "--" wins)
-_prof = "auto" if a.profile == "agent" else a.profile
-_extra = PR.agent_profile(a.model_dir, drafts=bool(a.drafts), reserve_gb=a.reserve_gb, profile=_prof, mode=a.mode)
+_extra = PR.agent_profile(a.model_dir, drafts=bool(a.drafts), reserve_gb=a.reserve_gb, profile=a.profile, mode=a.mode)
 if a.demo and "--ahead-min" not in wargs:  # the demo: no idle-time prefill of a few positions (a request arriving during one
     wargs = wargs + ["--ahead-min", "64"]   # waited for all of it, 0.5-0.9 s on Flash-Next; the request's prefill adds them for free)
 if a.demo and "--ckpt-min" not in wargs:  # the demo: two in-memory checkpoints whatever their size (Flash-Next's are 118 MB each:

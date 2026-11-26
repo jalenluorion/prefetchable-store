@@ -177,7 +177,6 @@ struct Qwen35 : Model {
   std::shared_ptr<Ver> V;
   bool verify(State& s, const int32_t* ids, int n, Want want = Want::LAST) override;
   void commit(State& s, int a) override;
-  bool verify_old = false;  // the previous pass (state copies, per-position heads, packed gemm from 6, full head): A/B only
   int ver_best[TMAX] = {-1, -1, -1, -1, -1, -1, -1, -1};  // the screened head's argmax per position of the last verify
   const float* logits_at(int i) const override;
   // draft heads trained outside (verify.cpp): post-norm final hidden of the last step (i < 0, kept when the step wanted

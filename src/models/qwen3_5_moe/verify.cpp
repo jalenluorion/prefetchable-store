@@ -21,8 +21,7 @@
 // overwritten later (append-only), the position counter and the cache's clock go back.
 // The output head: the screened head over all the pass's positions at once (ScreenHead::run_n: the planes read once) when
 // the caller wants only the argmax or the top k (Want::GREEDY / TOPK, as a single step under the same Want), else the
-// full head. `verify_old` (set_option): the previous pass (states copied at the start and streamed once per position,
-// the packed gemm from 6 positions, the full head), for A/B measurements.
+// full head.
 #include <arm_neon.h>
 
 #include <algorithm>
@@ -38,8 +37,7 @@ namespace dm {
 namespace qwen35 {
 
 namespace {
-constexpr int PACK_MIN = 2;      // positions from which the resident matrices go through the packed i8mm gemm
-constexpr int PACK_MIN_OLD = 6;  // (verify_old)
+constexpr int PACK_MIN = 2;  // positions from which the resident matrices go through the packed i8mm gemm
 
 // value head h of the Gated DeltaNet over positions 0..n-1 in order: the decode path's head (gdn::head_io) per position,
 // the state read from Sin for the first position and kept in Sout from then on (Sout's block of head h then holds the
@@ -82,9 +80,7 @@ struct Qwen35::Ver {
   std::vector<std::vector<float>> gp;            // [NL] DeltaNet layers: [TMAX][C + ZD + 2 NVH] projections (rollback)
   std::vector<std::vector<float>> cvp;           // [NL] DeltaNet layers: [TMAX][C] convolved inputs (rollback)
   std::vector<std::vector<float>> altc, alts;    // [NL] the second conv / recurrent state buffers (B)
-  std::vector<std::vector<float>> snapc, snaps;  // [NL] verify_old: conv / recurrent state at the step's start
-  bool old = false;                              // this pass ran the previous path (verify_old)
-  double ms_snap = 0, ms_replay = 0;
+  double ms_replay = 0;
   long steps = 0, rollbacks = 0, positions = 0;
   // bytes per pass (statistics): state copied (memcpy), recurrent state streamed by the heads (one pass over a layer's
   // whole state = its bytes), resident matrices and head read
@@ -149,22 +145,19 @@ bool Qwen35::verify(State& s0, const int32_t* ids, int n, Want want) {
     V->cvp.resize(c.NL);
     V->altc.resize(c.NL);
     V->alts.resize(c.NL);
-    V->snapc.resize(c.NL);
-    V->snaps.resize(c.NL);
     for (int L = 0; L < c.NL; L++)
       if (!lw[L].full) V->gp[L].resize((size_t)TMAX * G);
   }
   Ver& W8 = *V;
-  W8.old = verify_old;
   for (int L = 0; L < c.NL; L++)  // the buffers of the path this pass runs (the state's sizes)
     if (!lw[L].full) {
-      auto& a = W8.old ? W8.snapc[L] : W8.altc[L];
-      auto& b = W8.old ? W8.snaps[L] : W8.alts[L];
+      auto& a = W8.altc[L];
+      auto& b = W8.alts[L];
       if (a.size() != S->ls[L].conv.size()) a.resize(S->ls[L].conv.size());
       if (b.size() != S->ls[L].S.size()) b.resize(S->ls[L].S.size());
-      if (!W8.old && W8.cvp[L].size() != (size_t)TMAX * C) W8.cvp[L].resize((size_t)TMAX * C);
+      if (W8.cvp[L].size() != (size_t)TMAX * C) W8.cvp[L].resize((size_t)TMAX * C);
     }
-  const bool pack = n >= (W8.old ? PACK_MIN_OLD : PACK_MIN) && prec == Prec::I16 && H % 256 == 0 && ZD % 256 == 0 && QD % 256 == 0;
+  const bool pack = n >= PACK_MIN && prec == Prec::I16 && H % 256 == 0 && ZD % 256 == 0 && QD % 256 == 0;
   auto jb_bytes = [&](const JobN* j, int nj) {
     for (int i = 0; i < nj; i++) W8.b_res += (double)j[i].w->bytes();
   };
@@ -225,48 +218,31 @@ bool Qwen35::verify(State& s0, const int32_t* ids, int n, Want want) {
       auto tb = clk::now();
       T->attn_proj += ms_between(ta, tb);
       LState& St = S->ls[L];
-      const double sb = (double)St.S.size() * sizeof(float), cb = (double)St.conv.size() * sizeof(float);
-      auto tc = tb;
-      if (W8.old) {
-        // the state at the step's start, for a rollback
-        pcopy(pool, W8.snapc[L].data(), St.conv.data(), St.conv.size());
-        pcopy(pool, W8.snaps[L].data(), St.S.data(), St.S.size());
-        tc = clk::now();
-        W8.ms_snap += ms_between(tb, tc);
-        W8.b_copy += sb + cb;
-        for (int i = 0; i < n; i++) {  // positions in order through the decode path's phases
-          gdn::Ctx X;
-          lin_ctx(X, L, qkv[i], z[i], bb[i], aa[i], W8.cv.data(), ob[i], false);
-          pool.run(gdn::phase_conv, &X);
-          pool.run(gdn::phase_heads, &X);
-          W8.xo[i].prep(ob[i], ZD);
-        }
-        W8.b_stream += n * sb;
-      } else {
-        // A = the committed state (read only), B = the state after the pass's positions
-        const float* Ac = St.conv.data();
-        float* Bc = W8.altc[L].data();
-        const float* Asn = St.S.data();
-        float* Bs = W8.alts[L].data();
-        const float* wcv = W.conv;
-        float* cvl = W8.cvp[L].data();
-        const int CK = c.CK, CB = 256;
-        parallel_for(pool, (C + CB - 1) / CB, [&](int blk) {  // the convolution: channel by channel, positions in order
-          const int c0 = blk * CB, c1 = std::min(C, c0 + CB);
-          for (int ch = c0; ch < c1; ch++) cvl[ch] = gdn::conv_channel_io(Ac, Bc, wcv + (size_t)ch * CK, qkv[0][ch], C, CK, ch);
-          for (int i = 1; i < n; i++)
-            for (int ch = c0; ch < c1; ch++) cvl[(size_t)i * C + ch] = gdn::conv_channel(Bc, wcv + (size_t)ch * CK, qkv[i][ch], C, CK, ch);
-        });
-        const float* cvs[TMAX];
-        for (int i = 0; i < n; i++) cvs[i] = cvl + (size_t)i * C;
-        const float* const* cz = z;
-        const float* const* cb2 = bb;
-        const float* const* ca = aa;
-        const gdn::Weights gw{W.conv, W.A_log, W.dt_bias, W.gnorm};
-        parallel_for(pool, c.NVH, [&](int hh) { lin_head_n(gd, gw, hh, n, cvs, cb2, ca, cz, Asn, Bs, ob); });  // head by head
-        for (int i = 0; i < n; i++) W8.xo[i].prep(ob[i], ZD);
-        W8.b_stream += sb;
-      }
+      const double sb = (double)St.S.size() * sizeof(float);
+      const auto tc = tb;
+      // A = the committed state (read only), B = the state after the pass's positions
+      const float* Ac = St.conv.data();
+      float* Bc = W8.altc[L].data();
+      const float* Asn = St.S.data();
+      float* Bs = W8.alts[L].data();
+      const float* wcv = W.conv;
+      float* cvl = W8.cvp[L].data();
+      const int CK = c.CK, CB = 256;
+      parallel_for(pool, (C + CB - 1) / CB, [&](int blk) {  // the convolution: channel by channel, positions in order
+        const int c0 = blk * CB, c1 = std::min(C, c0 + CB);
+        for (int ch = c0; ch < c1; ch++) cvl[ch] = gdn::conv_channel_io(Ac, Bc, wcv + (size_t)ch * CK, qkv[0][ch], C, CK, ch);
+        for (int i = 1; i < n; i++)
+          for (int ch = c0; ch < c1; ch++) cvl[(size_t)i * C + ch] = gdn::conv_channel(Bc, wcv + (size_t)ch * CK, qkv[i][ch], C, CK, ch);
+      });
+      const float* cvs[TMAX];
+      for (int i = 0; i < n; i++) cvs[i] = cvl + (size_t)i * C;
+      const float* const* cz = z;
+      const float* const* cb2 = bb;
+      const float* const* ca = aa;
+      const gdn::Weights gw{W.conv, W.A_log, W.dt_bias, W.gnorm};
+      parallel_for(pool, c.NVH, [&](int hh) { lin_head_n(gd, gw, hh, n, cvs, cb2, ca, cz, Asn, Bs, ob); });  // head by head
+      for (int i = 0; i < n; i++) W8.xo[i].prep(ob[i], ZD);
+      W8.b_stream += sb;
       auto td = clk::now();
       T->attn_core += ms_between(tc, td);
       JobN jo = {&W.o, n, xo, nullptr, ys, pk(W8.po, W8.xo, ZD)};
@@ -320,7 +296,7 @@ bool Qwen35::verify(State& s0, const int32_t* ids, int n, Want want) {
   for (int i = 0; i < n; i++) W8.xh[i].prep(hs[i], H);
   float* lo[TMAX];
   for (int i = 0; i < n; i++) lo[i] = W8.lg.data() + (size_t)i * c.V;
-  if (fast_head && !W8.old && (want == Want::GREEDY || (want == Want::TOPK && head_topk > 0))) {
+  if (fast_head && (want == Want::GREEDY || (want == Want::TOPK && head_topk > 0))) {
     // the screened head, as a single step under this Want screens it: the exact rows that can be in the top k, -inf for
     // the rest; the planes are read once for every position
     const double hb0 = sh.bytes;
@@ -352,63 +328,40 @@ void Qwen35::commit(State& s0, int a) {
   a = std::max(1, std::min(a, n));
   const int C = c.conv_dim(), ZD = c.NVH * c.DV, G = C + ZD + 2 * c.NVH, CK = c.CK;
   Pool& pool = *core->pool;
-  if (W8.old && a < n) {
-    auto t0 = clk::now();
-    for (int L = 0; L < c.NL; L++) {
-      if (lw[L].full) continue;
-      LState& St = S->ls[L];
-      pcopy(pool, St.conv.data(), W8.snapc[L].data(), St.conv.size());
-      pcopy(pool, St.S.data(), W8.snaps[L].data(), St.S.size());
-      W8.b_copy += (double)(St.conv.size() + St.S.size()) * sizeof(float);
+  auto t0 = clk::now();
+  for (int L = 0; L < c.NL; L++) {
+    if (lw[L].full) continue;
+    LState& St = S->ls[L];
+    if (a < n) {  // B again from A for positions 0..a-1
+      // the conv state after a positions: the last CK - 1 rows of [A's rows, inputs 0 .. a-1]
+      const int R = CK - 1;
+      float* Bc = W8.altc[L].data();
+      for (int r = 0; r < R; r++) {
+        const int idx = a + r;  // index into [A rows 0 .. R-1, inputs 0 ..]
+        if (idx < R) std::memcpy(Bc + (size_t)r * C, St.conv.data() + (size_t)idx * C, sizeof(float) * C);
+        else
+          for (int ch = 0; ch < C; ch++) Bc[(size_t)r * C + ch] = W8.gp[L][(size_t)(idx - R) * G + ch];
+      }
+      W8.b_copy += (double)R * C * sizeof(float);
+      const float* cvs[TMAX];
+      const float* bbs[TMAX];
+      const float* aas[TMAX];
       for (int i = 0; i < a; i++) {
-        float* qkv = W8.gp[L].data() + (size_t)i * G;
-        float* z = qkv + C;
-        float* bb = z + ZD;
-        float* aa = bb + c.NVH;
-        gdn::Ctx X;
-        lin_ctx(X, L, qkv, z, bb, aa, W8.cv.data(), W8.ob.data(), false);
-        pool.run(gdn::phase_conv, &X);
-        pool.run(gdn::phase_heads, &X);
+        cvs[i] = W8.cvp[L].data() + (size_t)i * C;
+        bbs[i] = W8.gp[L].data() + (size_t)i * G + C + ZD;
+        aas[i] = bbs[i] + c.NVH;
       }
-      W8.b_stream += (double)a * St.S.size() * sizeof(float);
+      const Lw& W = lw[L];
+      const float* Asn = St.S.data();
+      float* Bs = W8.alts[L].data();
+      const gdn::Weights gw{W.conv, W.A_log, W.dt_bias, W.gnorm};
+      parallel_for(pool, c.NVH, [&](int hh) { lin_head_n(gd, gw, hh, a, cvs, bbs, aas, nullptr, Asn, Bs, nullptr); });
+      W8.b_stream += (double)St.S.size() * sizeof(float);
     }
-    W8.ms_replay += ms_since(t0);
-  } else if (!W8.old) {
-    auto t0 = clk::now();
-    for (int L = 0; L < c.NL; L++) {
-      if (lw[L].full) continue;
-      LState& St = S->ls[L];
-      if (a < n) {  // B again from A for positions 0..a-1
-        // the conv state after a positions: the last CK - 1 rows of [A's rows, inputs 0 .. a-1]
-        const int R = CK - 1;
-        float* Bc = W8.altc[L].data();
-        for (int r = 0; r < R; r++) {
-          const int idx = a + r;  // index into [A rows 0 .. R-1, inputs 0 ..]
-          if (idx < R) std::memcpy(Bc + (size_t)r * C, St.conv.data() + (size_t)idx * C, sizeof(float) * C);
-          else
-            for (int ch = 0; ch < C; ch++) Bc[(size_t)r * C + ch] = W8.gp[L][(size_t)(idx - R) * G + ch];
-        }
-        W8.b_copy += (double)R * C * sizeof(float);
-        const float* cvs[TMAX];
-        const float* bbs[TMAX];
-        const float* aas[TMAX];
-        for (int i = 0; i < a; i++) {
-          cvs[i] = W8.cvp[L].data() + (size_t)i * C;
-          bbs[i] = W8.gp[L].data() + (size_t)i * G + C + ZD;
-          aas[i] = bbs[i] + c.NVH;
-        }
-        const Lw& W = lw[L];
-        const float* Asn = St.S.data();
-        float* Bs = W8.alts[L].data();
-        const gdn::Weights gw{W.conv, W.A_log, W.dt_bias, W.gnorm};
-        parallel_for(pool, c.NVH, [&](int hh) { lin_head_n(gd, gw, hh, a, cvs, bbs, aas, nullptr, Asn, Bs, nullptr); });
-        W8.b_stream += (double)St.S.size() * sizeof(float);
-      }
-      St.conv.swap(W8.altc[L]);
-      St.S.swap(W8.alts[L]);
-    }
-    if (a < n) W8.ms_replay += ms_since(t0);
+    St.conv.swap(W8.altc[L]);
+    St.S.swap(W8.alts[L]);
   }
+  if (a < n) W8.ms_replay += ms_since(t0);
   if (a < n) {
     S->pos = W8.pos0 + a;
     core->tok_clock -= n - a;
@@ -424,9 +377,9 @@ std::string Qwen35::verify_json() const {
   char b[640];
   const double p = std::max<long>(1, V->steps);
   snprintf(b, sizeof b,
-           "{\"steps\":%ld,\"positions\":%ld,\"rollbacks\":%ld,\"old_path\":%s,\"ms_state_copy\":%.2f,\"ms_rollback\":%.2f,\"mb_per_pass\":{"
+           "{\"steps\":%ld,\"positions\":%ld,\"rollbacks\":%ld,\"ms_rollback\":%.2f,\"mb_per_pass\":{"
            "\"state_copied\":%.3f,\"state_streamed\":%.3f,\"resident\":%.3f,\"head\":%.3f,\"touched\":%.3f}}",
-           V->steps, V->positions, V->rollbacks, verify_old ? "true" : "false", V->ms_snap, V->ms_replay, V->b_copy / 1e6 / p,
+           V->steps, V->positions, V->rollbacks, V->ms_replay, V->b_copy / 1e6 / p,
            V->b_stream / 1e6 / p, V->b_res / 1e6 / p, V->b_head / 1e6 / p, (V->b_copy + V->b_stream + V->b_res + V->b_head) / 1e6 / p);
   return b;
 }

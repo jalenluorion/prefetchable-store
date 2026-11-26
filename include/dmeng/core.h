@@ -114,6 +114,9 @@ struct Approx {
   void reset_stats();
   // "drop", optionally followed by :w=W (and Flash-Next's :mass=M:late=-1); false if the name, a key or a value is unknown
   bool preset(const std::string& spec);
+  // the engine's mode string: "lossless" (nothing left out) or "approx:" + a preset; false if it is neither (every front
+  // end's --mode / mode, after resolve_run)
+  bool mode(const std::string& engine_mode);
   static const char* presets_help();
 };
 

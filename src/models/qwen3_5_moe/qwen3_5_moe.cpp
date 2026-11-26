@@ -21,8 +21,7 @@ namespace qwen35 {
 
 // ------------------------------------------------------------------------------------------------ load
 bool Qwen35::load(const LoadOpts& op, std::string& err) {
-  const std::string res = op.resident.empty() ? op.dir + "/dmeng_resident.bin" : op.resident;
-  if (!R.load(res, op.res_mem, err)) return false;
+  if (!R.load(op.resident, op.res_mem, err)) return false;  // (resolve_model names the file)
   for (auto& kv : op.cfg) R.cfg[kv.first] = kv.second;  // the manifest's configuration, where there is one
   c.from(R);
   lw.resize(c.NL);
@@ -823,7 +822,6 @@ bool Qwen35::set_option(const std::string& name, const std::string& value, std::
     return true;
   }
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
-  if (name == "verify_old") return (verify_old = std::stoi(value) != 0), true;  // the previous verify pass (A/B measurements)
   if (name == "prefill_record") {  // every position's picks of the batched prefill, int16 [pos][NL][K]
     if (px.record) fclose(px.record);
     px.record = value.empty() ? nullptr : fopen(value.c_str(), "wb");

@@ -60,8 +60,8 @@ struct dm_engine {
   std::unique_ptr<ModelLM> lm;
   std::unique_ptr<PrefixCache> pc;
   std::string err, stats, routers_path, res_file, last_prefill = "{}";  // the caller's strings are not kept (only copies)
-  std::string cache_why = "null";
-  int64_t rs_steps_loop = 0;  // decode steps at the last stats call (the loop / background counters' denominator)  // the automatic cache rule's numbers (memwatch.h auto_cache_gb), as dmeng and dmserve print them
+  std::string cache_why = "null";  // the automatic cache rule's numbers (memwatch.h auto_cache_gb), as dmeng and dmserve print them
+  int64_t rs_steps_loop = 0;        // decode steps at the last stats call (the loop / background counters' denominator)
   dm_open_opts o{};
   qos_class_t qos = QOS_CLASS_USER_INTERACTIVE;
   uint64_t rs_urgent = 0, rs_pf = 0, rs_pf_n = 0, rs_unused = 0, rs_busy = 0, rs_bytes = 0, rs_steps = 0;  // reads at the last stats call
@@ -190,13 +190,8 @@ void dm_default_opts(dm_open_opts* o) {
   std::memset(o, 0, sizeof *o);
   o->qos = DM_QOS_USER_INTERACTIVE;
   o->core_class = DM_CORES_ANY;
-#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-  o->memory_mode = DM_MEM_MLOCK;  // a locked slab, the resident locked (results/ios/p2/P2.md section 0b)
+  o->memory_mode = DM_MEM_MLOCK;  // a locked slab, the resident locked, on iOS too (results/ios/p2/P2.md section 0b)
   o->res_memory_mode = DM_MEM_MLOCK;
-#else
-  o->memory_mode = DM_MEM_MLOCK;
-  o->res_memory_mode = DM_MEM_MLOCK;
-#endif
   o->disk_gb = 4.0;
   o->ctx = 0;  // the profile's declared ctx, else 16384
   o->file_check = 1;
@@ -493,15 +488,10 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   } else if (!e->routers_path.empty()) {
     e->R = std::make_unique<Routers>();
     e->R->mem = res_mem;
-    if (!e->R->load(e->routers_path, *e->C, err)) {
+    if (!e->R->attach(e->routers_path, *e->C, ro.m, ro.tau, ro.cand, err)) {  // the names rule as resolved (presets.h)
       g_err = "routers: " + err;
       return nullptr;
     }
-    // the names rule as resolved (precedence: presets.h)
-    e->R->m = ro.m;
-    if (ro.tau > 0) e->R->tau = ro.tau;
-    e->R->cand = ro.cand;
-    e->C->hook = e->R.get();
     if (ro.bg_ranks > 0) {  // background reads: the routers' next ranks for the drive's idle time (as dmeng; its defaults)
       e->R->bg_ranks = ro.bg_ranks;
       e->R->bg_queue = 2;
@@ -516,25 +506,18 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   const std::string xtok = ro.xtok;
   if (!xtok.empty()) {  // cross-token routers: the next token's first steps, from a late step of this one
     e->X = std::make_unique<Xtok>();
-    if (!e->X->load(xtok, *e->C, err)) {
+    if (!e->X->wrap(xtok, *e->C, ro.xtok_tau, err)) {
       g_err = "xtok: " + err;
       return nullptr;
     }
-    e->X->tau = ro.xtok_tau;
-    e->X->inner = e->C->hook;
-    e->C->hook = e->X.get();
     if (ro.rd_prio > 0) e->C->cache.rd.prio = true;
   }
-  if (mode != "lossless") {  // fast, or its rule as an engine string (dmeng --mode)
-    const std::string md = mode;
-    const std::string preset = md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
-    if (!e->C->ns.preset(preset)) {  // drop[:w=W] (Approx::preset; Flash-Next's capped form :mass=M:late=-1)
-      g_err = "mode: exact|fast|lossless|approx:drop[:w=W], got " + md;
-      return nullptr;
-    }
-    if (e->C->ns.prio) e->C->cache.rd.prio = true;
-    if (e->C->ns.cancel) e->C->cancel_stale = true;
+  if (!e->C->ns.mode(mode)) {  // lossless, or drop[:w=W] (Approx::preset; Flash-Next's capped form :mass=M:late=-1)
+    g_err = "mode: exact|fast|lossless|approx:drop[:w=W], got " + mode;
+    return nullptr;
   }
+  if (e->C->ns.on && e->C->ns.prio) e->C->cache.rd.prio = true;
+  if (e->C->ns.on && e->C->ns.cancel) e->C->cancel_stale = true;
   // priority reads: the C API's own rule (the planner, the cross-token routers with rd_prio 1, fast mode), not dmeng's and
   // dmserve's priority_reads_on (presets.h); left as it runs until measured, the two differ (a) in exact mode with in-token
   // routers only and rd_prio 1 (the 35B on every profile, Flash-Next; defaults.priority_reads): off here, on there; (b)
@@ -567,10 +550,9 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     e->C->ra_sat_skip = ro.ra_sat_skip;
     e->C->cache.rd.depth_times(e->rs_dt);
   }
+  // (6 prefill threads with the 4-bit resident measured slower on the iPhone 15 Plus, 33.3 vs 30.3 s for 472 tokens, so
+  // the default is the decode's threads)
   int pt = o.prefill_threads;
-#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
-  // (6 prefill threads with the 4-bit resident measured slower on the iPhone 15 Plus, 33.3 vs 30.3 s for 472 tokens: off)
-#endif
   if (pt > 0 && pt != e->C->o.threads) e->prefill_pool.reset(new Pool(pt, -1, (int)e->qos));
   {  // the model's own options ("name=value;..."); iOS default: free the batched prefill's scratch after each prompt
      // (on the iPhone 15 Plus a 357-token prompt left ~0.35 GB of footprint behind for the rest of the session)
@@ -608,8 +590,6 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   so.ckpt_gb = 0;
   so.ckpt_min = 2;
   so.park_gb = 0.3;
-#endif
-#if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
   so.disk_min = 16;  // short chats get a disk copy (a chat continued after a relaunch restores it)
   so.disk_gain = 16;  // ... and a restore of it pays from 16 positions (the 256 default never fires for a short chat)
 #endif

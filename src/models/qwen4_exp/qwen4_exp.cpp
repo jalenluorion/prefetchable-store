@@ -160,8 +160,7 @@ static HCw load_hc(const ResFile& R, const std::string& n, bool combine) {
 bool Flash::load(const LoadOpts& op, std::string& err) {
   dir = op.dir;
   res_mem = op.res_mem;
-  const std::string res = op.resident.empty() ? op.dir + "/dmeng_resident.bin" : op.resident;
-  if (!R.load(res, op.res_mem, err)) return false;
+  if (!R.load(op.resident, op.res_mem, err)) return false;  // (resolve_model names the file)
   for (auto& kv : op.cfg) R.cfg[kv.first] = kv.second;  // the manifest's configuration
   if (!c.from(R, err)) return false;
   lw.resize(c.NL);
@@ -1106,7 +1105,6 @@ bool Flash::set_option(const std::string& name, const std::string& value, std::s
     fast_head = true;
     return true;
   }
-  if (name == "verify_old") return true;  // (the 35B's previous verify pass, for A/B: this family has one pass)
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;
   if ((name == "prefill_batched_always" && std::stoi(value) == 0) || (name == "prefill_record" && value.empty())) return true;  // off
   if (name == "prefill_batched_always" || name == "prefill_record")  // refused, not ignored

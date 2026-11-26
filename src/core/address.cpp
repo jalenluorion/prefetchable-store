@@ -109,57 +109,16 @@ void Oracle::after_router(Core& c, int step) {
   }
 }
 
-// ------------------------------------------------------------------------------------------------ transplant k1
-void Transplant::router_rows(Core& c, int step, const float* x, std::vector<Job>& jobs) {
-  if (lg.empty()) {
-    ensure(c.steps);
-    lg.assign(c.NE, 0.f);
-    nm.assign((size_t)c.steps * 8, -1);
-  }
-  pending = step + 1 < c.steps && c.views.size() == (size_t)c.steps ? step + 1 : -1;
-  if (pending < 0) return;
-  jobs.push_back({c.views[pending]->router, &c.xin.q, x, lg.data()});  // on the fp32 MoE input, as step + 1's router would run
-}
-
-void Transplant::after_router(Core& c, int) {
-  if (pending < 0) return;
-  auto t0 = clk::now();
-  const MoeView& v = *c.views[pending];
-  const int NE = c.NE, top = std::min(m, NE);
-  static thread_local std::vector<float> key;
-  static thread_local std::vector<int> idx;
-  key.resize(NE);
-  idx.resize(NE);
-  for (int e = 0; e < NE; e++) {
-    idx[e] = e;
-    if (v.rule == MoeView::SOFTMAX_TOPK_RENORM) key[e] = lg[e];
-    else {  // the sigmoid rule ranks by score + bias
-      const float yv = 1.f / (1.f + std::exp(std::fabs(lg[e])));
-      key[e] = (lg[e] < 0 ? yv : 1.f - yv) + v.router_bias[e];
-    }
-  }
-  std::partial_sort(idx.begin(), idx.begin() + top, idx.end(), [&](int a, int b) { return key[a] > key[b] || (key[a] == key[b] && a < b); });
-  for (int j = 0; j < std::min(top, 8); j++) nm[(size_t)pending * 8 + j] = idx[j];
-  for (int j = 0; j < top; j++) name(c, c.pos, pending, idx[j]);
-  pending = -1;
-  t_ms += ms_since(t0);
-}
-
-void Transplant::after_moe(Core& c, int step, const int32_t* pk, const float*) {
-  if (step == 0 || nm.empty()) return;
-  const int* n = nm.data() + (size_t)step * 8;
-  for (int j = 0; j < c.K; j++)
-    for (int i = 0; i < 8; i++) hit8 += n[i] == pk[j];
-  calls += 1;
-}
-
-std::string Transplant::stats_json(Core& c, int ntok) {
-  std::ostringstream o;
-  o << "{\"m\":" << m << ",\"top_k_in_named8_steps1plus\":" << hit8 / std::max(1.0, calls * c.K) << ",\"naming_ms_per_token\":" << t_ms / std::max(1, ntok) << "}";
-  return o.str();
-}
-
 // ------------------------------------------------------------------------------------------------ trained routers
+bool Routers::attach(const std::string& path, Core& c, int names_m, double names_tau, int names_cand, std::string& err) {
+  if (!load(path, c, err)) return false;
+  m = names_m;
+  tau = names_tau;
+  cand = names_cand;
+  c.hook = this;
+  return true;
+}
+
 bool Routers::load(const std::string& path, Core& c, std::string& err) {
   if (!R.load(path, mem, err)) return false;
   lag = (int)R.geti("lag");
@@ -676,6 +635,14 @@ std::string Routers::stats_json(Core& c, int ntok) {
 }
 
 // ------------------------------------------------------------------------------------------------ cross-token routers
+bool Xtok::wrap(const std::string& path, Core& c, double threshold, std::string& err) {
+  if (!load(path, c, err)) return false;
+  tau = threshold;
+  inner = c.hook;
+  c.hook = this;
+  return true;
+}
+
 bool Xtok::load(const std::string& path, Core& c, std::string& err) {
   if (!R.load(path, Mem::MLOCK, err)) return false;
   if (R.gets("kind") != "ink_xtok") {

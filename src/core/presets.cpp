@@ -438,10 +438,6 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
       if ((*pr)["copy_mb"].kind == Json::NUM) p.spare_copy_mb = (*pr)["copy_mb"].f(0);
     }
   }
-  if (const Json* bg = prof("background"); bg && bg->kind == Json::OBJ) {  // per profile only (the drive decides)
-    p.bg_ranks = (int)(*bg)["ranks"].i(0);
-    p.bg_gate = (int)(*bg)["gate"].i(0);
-  }
   // the context positions (per profile only: the KV reserve the device class holds, measured per model)
   if (const Json* cx = prof("ctx")) {
     const Json* n = cx->kind == Json::OBJ ? member(cx, "positions") : cx;
@@ -497,8 +493,7 @@ std::string Preset::json() const {
     << (draft_max > 0 ? ",\"max\":" + std::to_string(draft_max) : std::string())  // (declared only)
     << "},\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
-    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
-    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "}";
+    << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers;
   if (ctx > 0) o << ",\"ctx\":" << ctx;  // (declared only)
   o << ",\"notes\":[";
   for (size_t i = 0; i < notes.size(); i++) o << (i ? "," : "") << q(notes[i]);
@@ -506,35 +501,24 @@ std::string Preset::json() const {
   return o.str();
 }
 
-}  // namespace dm
-
-namespace dm {
 std::string Resolved::json() const {
   std::ostringstream o;
-  auto qq = [](const std::string& s) {
-    std::string r = "\"";
-    for (char c : s) {
-      if (c == '"' || c == '\\') r += '\\';
-      r += c;
-    }
-    return r + "\"";
-  };
-  o << "{\"profile\":" << qq(profile) << ",\"mode\":" << qq(mode) << ",\"routers\":" << qq(routers) << ",\"names\":"
+  o << "{\"profile\":" << q(profile) << ",\"mode\":" << q(mode) << ",\"routers\":" << q(routers) << ",\"names\":"
     << (routers.empty() ? std::string("null")
                         : tau >= 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                   : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
-    << ",\"cross_token\":" << qq(xtok) << ",\"cache_gb\":" << cache_gb << ",\"cache_auto\":" << (cache_auto ? "true" : "false")
-    << ",\"cache_start\":" << (cache_auto ? qq(cache_start) : std::string("null"));
+    << ",\"cross_token\":" << q(xtok) << ",\"cache_gb\":" << cache_gb << ",\"cache_auto\":" << (cache_auto ? "true" : "false")
+    << ",\"cache_start\":" << (cache_auto ? q(cache_start) : std::string("null"));
   if (!slab.empty()) o << ",\"slab\":" << slab;
-  o << ",\"eviction\":" << qq(evict) << ",\"drafts\":{\"lookup\":" << (draft == "lookup" || draft == "fixed" || draft == "both" ? "true" : "false")
-    << ",\"head\":" << (draft == "head" || draft == "both" ? "true" : "false") << "},\"draft\":" << qq(draft) << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
+  o << ",\"eviction\":" << q(evict) << ",\"drafts\":{\"lookup\":" << (draft == "lookup" || draft == "fixed" || draft == "both" ? "true" : "false")
+    << ",\"head\":" << (draft == "head" || draft == "both" ? "true" : "false") << "},\"draft\":" << q(draft) << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
-    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
+    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << q(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
-  o << ",\"resident\":" << qq(resident) << ",\"resident_bits\":" << resident_bits;
+  o << ",\"resident\":" << q(resident) << ",\"resident_bits\":" << resident_bits;
   if (spare_mem || !spare_rule.empty()) {  // (on, or the profile declares the rule: the decision and its source)
-    o << ",\"spare_memory\":" << (spare_mem ? "true" : "false") << ",\"spare_memory_from\":" << qq(spare_from);
+    o << ",\"spare_memory\":" << (spare_mem ? "true" : "false") << ",\"spare_memory_from\":" << q(spare_from);
     if (!spare_rule.empty()) o << ",\"spare_memory_rule\":" << spare_rule;
   }
   if (spare_mem)
@@ -700,8 +684,8 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   r.ra_sat_skip = g.ra_sat_skip ? *g.ra_sat_skip : pf ? P.ra_sat_skip : r.ra_sat_skip;
   if (g.readers) r.readers = *g.readers;
   else if (pf && P.readers > 0) r.readers = P.readers;
-  r.bg_ranks = g.bg_ranks ? *g.bg_ranks : pf ? P.bg_ranks : r.bg_ranks;
-  r.bg_gate = g.bg_gate ? *g.bg_gate : pf ? P.bg_gate : r.bg_gate;
+  if (g.bg_ranks) r.bg_ranks = *g.bg_ranks;  // background reads: explicit only (no profile declares them)
+  if (g.bg_gate) r.bg_gate = *g.bg_gate;
   // drafting
   if (g.draft) r.draft = *g.draft;
   else if (g.drafts) r.draft = *g.drafts > 0 ? "lookup" : "none";

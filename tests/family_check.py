@@ -345,7 +345,7 @@ if wanted("drafting"):
         try:
             bad, okd = [], []
             P = [str(rnd.randrange(LO, V)) for _ in range(60)]
-            for nm, fl in (("i16", []), ("f16", ["--prec", "f16"]), ("screened head", ["--fast-head", "1"]), ("previous pass", ["--verify-old", "1"])) + \
+            for nm, fl in (("i16", []), ("f16", ["--prec", "f16"]), ("screened head", ["--fast-head", "1"])) + \
                           ((("f32", ["--prec", "f32"]),) if caps.get("ref_path") else ()):
                 r = run([DMENG, "--model", M, *BASE, "--prompt-ids", ",".join(P), "--n", "8", "--cache-gb", f"{FEW_GB:.6f}", *fl, "--verify-check", "150"])
                 l = [x for x in r.stderr.splitlines() if "verify_check" in x]

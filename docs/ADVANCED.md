@@ -27,7 +27,7 @@ resolve to, as JSON, without loading the model.
   `--mem plain|mlock|purgeable|file` and its `--file-*` options, `--res-mem`, `--threads`, `--readers`, `--split`,
   `--prec`, `--ctx`, `--pool-share`, `--half-life`.
 - **Early names** (they only schedule reads; in `exact` the tokens do not depend on them): `--prefetch
-  none|router|oracle|transplant|plan`, `--routers F --m M`, the confidence rule `--rt-tau T --rt-cand C`,
+  none|router|oracle|plan`, `--routers F --m M`, the confidence rule `--rt-tau T --rt-cand C`,
   cross-token names `--xtok F --xtok-tau T` and `--xtok-bg F`, the read planner `--plan-routers ...`, `--router-stats`,
   `--router-ecache`, `--router-heavy`.
 - **Reads and eviction**: `--evict auto|hazard|freq|pred`, `--layer-caps`, `--evict-policy F`, `--rd-prio`,
@@ -45,7 +45,7 @@ resolve to, as JSON, without loading the model.
   `pinned_mb`, `pins_released`, `pins_over_budget` and `checkpoint_mb` against `checkpoint_budget_mb`.
 - **Draft and verify** (greedy and sampled; the tokens are plain decoding's; see Drafting below): `--draft lookup|fixed|head|both`,
   `--draft-max`, `--draft-thr`, `--head-backoff`, `--early`, `--verify-names`, `--skeleton`, `--probe-every`,
-  `--copy-free`, `--draft-cost`, `--verify-old` (the previous verify pass, for A/B measurements).
+  `--copy-free`, `--draft-cost`.
 - **Reads**: `--name-gate 0|1` (no new named read while urgent reads wait for a reader; default 0).
 - **Outputs and checks**: `--json`, `--out-ids`, `--steps-out`, `--record`, `--dump-names`, teacher forcing
   (`--teacher`, `--dump-logits`, `--nll-out`, `--ref-nll`, `--qual-out`, `--ref-qual`, `--taps-out`), `--state-check`,

@@ -102,7 +102,7 @@ struct Args {
   std::string draft = "none";  // draft and verify for greedy requests: none | lookup (controller) | fixed
   double draft_thr = 0.9;              // the model's draft head: as dmeng --draft-thr / --head-backoff
   int head_backoff0 = 32, head_backoff_max = 256;
-  int draft_max = 7, early = 0, probe_every = 48, verify_names = 1, draft_gate = 1, verify_old = 0, copy_free = 1;
+  int draft_max = 7, early = 0, probe_every = 48, verify_names = 1, draft_gate = 1, copy_free = 1;
   std::string draft_cost;  // the measured pass costs: read at start (when present), written after each drafted request
   double draft_margin = 0.05;
   double gpu_frac = 0;       // prefill: share of each attention projection's rows on the GPU (exact); 0 = CPU only
@@ -189,7 +189,7 @@ prompt path
   --hotset F|none        saved hot set (default DIR/.dmeng/hotset.bin)
 draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed)
   --draft none|lookup|fixed --draft-max N (7) --early N (0) --probe-every N (48) --verify-names 0|1 (default 1)
-  --draft-cost F|none (default DIR/.dmeng/draft_cost.txt under a profile) --copy-free 0|1 (1) --verify-old 0|1 (0: A/B only)
+  --draft-cost F|none (default DIR/.dmeng/draft_cost.txt under a profile) --copy-free 0|1 (1)
   --draft-thr P --head-backoff B,M        the model's draft head (--draft head|both), as dmeng (0.9; 32,256)
 measurement
   --check IDS --ref-chunk N --gen N | --prefill-bench IDS --rep N --record-routing F | --check-ahead A B --check-ahead-len N
@@ -441,7 +441,6 @@ int main(int argc, char** argv) {
       a.head_backoff0 = std::stoi(b.substr(0, c));
       a.head_backoff_max = c == std::string::npos ? a.head_backoff0 : std::stoi(b.substr(c + 1));
     }
-    else if (k == "--verify-old") a.verify_old = std::stoi(v());
     else if (k == "--copy-free") a.copy_free = std::stoi(v());
     else if (k == "--draft-cost") a.draft_cost = v();
     else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
@@ -462,14 +461,7 @@ int main(int argc, char** argv) {
     }
   }
   if (a.model.empty()) {
-    fprintf(stderr,
-            "usage: dmserve --model DIR [--resident F] [options]\n"
-            "  prefix cache: --ckpt-gb G (checkpoints in memory, default %.2f) --park-gb G (parked sequences, default %.2f)\n"
-            "                --disk DIR --disk-gb G (default %.1f)\n"
-            "  draft and verify (greedy and sampled requests; the ids are plain decoding's for the request's seed): --draft none|lookup|fixed|head|both (default none; head, both: the model's own draft head),\n"
-            "                --draft-max N (7), --early N (name the copied positions' experts N positions ahead; 0 = off),\n"
-            "                --probe-every N (48)\n",
-            SessionOptions().ckpt_gb, SessionOptions().park_gb, SessionOptions().disk_gb);
+    fprintf(stderr, "usage: dmserve --model DIR [options]  (dmserve --help)\n");
     return 2;
   }
   std::string err;
@@ -599,34 +591,20 @@ int main(int argc, char** argv) {
       return 1;
     }
   Routers rts;  // decode: trained lag-k routers naming m experts early (lossless); none = cache only
-  if (!a.routers.empty()) {
-    if (!rts.load(a.routers, C, err)) {
-      fprintf(stderr, "routers: %s\n", err.c_str());
-      return 1;
-    }
-    rts.m = a.m;
-    rts.tau = a.rt_tau;
-    rts.cand = a.rt_cand;
-    C.hook = &rts;
+  if (!a.routers.empty() && !rts.attach(a.routers, C, a.m, a.rt_tau, a.rt_cand, err)) {
+    fprintf(stderr, "routers: %s\n", err.c_str());
+    return 1;
   }
   Xtok xt;  // cross-token routers (names the next token's first layers), wrapping the hook above
-  if (!a.xtok.empty()) {
-    if (!xt.load(a.xtok, C, err)) {
-      fprintf(stderr, "xtok: %s\n", err.c_str());
-      return 1;
-    }
-    xt.tau = a.xtok_tau;
-    xt.inner = C.hook;
-    C.hook = &xt;
+  if (!a.xtok.empty() && !xt.wrap(a.xtok, C, a.xtok_tau, err)) {
+    fprintf(stderr, "xtok: %s\n", err.c_str());
+    return 1;
   }
-  if (a.mode != "lossless") {  // opt-in approximate mode, as dmeng --mode
-    const std::string preset = a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
-    if (!C.ns.preset(preset)) {
-      fprintf(stderr, "--mode exact|fast|lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
-      return 2;
-    }
-    if (C.ns.cancel) C.cancel_stale = true;
+  if (!C.ns.mode(a.mode)) {
+    fprintf(stderr, "--mode exact|fast|lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
+    return 2;
   }
+  if (C.ns.on && C.ns.cancel) C.cancel_stale = true;
   C.cache.name_gate = a.name_gate != 0;
   C.ra_budget = a.ra_budget;
   C.ra_max_tok = a.ra_max;
@@ -733,10 +711,6 @@ int main(int argc, char** argv) {
     struct stat sb;
     std::string e;
     if (stat(a.draft_cost.c_str(), &sb) == 0 && !dr.load_cost(a.draft_cost, e)) fprintf(stderr, "dmserve: %s (the family's prior)\n", e.c_str());
-  }
-  if (a.verify_old) {
-    std::string e;
-    if (!M->set_option("verify_old", "1", e)) fprintf(stderr, "dmserve: --verify-old: %s\n", e.c_str());
   }
   C.chunk_names = a.verify_names != 0;
   PrefixTarget tgt(pc, lm);

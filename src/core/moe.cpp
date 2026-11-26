@@ -68,6 +68,11 @@ bool Approx::preset(const std::string& spec) {
   return true;
 }
 
+bool Approx::mode(const std::string& m) {
+  if (m == "lossless") return true;
+  return m.rfind("approx:", 0) == 0 && preset(m.substr(7));
+}
+
 const char* Approx::presets_help() {
   return "drop (a missing pick of released weight <= 0.1 is left out: no substitute, the kept picks keep their released "
          "weights; a heavier one is read and waited for; a pick whose read is in flight is waited for), followed by :w=W "

@@ -73,11 +73,6 @@ struct Preset {
   bool ra_sat_skip = false;
   // (a profile's run_ahead may list "modes": on only in those; the phones: exact)
   int readers = 0;  // reader threads (0 = the front end's default; the phones: 8)
-  // background reads for the drive's idle time (Routers::bg_ranks; 0 = off): the routers' ranks up to `ranks` of the
-  // steps already named, started while at most `gate` speculative reads are in flight (off in every built-in profile:
-  // on Flash-Next, measured in one process token by token, they raised the drive's effective rate 4-8% and the bytes
-  // per token 2-8%, and the tokens did not get faster)
-  int bg_ranks = 0, bg_gate = 0;
   // spare memory, a probation tier in the OS file cache under the slab (store.h, Cache::file_under): a profile's
   // "spare_memory": {"min_physical_gb": G, "modes": [...], "probation_gb": B} turns it on where the device has at least G
   // GB of physical memory (hw.memsize) and the mode in force is listed (as run_ahead's "modes": "exact" or "fast", by
@@ -179,7 +174,7 @@ struct Given {
   std::optional<std::string> resident;  // an explicit resident file
   std::optional<std::string> routers;   // an engine router file, or "none"
   std::optional<std::string> xtok;      // a cross-token router file, or "none"
-  bool other_address = false;           // another early address (oracle, planner, transplant, a router id): no profile routers
+  bool other_address = false;           // another early address (oracle, planner, a router id): no profile routers
   std::optional<int> m, cand;
   std::optional<double> tau, xtok_tau;
   std::optional<bool> rd_prio;

@@ -205,8 +205,8 @@ struct Inkling : Model {
     if (dh) o << (fast_head ? "," : "") << "\"draft_head\":" << dh->stats_json();
     if (ver_passes > 0) {
       const double p = ver_passes;
-      o << (fast_head || dh ? "," : "") << "\"verify\":{\"steps\":" << ver_passes << ",\"positions\":" << ver_positions << ",\"old_path\":"
-        << (verify_old ? "true" : "false") << ",\"mb_per_pass\":{\"resident\":" << ver_res_bytes / 1e6 / p << ",\"head\":"
+      o << (fast_head || dh ? "," : "") << "\"verify\":{\"steps\":" << ver_passes << ",\"positions\":" << ver_positions
+        << ",\"mb_per_pass\":{\"resident\":" << ver_res_bytes / 1e6 / p << ",\"head\":"
         << ver_head_bytes / 1e6 / p << ",\"touched\":" << (ver_res_bytes + ver_head_bytes) / 1e6 / p << "}}";
     }
     o << "}";
@@ -317,7 +317,6 @@ struct Inkling : Model {
   void commit(State& s, int a) override;
   const float* logits_at(int i) const override { return mlg.data() + (size_t)i * c.VU; }
   Want ver_want = Want::LAST;  // what the running verify's caller reads of each position's logits
-  bool verify_old = false;     // the previous verify pass (packed gemm from 6 positions, the full head): A/B only
   int ver_best[RING_SLACK + 1];
   double ver_passes = 0, ver_positions = 0, ver_head_bytes = 0, ver_res_bytes = 0, ver_hb_full_ = 0;
   bool prefill(State& s, const int32_t* ids, int n, bool want_logits, const std::vector<int>& capture, const LM::StateSink& sink,
@@ -468,8 +467,7 @@ void l2clip(float* x, const float* scale, int n, float thr) {
 
 // ------------------------------------------------------------------------------------------------ load
 bool Inkling::load(const LoadOpts& op, std::string& err) {
-  const std::string res = op.resident.empty() ? op.dir + "/dmeng_resident.bin" : op.resident;
-  if (!R.load(res, op.res_mem, err)) return false;
+  if (!R.load(op.resident, op.res_mem, err)) return false;  // (resolve_model names the file)
   dir = op.dir;
   res_mem = op.res_mem;
   for (auto& kv : op.cfg) R.cfg[kv.first] = kv.second;  // the manifest's configuration, where there is one
@@ -1912,7 +1910,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
     ki[i] = three ? p.qn + H : p.qn;
     vi[i] = three ? p.qn + 2 * H : p.qn;
   }
-  const bool packed = !ref && prec == Prec::I16 && n >= (rb && !verify_old ? 2 : 6);  // (a verify pass: from 2 positions)
+  const bool packed = !ref && prec == Prec::I16 && n >= (rb ? 2 : 6);  // (a verify pass: from 2 positions)
   if (packed) {
     xqb_a.reserve(H, n);
     if (three) {
@@ -2353,7 +2351,7 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
       fh[k] = hn.data() + (size_t)k * H;
       oh[k] = fl.data() + (size_t)k * c.V;
     }
-    const bool scr = all_logits && rb && !verify_old && fast_head && !ref && (ver_want == Want::GREEDY || (ver_want == Want::TOPK && head_topk > 0));
+    const bool scr = all_logits && rb && fast_head && !ref && (ver_want == Want::GREEDY || (ver_want == Want::TOPK && head_topk > 0));
     std::vector<int> full_pos;  // positions whose logits come from the full head (all, or the screen's fallbacks)
     if (scr) {
       // the screened head with the softcap, as a single step under this Want: every position's capped logits of the rows
@@ -2379,7 +2377,7 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
       std::vector<float*> of(nf);
       for (int j = 0; j < nf; j++) xf[j] = xh[full_pos[j]], ff[j] = fh[full_pos[j]], of[j] = oh[full_pos[j]];
       const XQB* ph = nullptr;
-      if (!ref && prec == Prec::I16 && nf >= (rb && !verify_old ? 2 : 6)) {
+      if (!ref && prec == Prec::I16 && nf >= (rb ? 2 : 6)) {
         xqb_h.reserve(H, nf);
         for (int j = 0; j < nf; j++) xqb_set_from(xqb_h, j, pp[full_pos[j]]->xa.q);
         xqb_pad(xqb_h);
@@ -2664,7 +2662,6 @@ bool Inkling::set_option(const std::string& name, const std::string& value, std:
     return true;
   }
   if (name == "head_topk") return (head_topk = std::min(std::stoi(value), ScreenHead::KMAX)), true;  // Want::TOPK's k
-  if (name == "verify_old") return (verify_old = std::stoi(value) != 0), true;  // the previous verify pass (A/B measurements)
   if (name == "prefill_batched_always" && std::stoi(value) == 0) return true;      // off
   if (name == "prefill_batched_always")  // refused, not ignored
     return (err = name + ": not implemented for inkling2_loop's prefill"), false;

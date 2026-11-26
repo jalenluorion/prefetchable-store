@@ -100,8 +100,7 @@ generation
   --start-pos P          timing of long contexts: the first token sits at position P
 
 early address (lossless: names only schedule reads; the released router decides)
-  --prefetch none|oracle|router|transplant|plan
-  --prefetch transplant --m M      no trained weights: step s + 1's released router on step s's input names its top M
+  --prefetch none|oracle|router|plan
   --oracle F --lead N|token        replay a routing recorded with --record, N steps ahead or one token ahead
   --routers F --m M                trained routers (engine file), name the top M per step (default 8)
   --xtok-bg F                      a second cross-token source whose reads start only while no read of the current
@@ -117,9 +116,8 @@ early address (lossless: names only schedule reads; the released router decides)
   --evict auto|freq|pred|hazard  --rd-prio 0|1  --rd-excl 0|1  --spec-max N  --cancel 0|1
   --bg-ranks D --bg-gate G --bg-split P --bg-queue Q --bg-max N   background reads for the drive's idle time: the routers' ranks
                          m+1..D of the steps already named, while no urgent read and at most G speculative ones are in
-                         flight, in P pieces (N in flight), at most Q records queued (default: the profile's `background`,
-                         which no published profile declares: off; split 2, queue 2, max 1; under the confidence names
-                         rule, the top D's ranks it left unnamed)
+                         flight, in P pieces (N in flight), at most Q records queued (default off; split 2, queue 2, max 1; under
+                         the confidence names rule, the top D's ranks it left unnamed)
   --name-gate 0|1        1: a name that needs a read is not issued while urgent reads wait for a reader (default 0)
                          auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
                          EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
@@ -193,8 +191,6 @@ outputs
                          experts of later steps as one-position steps do (routers: the first two blocks per position at
                          the pass's start, the lag rows in each step's router fork-join; oracle: the recorded picks); names
                          only schedule reads (default 1)
-  --verify-old 0|1       1: the previous verify pass (recurrent states copied at the pass's start and streamed once per
-                         position, the packed gemm from 6 positions, the full head), for A/B measurements (default 0)
   --copy-free 0|1        with --draft lookup: copy drafts are not rationed by the probe interval and budget once their
                          drafts are being kept (default 1)
   --draft-cost F         with --draft: the pass costs a run measured, read at the start in place of the family's prior when
@@ -227,7 +223,7 @@ struct Args {
   int bg_ranks = 0, bg_gate = 0, bg_split = 2, bg_queue = 2, bg_max = 1;
   double bg_margin = 0;  // background reads (the profile's; --bg-ranks 0 = off)
   int teacher_prefill = 0;  // --teacher: the first N ids through the batched prompt path (--prefill-chunk), the rest stepped
-  int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1, verify_old = 0, copy_free = 1;
+  int prefill_chunk = 1, draft_max = 7, probe_every = 48, early = 0, verify_names = 1, draft_gate = 1, copy_free = 1;
   std::string draft_cost;
   double draft_margin = 0.05;
   double prefill_gpu_frac = 0, prefill_gpu_experts = 0;
@@ -479,7 +475,6 @@ int main(int argc, char** argv) {
     else if (k == "--probe-every") a.probe_every = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
     else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
-    else if (k == "--verify-old") a.verify_old = std::stoi(v());
     else if (k == "--copy-free") a.copy_free = std::stoi(v());
     else if (k == "--draft-cost") a.draft_cost = v();
     else if (k == "--draft-margin") a.draft_margin = std::stod(v());
@@ -622,7 +617,6 @@ int main(int argc, char** argv) {
   // ---- the early address
   Oracle orc;
   Routers rts, hrts;
-  Transplant tpl;
   Planner pln;
   const bool plan = a.prefetch == "plan";
   if (a.prefetch == "oracle") {
@@ -643,9 +637,6 @@ int main(int argc, char** argv) {
       rts.heavy = &hrts;
     }
     C.hook = &rts;
-  } else if (a.prefetch == "transplant") {
-    tpl.m = a.m;
-    C.hook = &tpl;
   } else if (plan) {
     if (!pln.load(split_list(a.plan_routers), C, err)) return die("planner", err);
     pln.u = a.plan_u;
@@ -660,33 +651,20 @@ int main(int argc, char** argv) {
     pln.calib_q_only = a.plan_calib == "q";
     C.hook = &pln;
   } else if (a.prefetch != "none") {
-    fprintf(stderr, "--prefetch none|oracle|router|transplant|plan\n");
+    fprintf(stderr, "--prefetch none|oracle|router|plan\n");
     return 2;
   }
 
   Xtok xt;  // cross-token routers, wrapping the hook chosen above (if any)
-  if (!a.xtok.empty()) {
-    if (!xt.load(a.xtok, C, err)) return die("xtok", err);
-    xt.tau = a.xtok_tau;
-    xt.inner = C.hook;
-    C.hook = &xt;
-  }
+  if (!a.xtok.empty() && !xt.wrap(a.xtok, C, a.xtok_tau, err)) return die("xtok", err);
   Xtok xb;  // a second cross-token source whose names use the readers' background class
-  if (!a.xtok_bg.empty()) {
-    if (!xb.load(a.xtok_bg, C, err)) return die("xtok-bg", err);
-    xb.tau = a.xtok_tau;
-    xb.background = true;
-    xb.inner = C.hook;
-    C.hook = &xb;
-  }
+  xb.background = true;
+  if (!a.xtok_bg.empty() && !xb.wrap(a.xtok_bg, C, a.xtok_tau, err)) return die("xtok-bg", err);
 
   // ---- the mode
-  if (a.mode != "lossless") {
-    const std::string preset = a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
-    if (!C.ns.preset(preset)) {
-      fprintf(stderr, "--mode lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
-      return 2;
-    }
+  if (!C.ns.mode(a.mode)) {
+    fprintf(stderr, "--mode lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
+    return 2;
   }
   C.cache.rd.prio = priority_reads_on(a.rd_prio, plan, C.ns.on && C.ns.prio);
   C.cache.rd.excl = a.rd_excl != 0;
@@ -748,7 +726,6 @@ int main(int argc, char** argv) {
     C.force = forced.data();
     C.force_n = hdr[0];
   }
-  // the screened head: greedy (temperature 0), or a top-k sampler (top-k 1..64: only the exact top-k logits are needed)
   // the screened head: on by default (Qwen3.6) where it is exact and nothing needs every logit: greedy decoding without
   // drafting or the verify check, or top-k sampling with k <= 64; --fast-head 0 = the full head, 1 / 2 asked explicitly
   // (2 also checks every token against the full head)
@@ -769,7 +746,6 @@ int main(int argc, char** argv) {
   }
   if (!a.taps_out.empty() && !M->set_option("taps", "1", err)) return die("model", err);
   if (a.run_ahead > 0 && !M->set_option("run_ahead", std::to_string(a.run_ahead), err)) return die("model", err);
-  if (a.verify_old && !M->set_option("verify_old", "1", err)) return die("model", err);
   C.ra_budget = a.ra_budget;
   C.ra_max_tok = a.ra_max;
   C.ra_sat_skip = a.ra_sat != 0;
@@ -1015,7 +991,7 @@ int main(int argc, char** argv) {
          << ",\"weight_left_out_per_token_p90\":" << (w.empty() ? 0.0 : (double)w[std::min(w.size() - 1, (size_t)(0.9 * w.size()))])
          << ",\"steps_with_a_drop_share\":" << N.steps_replaced / ns << ",\"picks_read_and_waited_per_token\":" << per(N.n_read_now + N.n_late_waited) << "}";
     }
-    if (C.hook) js << ",\"" << (plan ? "planner" : a.prefetch == "oracle" ? "oracle" : a.prefetch == "transplant" ? "transplant" : "routers") << "\":" << C.hook->stats_json(C, steps);
+    if (C.hook) js << ",\"" << (plan ? "planner" : a.prefetch == "oracle" ? "oracle" : "routers") << "\":" << C.hook->stats_json(C, steps);
     js << ",\"model\":" << M->stats_json(steps);
     if (C.run_ahead) js << ",\"run_ahead\":" << C.ra_json();
   };
