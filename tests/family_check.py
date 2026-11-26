@@ -722,16 +722,16 @@ if wanted("presets"):
             r = run([os.path.join(B, "ms_derive"), "resident", RQ, "--bits", "4"])
             if r.returncode:
                 bad.append(f"ms_derive resident --bits 4: {r.stderr[-200:]}")
-            for fold, bits, want in ((RQ, 0, 4), (RQ, 8, 8), (M, 0, 8)):
+            for fold, bits, wbits in ((RQ, 0, 4), (RQ, 8, 8), (M, 0, 8)):
                 if os.path.exists(j):
                     os.remove(j)
                 r = run([DMGATE, "--model", fold, "--profile", "phone-small", "--resident-bits", str(bits), "--prompt-ids", ip, "--n", "2", "--threads", "2",
                          "--cache-gb", "auto", "--json", j])
                 d = json.load(open(j))["stats"] if r.returncode == 0 else None
                 got = (d["policy"].get("resident_bits"), d["policy"].get("resident"), d["resolved"].get("resident_bits"), d["resolved"].get("resident")) if d else r.stderr[-200:]
-                wid = "resident_q4" if want == 4 else "resident_q8"
-                if got != (want, wid, want, wid):
-                    bad.append(f"phone-small resident_bits {bits}{' (no 4-bit file)' if fold == M else ''} capi: {got} != {(want, wid, want, wid)}")
+                wid = "resident_q4" if wbits == 4 else "resident_q8"
+                if got != (wbits, wid, wbits, wid):
+                    bad.append(f"phone-small resident_bits {bits}{' (no 4-bit file)' if fold == M else ''} capi: {got} != {(wbits, wid, wbits, wid)}")
                 ncell += 1
             for fe in ("dmeng", "dmserve"):  # the profile's file, opened and reported the same way
                 if os.path.exists(j):
