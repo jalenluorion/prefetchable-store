@@ -56,7 +56,7 @@ struct Preset {
   int bg_ranks = 0, bg_gate = 0;
   // the OS file cache under the locked slab (store.h, Cache::file_under): a profile's "spare_memory":
   // {"min_physical_gb": G} turns it on where the device has at least G GB of physical memory (hw.memsize). Built-in:
-  // undeclared in every profile (off)
+  // phone 11 (the 12 GB class); mac and phone-small undeclared (off)
   double spare_min_gb = 0;
   bool spare_mem = false;
   std::vector<std::string> notes;  // defaults that did not resolve, fallbacks taken
