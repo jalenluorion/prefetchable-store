@@ -54,6 +54,8 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "chunk": 256,
    "gpu_min": 64,
    "join": 0.25,
+   "lend": 1,
+   "scratch_mb": 768,
    "short_names": "router",
    "span": 8192,
    "whole_from": 0
@@ -166,7 +168,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "gpu_min": 64,
    "gpu_min_wave": 128,
    "join": 0,
+   "lend": 1,
    "pack_min": 1,
+   "scratch_mb": 768,
    "short_names": "router",
    "span": 8192,
    "waves": true,

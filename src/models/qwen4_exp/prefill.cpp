@@ -567,36 +567,26 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     }
     fast = po.fast && gpu.half();
   }
-  // The scratch is bounded by memory, not only by the front end's chunk and span: this model's per-position scratch is
-  // large (four streams of the hidden state, 40 KB per position, and about 0.6 MB per position of a sub-chunk), and on the
-  // 16 GB Mac the prompt path's peak decides whether it swaps. The bound (the manifest's scratch_mb) goes to the
-  // sub-chunks first (at most a quarter: each layer's resident matrices are read once per sub-chunk, 4 GB / 192 positions =
-  // 21 MB per position, under 1% of its compute), then in the fast path to the MoE blocks (at most a quarter: the GPU's
-  // efficiency grows with the users per expert), and the rest to the span's streams: a span reads every needed expert of
-  // every layer once (about 65 GB for a long prompt, 20 s of drive), so the prompt is cut into as few spans as the rest
-  // allows, of equal length.
-  const double B = (po.scratch_mb > 0 ? po.scratch_mb : px.scratch_mb) * 1e6;
-  const int sub_cap = std::max(64, (int)(B / 4 / sub_bytes_per_pos()) / 64 * 64);
-  const int chunk_eff = std::min(po.chunk, sub_cap);
+  // The scratch bounded by memory (prompt_plan, every family's rule): this model's per-position scratch is large (four
+  // streams of the hidden state, 40 KB per position, and about 0.6 MB per position of a sub-chunk); the span's arrays are
+  // the streams (and the fast path's MoE inputs); the cancel snapshot when the span does not start empty
+  PromptBytes pb;
+  pb.sub = sub_bytes_per_pos();
+  pb.span = 4.0 * c.N() + (fast ? 4.0 * c.H + 4.0 * 64 : 0.0);
+  pb.moe = fast ? moe_bytes_per_pos() : 0.0;
+  pb.snap = cancel && S->pos > 0 ? (double)fixed_bytes(*S) : 0.0;
+  pb.held = (double)span_bytes();
+  const PromptPlan plan = prompt_plan(po, n, pb);
+  const int chunk_eff = plan.chunk, span = plan.span;
   px.fast = fast;
-  px.moe_block = !fast ? 0 : std::min(n, po.moe_block > 0 ? po.moe_block : std::max(256, (int)(B / 4 / moe_bytes_per_pos())));
-  const double rest = B - chunk_eff * sub_bytes_per_pos() - px.moe_block * moe_bytes_per_pos();
-  const double per = 4.0 * c.N() + (fast ? 4.0 * c.H + 4.0 * 64 : 0.0);  // streams (and the fast path's MoE inputs)
-  const int span_cap = std::max(chunk_eff, (int)(rest / per));
-  int span = std::min(std::max(chunk_eff, po.span), span_cap);
-  if (n > span) span = (n + (n + span - 1) / span - 1) / ((n + span - 1) / span);  // equal spans
-  // the prompt's transient memory from the cache (PrefillOpts::lend): the span's streams, its sub-chunk and MoE-block
-  // buffers (the fast path's GPU block is sized by the same bound), the cancel snapshot when the span does not start empty
-  int64_t lent = 0;
-  if (po.lend && po.release) {
-    const int sl = std::min(n, span);
-    const double est = sl * per + std::min(chunk_eff, sl) * sub_bytes_per_pos() + std::min(sl, px.moe_block) * moe_bytes_per_pos() +
-                       (cancel && S->pos > 0 && sl > chunk_eff ? (double)fixed_bytes(*S) : 0.0) - (double)span_bytes();
-    lent = (int64_t)std::max(0.0, est);
+  px.moe_block = plan.moe_block;
+  // the prompt's transient memory from the cache (PrefillOpts::lend): the GPU's first use of its buffers before the loan
+  const int64_t lent = plan.lend;
+  if (lent) {
     if (fast) gpu.half()->touch();
     if (gpu) gpu->touch();
-    core->cache.lend(lent);
   }
+  PromptLoan loan(*core, lent);
   px.gdn_ms = px.qsa_ms = 0;
   const double hs0 = gpu.half() ? gpu.half()->ms_stage : 0, hg0 = gpu.half() ? gpu.half()->ms_gpu : 0, hf0 = gpu.half() ? gpu.half()->flops : 0;
   const double mh0 = core->moe_half_ms;
@@ -662,7 +652,6 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
     if (gpu) gpu->trim();
     if (gpu.half()) gpu.half()->trim();
   }
-  if (lent) core->cache.lend(0);
   if (ok && fast_head && want_logits) greedy_ = argmax();
   return ok;
 }

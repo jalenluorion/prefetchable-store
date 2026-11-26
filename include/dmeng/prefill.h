@@ -98,6 +98,31 @@ struct MoePass {
 // prefill_<key> options; false + err on an unknown key or a bad value
 bool prefill_declared(const std::vector<std::pair<std::string, std::string>>& kv, PrefillOpts& o, std::string& err);
 
+// A prompt's memory, every family the same way. The family gives its bytes per position: a sub-chunk's scratch (sub), the
+// span's own arrays (span: its residual streams and whatever else lives for the whole span), the fast path's MoE block
+// (moe; 0 off), the cancel snapshot (snap; 0 none) and what its scratch holds now (held). From the bound scratch_mb:
+// the sub-chunk takes at most a quarter of it (a layer's resident matrices are read once per sub-chunk), the fast path's
+// MoE block at most a quarter, the span the rest; a short rest (PrefillOpts::join) joins the span before while the bound
+// allows; then the prompt is cut into equal spans (a span reads each needed expert of each layer once, so as few spans as
+// the bound allows, of equal length). No bound (scratch_mb 0): the declared chunk and span. lend: what the cache lends
+// for the prompt (PrefillOpts::lend with release; else 0).
+struct PromptBytes {
+  double sub = 0, span = 0, moe = 0, snap = 0, held = 0;
+};
+struct PromptPlan {
+  int chunk = 0, span = 0, moe_block = 0;
+  int64_t lend = 0;
+};
+PromptPlan prompt_plan(const PrefillOpts& o, int n, const PromptBytes& b);
+
+// The loan for the life of the object (Cache::lend; nothing when 0), given back after
+struct PromptLoan {
+  Core& c;
+  const int64_t bytes;
+  PromptLoan(Core& core, int64_t b);
+  ~PromptLoan();
+};
+
 // The driver: the prompt in spans (o.span, o.join), each run by span(done, m, last, cap_rel) where cap_rel are the
 // checkpoint positions inside the span relative to its start; a cancel checked before each span; fast mode's leave-out
 // rule off while it runs (a span reads its positions' union once whatever the rule: the prompt's state is exact mode's).
