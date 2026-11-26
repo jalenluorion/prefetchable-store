@@ -33,6 +33,7 @@
 #include "files.h"
 #include "dmeng/address.h"
 #include "dmeng/core.h"
+#include "dmeng/draft.h"
 #include "dmeng/model.h"
 #include "dmeng/model_lm.h"
 #include "dmeng/presets.h"
@@ -75,6 +76,32 @@ struct dm_engine {
   uint64_t rs_dt[7] = {0};  // the readers' time by reads in flight at the last stats call (Readers::depth_times)
   uint32_t ra_lcg = 12345;  // run_ahead_ab: the arm choice per step, as dmeng's DMENG_RA_AB
   double ab_n[2] = {0, 0}, ab_ms[2] = {0, 0}, ab_wait[2] = {0, 0}, ab_mb[2] = {0, 0}, ab_urg[2] = {0, 0}, ab_named[2] = {0, 0};
+  // drafting (dm_step_n): the controller dmeng and dmserve run (draft.h), over the prefix cache's live sequence as in
+  // dmserve's worker; null when the resolved drafting is none (then nothing of it is allocated)
+  struct PcTarget : DraftTarget {
+    PrefixCache& pc;
+    LM& lm;
+    PcTarget(PrefixCache& p, LM& l) : pc(p), lm(l) {}
+    int pos() const override { return lm.pos(); }
+    void step(int id) override { pc.step(id, nullptr); }
+    const float* logits() const override { return pc.logits(); }
+    bool verify(const int* ids, int n) override { return pc.verify(ids, n); }
+    const float* logits_at(int i) const override { return pc.logits_at(i); }
+    void commit(int a) override { pc.commit(a); }
+  };
+  std::unique_ptr<Drafter> dr;
+  std::unique_ptr<HeadSource> hs;
+  std::unique_ptr<PcTarget> tgt;
+  std::vector<int32_t> dhist;               // the drafter's sequence: the live one + the token fed
+  std::vector<int> dgot, dstop;             // one call's produced tokens, its stop ids
+  std::vector<int32_t> shist;               // the sampler's history (the caller's + this call's tokens before the one drawn)
+  std::vector<int32_t> dgen;                // the generation since the last dm_sync (the lookup's archive at its end)
+  std::vector<std::vector<int32_t>> dfrag;  // dm_set_draft_fragments (the skeleton source)
+  std::vector<float> dlg;                   // dm_step_n's logits when the caller passes none (drafting off)
+  std::string draft_cost;                   // the pass costs measured (read at open when present, written at a generation's end)
+  double draft_reserve = 0;                 // bytes the slab gave to drafting (iOS slab rule; 0: none)
+  double first_pass_gb = -1, head_gb = 0;   // the footprint's rise over the first verify pass; the draft head's weights + state
+  long dcalls = 0, dtoks = 0;               // dm_step_n calls and tokens since the last stats call
 };
 
 static thread_local std::string g_err;
@@ -142,6 +169,23 @@ static Mem mem_c(int m) {
 struct QosScope {  // the caller's QoS for the duration of a call
   explicit QosScope(qos_class_t q) { pthread_set_qos_class_self_np(q, 0); }
 };
+
+// The end of a drafted generation (the next dm_sync, dm_close), as dmserve ends a request: the generation joins the lookup's
+// archive (a later prompt may drop it), early names are released, the pass costs measured so far are written (the next
+// open's prior)
+static void draft_end(dm_engine* e) {
+  if (!e->dr || e->dgen.empty()) return;
+  e->dr->lookup.add_archive(e->dgen);
+  e->dr->end();
+  if (!e->draft_cost.empty()) e->dr->save_cost(e->draft_cost);
+  e->dgen.clear();
+}
+
+static double footprint_gb() {
+  task_vm_info_data_t vi;
+  mach_msg_type_number_t cnt = TASK_VM_INFO_COUNT;
+  return task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &cnt) == KERN_SUCCESS ? vi.phys_footprint / 1e9 : 0;
+}
 
 extern "C" {
 
@@ -235,6 +279,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   // model_options entries "run:FLAG=VALUE" (or run:--FLAG=VALUE): any dmeng run flag (presets.h run_flag), read after the fields above (so a
   // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode approx:drop:w=0.12, --rd-prio)
   std::string model_opts;
+  std::string draft_cost = "\x01";  // run:draft-cost=FILE|none (the C API's own; unset: the profile's cache folder, as dmserve)
   {
     const std::string mo = o.model_options ? o.model_options : "";
     for (size_t i = 0; i < mo.size();) {
@@ -245,7 +290,8 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
         const size_t q = kv.find('=');
         std::string flag = kv.substr(4, q == std::string::npos ? std::string::npos : q - 4);
         if (flag.rfind("--", 0) != 0) flag = "--" + flag;  // run:bg-ranks=8 as run:--bg-ranks=8
-        F(flag.c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
+        if (flag == "--draft-cost") draft_cost = q == std::string::npos ? "" : kv.substr(q + 1);
+        else F(flag.c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
       } else if (!kv.empty()) {
         model_opts += (model_opts.empty() ? "" : ";") + kv;
       }
@@ -268,16 +314,15 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   const Preset& P = ro.preset;
   const bool profiled = ro.profiled;
   if (profiled) e->preset_json = P.json();
-  // no drafting in the C API: asked for explicitly it is refused; a profile's declared drafts are left off here (said in
-  // the notes, and the "resolved" block reports none; the "preset" block keeps what the profile declares)
-  if (ro.draft != "none" && ((g.draft && *g.draft != "none") || (g.drafts && *g.drafts > 0))) {
-    g_err = "drafts: the C API has no drafting (draft " + ro.draft + " asked for)";
+  // drafting, resolved as in dmeng and dmserve (explicit run:draft=MODE / run:drafts=0|1 > the profile's drafts > off):
+  // dm_step_n drafts with it; dm_step stays plain decoding
+  if (ro.draft != "none" && ro.draft != "lookup" && ro.draft != "fixed" && ro.draft != "head" && ro.draft != "both") {
+    g_err = "draft: none|lookup|fixed|head|both, got " + ro.draft;
     return nullptr;
   }
-  if (ro.draft != "none") {
-    ro.notes.push_back("drafts: the profile declares draft " + ro.draft + "; the C API has no drafting, off");
-    ro.draft = "none";
-    ro.drafts = 0;
+  if (ro.early < 0 || (ro.early > 0 && ro.draft == "none")) {
+    g_err = "early: run:early=N (N >= 0) goes with drafting";
+    return nullptr;
   }
   // the prompt's sub-chunk is the model's own here (the C API does not set it; dmeng and dmserve use 512): printed as 0
   ro.prefill_chunk = 0;
@@ -315,6 +360,10 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     e->M = make_model(family, err);
   if (!e->M || !e->M->load(lo, err)) {
     g_err = "load: " + err;
+    return nullptr;
+  }
+  if (ro.draft != "none" && !e->M->info().has_verify) {  // never silently plain decoding (as dmeng and dmserve)
+    g_err = "draft: drafting is not supported for this family (" + e->M->info().family + "): the model has no multi-position verify pass";
     return nullptr;
   }
   e->prefill_json = prefill_json(lo.prefill);
@@ -369,10 +418,25 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     const int64_t rt = !e->routers_path.empty() && stat(e->routers_path.c_str(), &st) == 0 ? (int64_t)st.st_size : 0;
     // available: follows what iOS makes available (phones with more memory get a larger cache); footprint_target: the
     // device class's app footprint less the model's measured footprint beside the cache
-    const int64_t slab = ro.slab.bytes(e->avail_open, res, rt);
+    int64_t slab = ro.slab.bytes(e->avail_open, res, rt);
+    if (ro.draft != "none") {  // drafting's own memory comes out of the slab, so the footprint the rule aims at holds:
+      // a verify pass's buffers (the two largest parts: a second copy of the fixed state, the 35B's and Flash-Next's
+      // rollback, and 8 positions' logits; Inkling keeps less) and the draft head's file (head, both)
+      std::string e2;
+      auto tmp = e->M->new_state(ro.ctx, e2);
+      double rv = (tmp ? (double)e->M->fixed_bytes(*tmp) : 0.0) + (double)DraftCtl::DMAX * e->M->info().vocab * 4.0;
+      if (ro.draft == "head" || ro.draft == "both") {
+        struct stat hs;
+        if (stat((std::string(model_dir) + "/mtp.safetensors").c_str(), &hs) == 0) rv += (double)hs.st_size;
+      }
+      const int64_t floor = (int64_t)(ro.slab.min_gb * 1e9);
+      const int64_t cut = std::max<int64_t>(floor, slab - (int64_t)rv);
+      e->draft_reserve = (double)std::max<int64_t>(0, slab - cut);
+      slab = std::min(slab, cut);
+    }
     e->slab_auto = slab;
     co.cache_gb = slab / 1e9;
-    char b[400];
+    char b[480];
     if (ro.slab.rule == "footprint_target")
       snprintf(b, sizeof b, "{\"rule\":\"footprint_target\",\"target_gb\":%g,\"non_cache_gb\":%g,\"min_gb\":%g,\"max_gb\":%g,\"gb\":%g}",
                ro.slab.target_gb, ro.slab.non_cache_gb, ro.slab.min_gb, ro.slab.max_gb, slab / 1e9);
@@ -380,6 +444,13 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       snprintf(b, sizeof b, "{\"rule\":\"available\",\"available_gb\":%g,\"resident_gb\":%g,\"router_gb\":%g,\"state_gb\":%g,\"margin_gb\":%g,\"min_gb\":%g,\"max_gb\":%g,\"gb\":%g}",
                e->avail_open / 1e9, res / 1e9, rt / 1e9, ro.slab.state_gb, ro.slab.margin_gb, ro.slab.min_gb, ro.slab.max_gb, slab / 1e9);
     e->slab_json = b;
+    if (e->draft_reserve > 0) {  // (written only with drafting on: the block is unchanged without it)
+      char d[64];
+      snprintf(d, sizeof d, ",\"draft_reserve_gb\":%g}", e->draft_reserve / 1e9);
+      e->slab_json.pop_back();
+      e->slab_json += d;
+      fprintf(stderr, "dmeng: drafting's memory out of the slab: %.3f GB\n", e->draft_reserve / 1e9);
+    }
     if (ro.slab.rule == "footprint_target")
       fprintf(stderr, "dmeng: expert slab %.2f GB = footprint target %.2f - the model's non-cache footprint %.2f GB (available %.2f GB)\n", slab / 1e9,
               ro.slab.target_gb, ro.slab.non_cache_gb, e->avail_open / 1e9);
@@ -547,6 +618,37 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.ckpt_gb > 0) so.ckpt_gb = o.ckpt_gb;
   if (o.park_gb > 0) so.park_gb = o.park_gb;
   e->pc = std::make_unique<PrefixCache>(*e->lm, so);
+  if (ro.draft != "none") {  // the shared drafter, set up as dmserve's worker sets it up (the same defaults)
+    if (ro.draft == "head" || ro.draft == "both") {  // the model's own draft head (Inkling's MTP); a family or folder without one refuses
+      std::string he;
+      if (!e->M->set_option("draft_ctx", std::to_string(ctx), he) || !e->M->set_option("draft_head", "1", he)) {
+        g_err = "draft head: " + he;
+        return nullptr;
+      }
+      e->hs = std::make_unique<HeadSource>();
+      e->hs->M = e->M.get();
+      e->head_gb = e->M->draft_head_bytes() / 1e9;
+    }
+    e->dr = std::make_unique<Drafter>();
+    Drafter& dr = *e->dr;
+    dr.o.mode = ro.draft == "head" || ro.draft == "both" ? "lookup" : ro.draft;
+    dr.o.lookup = ro.draft != "head";
+    if (e->hs) dr.extra.push_back(e->hs.get());
+    dr.o.max = ro.draft_max;
+    dr.o.early = ro.early;
+    dr.init(e->M->info().family, ro.early > 0 ? e->C.get() : nullptr, draft_cost_prior(model_dir));
+    dr.reads = e->C.get();
+    e->draft_cost = draft_cost != "\x01" ? draft_cost : profiled ? P.cache_dir + "/draft_cost.txt" : "";
+    if (e->draft_cost == "none") e->draft_cost.clear();
+    if (!e->draft_cost.empty()) {  // the pass costs an earlier session measured, in place of the family's prior
+      struct stat sb;
+      std::string ce;
+      if (stat(e->draft_cost.c_str(), &sb) == 0 && !dr.load_cost(e->draft_cost, ce)) fprintf(stderr, "dmeng: %s (the family's prior)\n", ce.c_str());
+    }
+    e->tgt = std::make_unique<dm_engine::PcTarget>(*e->pc, *e->lm);
+  } else if (draft_cost != "\x01" && !draft_cost.empty() && draft_cost != "none") {
+    fprintf(stderr, "dmeng: run:draft-cost without drafting: ignored\n");
+  }
   ro.routers = e->R || e->PL ? e->routers_path : "";
   e->res = ro.resolved(co.cache_gb);
   return e.release();
@@ -557,6 +659,7 @@ void dm_close(dm_engine* e) {
   dm_cancel(e);
   {
     std::lock_guard<std::mutex> lk(e->busy);  // a call in flight finishes (within one layer) first
+    draft_end(e);
   }
   delete e;
 }
@@ -596,6 +699,7 @@ int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int n
     if (res) res->cancelled = 1;
     return DM_ECANCELLED;
   }
+  draft_end(e);  // a new prompt: the drafted generation before it has ended
   auto t0 = std::chrono::steady_clock::now();
   std::vector<int> v(ids, ids + n), mk;
   for (int i = 0; i < nmarks; i++) mk.push_back(marks[i]);
@@ -609,6 +713,10 @@ int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int n
   if (e->prefill_pool) std::swap(e->C->pool, e->prefill_pool);
   e->lm->on_progress = nullptr;
   if (r.cancelled) e->cancel_req.store(false);
+  if (e->dr && e->dr->core && r.source != "live" && r.source != "checkpoint") {  // picks of restored positions never ran here (dmserve)
+    const size_t row = (size_t)e->C->steps * e->C->K, nr = std::min(e->dr->pick_log.size(), (size_t)r.reused * row);
+    std::fill(e->dr->pick_log.begin(), e->dr->pick_log.begin() + nr, (int16_t)-1);
+  }
   {
     std::ostringstream lp;
     lp << "{\"source\":\"" << r.source << "\",\"reused\":" << r.reused << ",\"computed\":" << r.computed << ",\"ms_restore\":" << r.ms_restore
@@ -655,6 +763,72 @@ int dm_step(dm_engine* e, int32_t id, float* logits) {
     e->ab_urg[a] += (e->C->cache.st.bytes_urgent - u0) / 1e6;  // (a stats call between steps resets these: then 0)
     e->ab_named[a] += (e->C->cache.st.bytes_pf - n0) / 1e6;
   }
+  return DM_OK;
+}
+
+int dm_step_n(dm_engine* e, int32_t id, const dm_sampler* s, const int32_t* history, int n_history, const int32_t* stop, int n_stop,
+              int max_out, int32_t* out, int* n_out, float* logits) {
+  if (n_out) *n_out = 0;
+  if (!e || !out || !n_out || max_out < 1 || n_history < 0 || (n_history > 0 && !history) || n_stop < 0 || (n_stop > 0 && !stop)) return DM_EINVAL;
+  std::lock_guard<std::mutex> lk(e->busy);
+  QosScope qs(e->qos);
+  if (e->cancel_req.exchange(false)) return DM_ECANCELLED;
+  const int V = e->lm->info().vocab;
+  const auto t0 = std::chrono::steady_clock::now();
+  if (!e->dr) {  // no drafting: dm_step, then dm_sample over the caller's history (the app's loop, in one call)
+    float* lg = logits;
+    if (!lg) {
+      e->dlg.resize((size_t)V);
+      lg = e->dlg.data();
+    }
+    e->pc->step(id, lg);
+    out[0] = dm_sample(lg, V, s, history, n_history);
+    *n_out = 1;
+    e->steps++;
+    e->step_ns += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+    return DM_OK;
+  }
+  Drafter& dr = *e->dr;
+  // the sampler's history for the token drawn at index i of this call: the caller's history, then this call's tokens before it
+  e->shist.assign(history, history + n_history);
+  e->dgot.clear();
+  dr.pick = [e, s, V, n_history](const float* lg, int i) {
+    while ((int)e->shist.size() < n_history + i) e->shist.push_back(e->dgot[e->shist.size() - n_history]);
+    return (int)dm_sample(lg, V, s, e->shist.data(), n_history + i);
+  };
+  e->dstop.assign(stop, stop + n_stop);
+  e->dhist.assign(e->pc->live().begin(), e->pc->live().end());
+  e->dhist.push_back(id);
+  dr.skeleton.set(e->dfrag);
+  if (e->dgen.empty()) e->dgen.push_back(id);
+  const int room = e->lm->info().max_ctx - (int)e->pc->live().size() - 2;
+  const long v0 = dr.verifies;
+  const double f0 = e->first_pass_gb < 0 ? footprint_gb() : 0;
+  const int n = dr.step(*e->tgt, e->dhist, V, std::max(1, std::min(max_out, room)), e->dstop, e->dgot);
+  dr.pick = nullptr;
+  if (e->first_pass_gb < 0 && dr.verifies > v0) e->first_pass_gb = std::max(0.0, footprint_gb() - f0);
+  for (int i = 0; i < n; i++) out[i] = e->dgot[i];
+  e->dgen.insert(e->dgen.end(), e->dgot.begin(), e->dgot.end());
+  *n_out = n;
+  if (logits) std::memcpy(logits, e->pc->logits(), sizeof(float) * (size_t)V);
+  e->steps += n;  // positions fed: the token given and the n - 1 kept drafts (one per produced token)
+  e->dcalls++;
+  e->dtoks += n;
+  e->step_ns += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
+  return DM_OK;
+}
+
+int dm_set_draft_fragments(dm_engine* e, const int32_t* ids, const int32_t* lens, int n) {
+  if (!e || n < 0 || (n > 0 && (!ids || !lens))) return DM_EINVAL;
+  std::lock_guard<std::mutex> lk(e->busy);
+  std::vector<std::vector<int32_t>> f;
+  size_t at = 0;
+  for (int i = 0; i < n; i++) {
+    if (lens[i] < 0) return DM_EINVAL;
+    if (lens[i] > 0) f.emplace_back(ids + at, ids + at + lens[i]);
+    at += (size_t)lens[i];
+  }
+  e->dfrag.swap(f);
   return DM_OK;
 }
 
@@ -838,7 +1012,9 @@ const char* dm_stats_json(dm_engine* e) {
     << ",\"mode\":\"" << (e->C->ns.on ? "approx" : "lossless") << "\",\"preset\":" << e->preset_json << ",\"prefill_declared\":" << e->prefill_json << ",\"xtok\":" << (e->X ? "true" : "false") << ",\"router_tau\":" << (e->R ? e->R->tau : 0) << ",\"split\":" << e->C->o.split
     << ",\"prefill_threads\":" << (e->prefill_pool ? e->prefill_pool->size() : e->C->o.threads)
     << ",\"resident_bits\":" << (e->o.resident_bits == 4 ? 4 : 8) << ",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9 << ",\"slab_rule\":" << e->slab_json
-    << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode << "}";
+    << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode;
+  if (e->dr) s << ",\"draft\":\"" << e->res.draft << "\",\"draft_max\":" << e->dr->o.max << ",\"draft_early\":" << e->dr->o.early;  // (with drafting only)
+  s << "}";
   {  // P2 levers: the reads since the last stats call (urgent = read when needed, named = issued ahead by the router;
      // named unused = named records evicted before any use; the cache counters are reset by every stats call, the
      // readers' are not), drive busy (wall time with a read in flight) and rate
@@ -910,6 +1086,20 @@ const char* dm_stats_json(dm_engine* e) {
     s << "}";
   }
   if (e->C->hook) s << ",\"hook\":" << e->C->hook->stats_json(*e->C, (int)std::max<int64_t>(1, e->steps));
+  if (e->dr) {  // drafting since the last stats call (the counters dmeng and dmserve report), dm_step_n's calls, its memory
+    std::string dj = e->dr->stats_json();
+    if (e->hs) dj.insert(dj.size() - 1, ",\"head\":" + e->hs->stats_json());  // (the head's own counters: since open)
+    std::ostringstream m;
+    m.setf(std::ios::fixed);
+    m.precision(4);
+    m << ",\"calls\":" << e->dcalls << ",\"call_tokens\":" << e->dtoks << ",\"tokens_per_call\":" << (double)e->dtoks / std::max<long>(1, e->dcalls)
+      << ",\"memory\":{\"first_pass_footprint_gb\":" << e->first_pass_gb << ",\"head_gb\":" << e->head_gb << ",\"slab_reserve_gb\":" << e->draft_reserve / 1e9
+      << "},\"cost_file\":\"" << e->draft_cost << "\"";
+    dj.insert(dj.size() - 1, m.str());
+    s << ",\"draft\":" << dj;
+    e->dr->reset_stats();
+    e->dcalls = e->dtoks = 0;
+  }
   s << ",\"cache_auto\":" << e->cache_why << ",\"resolved\":" << e->res.json() << ",\"capabilities\":" << e->M->info().caps_json() << "}";
   e->stats = s.str();
   e->lm->reset_stats();

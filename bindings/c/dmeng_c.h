@@ -233,6 +233,38 @@ void dm_sampler_default(dm_sampler* s); /* greedy */
 int32_t dm_sample(const float* logits, int vocab, const dm_sampler* s, const int32_t* history, int n_history);
 int32_t dm_argmax(const float* logits, int vocab);
 
+/* Drafting (docs/ADVANCED.md, "Drafting"): one pass verifies several tokens and keeps exactly the tokens plain decoding
+ * would produce; the controller, its sources and its statistics are dmeng's and dmserve's (include/dmeng/draft.h).
+ * Whether it is on is resolved at dm_open as in dmeng and dmserve: model_options "run:draft=MODE" (none | lookup | head |
+ * both | fixed; "run:drafts=1" = lookup, "run:drafts=0" = none) > the profile's declared "drafts" {"lookup", "head"} >
+ * off. lookup: copy drafts from text already in the sequence (the prompt, the reply so far, earlier replies of the
+ * session) plus the fragments of dm_set_draft_fragments; head: the model's own draft head (Inkling's mtp.safetensors);
+ * both: the two. "run:draft-max=N" (1..7, default the profile's drafts.max, else 7): drafts per pass at most.
+ * "run:draft-cost=FILE|none": the pass costs measured (read at open, written at the end of each generation; default
+ * under a profile <derived_dir>/draft_cost.txt, as dmserve). A family without a multi-position verify, or a head the
+ * folder does not have, fails dm_open (dm_last_error says why), the declared default too. With drafting off nothing of
+ * it is allocated and every call behaves as before. On iOS the slab sizing rule gives drafting's memory (a verify
+ * pass's buffers, the head's weights) out of the slab (dm_stats_json policy.slab_rule.draft_reserve_gb).
+ *
+ * dm_step_n: one decode step that may produce several tokens. Feeds `id` (the token just chosen, as dm_step) and writes
+ * the next tokens to out[0 .. *n_out), 1 <= *n_out <= max_out, each exactly the token the app's own loop
+ * would choose there:
+ *   out[0] = dm_sample(logits after id, s, history, n_history)
+ *   out[i] = dm_sample(logits after out[i-1], s, history + out[0 .. i), n_history + i)
+ * (history: this reply's tokens so far, id included, as the app passes dm_sample; s NULL = greedy). The state then holds
+ * every position up to out[*n_out - 2]: the next call feeds out[*n_out - 1]. Without drafting it is dm_step followed by
+ * dm_sample (*n_out = 1). Stops after a token in stop[0 .. n_stop) (it is the last one written). max_out bounds the
+ * tokens of this call (out holds max_out; 8 is the most a call produces): pass 1 for a step whose next token the app
+ * forces, or the number of tokens up to a token it will force. logits (NULL = not wanted): the logits out[*n_out - 1]
+ * was drawn from. DM_ECANCELLED (nothing computed) if a cancel is pending. dm_counters' decode_steps and step_ns count
+ * the positions fed and the time inside the call. */
+int dm_step_n(dm_engine* e, int32_t id, const dm_sampler* s, const int32_t* history, int n_history, const int32_t* stop,
+              int n_stop, int max_out, int32_t* out, int* n_out, float* logits);
+/* The text lookup drafts copy from besides the sequence itself: n fragments of token ids, fragment i = lens[i] ids,
+ * concatenated in ids (e.g. the tool-call format of a request's tools, dmserve's skeleton source). Kept for the following
+ * dm_step_n calls until replaced; n = 0 clears them. Without drafting they are kept and not used. */
+int dm_set_draft_fragments(dm_engine* e, const int32_t* ids, const int32_t* lens, int n);
+
 /* Change the expert cache budget at run time (any thread). Applied at once if the engine is idle, else at the next
  * token or prefill-layer boundary. Lower: entries are dropped and their memory given back (DM_MEM_FILE: bookkeeping
  * only, the lowest-value entries first); higher: up to the budget given at dm_open. With file_adapt it is also the new
@@ -271,7 +303,10 @@ int dm_spare_memory_pause(dm_engine* e);
 int64_t dm_store_resident_bytes(dm_engine* e);
 
 /* JSON of what ran since the last call (decode ms per stage, hit rate, MB read, prefix-cache counters, memory: process
- * footprint, the policy's held GB and, in DM_MEM_FILE, the store pages resident in the file cache by mincore). The
+ * footprint, the policy's held GB and, in DM_MEM_FILE, the store pages resident in the file cache by mincore; with
+ * drafting, "draft": dmeng's counters (offered, declined, drafted, accepted, verifies, tokens per step, the controller's
+ * cost model), dm_step_n's calls and tokens per call, its memory (the first verify pass's footprint rise, the head's
+ * weights and state, the slab's reserve), and policy.draft / draft_max). The
  * string is owned by the engine and valid until the next call on it. */
 const char* dm_stats_json(dm_engine* e);
 
