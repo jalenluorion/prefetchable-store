@@ -57,6 +57,9 @@ struct Preset {
   // drafting by default (a profile's "drafts": {"lookup": B, "head": B}; an older manifest's bool: the lookup drafts):
   // the lookup and tool-call drafts, the model's own draft head; off in every built-in profile
   bool draft_lookup = false, draft_head = false;
+  // the most drafts one pass verifies (a profile's "drafts": {..., "max": N}, 1..7; 0 = undeclared: the front end's 7):
+  // the pass width is 1 + N positions
+  int draft_max = 0;
   // the batched prefill's exact CPU + GPU split (Metal builds): shares of the attention projections' and the experts'
   // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for both models, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)
   double gpu_frac = 0, gpu_experts = 0;
@@ -100,6 +103,7 @@ struct Resolved {
   std::string profile, mode, routers, xtok, evict;  // mode: the engine's mode string; routers / xtok: "" = none
   int m = 0, cand = 0;
   std::string draft = "none";  // the drafting in force: none | lookup | fixed | head | both (JSON: "drafts": {"lookup", "head"})
+  int draft_max = 7;           // drafts per pass at most (JSON "draft_max", written only while drafting is on)
   double tau = -1, cache_gb = 0, gpu_frac = 0, gpu_experts = 0;  // tau as the routers use it: >= 0 the confidence rule
   int run_ahead = 0, run_ahead_depth = 1;                         // picks named by the run-ahead (0 = off), its depth
   double ra_budget = 0;                                           // its limits (0 / 0 / false: none)
@@ -108,7 +112,9 @@ struct Resolved {
   int readers = 0;
   int bg_ranks = 0, bg_gate = 0;
   bool cache_auto = false;
-  std::string cache_start;  // the automatic cache's start rule (Preset::cache_start)
+  // the automatic cache's start rule (Preset::cache_start); "slab:RULE" where the C API sized a slab on iOS by that rule
+  // (sized once at open, no watcher: only dm_set_cache_bytes moves the budget)
+  std::string cache_start;
   // the slab's sizing rule and its declared inputs (SlabRule::json), written only when the cache is a slab (a phone
   // profile's, or the C API's slab on iOS): the block is unchanged otherwise
   std::string slab;
@@ -118,11 +124,16 @@ struct Resolved {
   bool spare_mem = false;  // written only when on (the block is unchanged with it off)
   int ctx = 0;             // the context positions in force, written only when the profile declares a ctx (else 0)
   double drive_gbs = 0;    // bench only (--drive-gbs): written only when set (the block is unchanged without it)
+  // the in-memory weights the front end opened (LoadOpts::resident_id: resident_q8 | resident_q4, "" = another file
+  // given) and their precision (8 | 4; 0 = another file); written by the front end after the model is loaded
+  std::string resident;
+  int resident_bits = 0;
+  void set_resident(const std::string& id) { resident = id, resident_bits = id == "resident_q4" ? 4 : id == "resident_q8" ? 8 : 0; }
   std::string json() const;
 };
 
 // exact -> lossless, fast -> approx:drop (the built-in names); anything else is returned unchanged (lossless,
-// approx[:PRESET] stay accepted everywhere)
+// approx:drop[:w=W] stay accepted everywhere)
 std::string engine_mode_of(const std::string& mode);
 
 // the device's physical memory in bytes (hw.memsize; DMENG_TEST_PHYS_MEM overrides it, tests only)
@@ -133,7 +144,7 @@ double physical_memory_bytes();
 std::string device_profile(int64_t avail_bytes, double min_gb, std::string& why);
 
 // Resolve the defaults of model folder `dir` for profile `profile_req` ("" / "auto" = the device's) and mode
-// `mode_req` ("" = the profile's; exact | fast | lossless | approx[:PRESET]). derived_dir: the engine's cache folder
+// `mode_req` ("" = the profile's; exact | fast | lossless | approx:drop[:w=W]). derived_dir: the engine's cache folder
 // ("" = DIR/.dmeng). Router files are found (or derived) as docs/MANIFEST-PRESETS.md says. A mode's engine string is the
 // model-level modes.<mode>.engine, replaced by the profile's own profiles.<profile>.modes.<mode>.engine when it declares
 // one (Preset::engine_mode_from says which); a mode_req that names no declared mode is an engine string and is kept.
@@ -145,7 +156,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
 // dm_open_opts); an unset member is left to the profile, then the manifest's defaults, then the built-in values. The
 // front ends differ only in that spelling, never in the precedence, so a setting resolves the same way in all three.
 struct Given {
-  std::optional<std::string> mode;      // exact | fast | lossless | approx[:PRESET]
+  std::optional<std::string> mode;      // exact | fast | lossless | approx:drop[:w=W]
   std::optional<std::string> resident;  // an explicit resident file
   std::optional<std::string> routers;   // an engine router file, or "none"
   std::optional<std::string> xtok;      // a cross-token router file, or "none"
@@ -164,7 +175,7 @@ struct Given {
   std::optional<int> run_ahead, run_ahead_depth, ra_max_tok;
   std::optional<double> ra_budget;
   std::optional<bool> ra_sat_skip;
-  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts, early;
+  std::optional<int> readers, bg_ranks, bg_gate, prefill_chunk, drafts, early, draft_max;
   std::optional<std::string> draft;    // none | lookup | fixed | head | both
   bool recording = false;  // a routing record is written (dmeng --record): single steps unless a chunk is given
 };
@@ -173,7 +184,7 @@ struct Given {
 // function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
 // --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
 // --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
-// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N --spare-mem 0|1 --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --draft-max N --early N --spare-mem 0|1 --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
 // run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
 // and err on a malformed value).
 std::string run_flag_name(const std::string& flag);
@@ -190,7 +201,8 @@ struct RunOpts {
   bool routers_from_profile = false;
   int m = 8, cand = 16;
   double tau = -1, xtok_tau = 0.5;  // tau as the routers use it (>= 0: the confidence rule)
-  int rd_prio = -1;                 // -1: the front end's rule (on with planner / fast mode), 0 / 1 explicit or the profile's
+  int rd_prio = -1;                 // -1: the front end's rule (on with planner / fast mode), 0 / 1 explicit or the profile's;
+                                    // in the resolved block: the value in force (priority_reads_on, the C API's rule)
   std::string evict = "auto";
   std::string layer_caps;           // "" = the core's rule
   std::string cache = "fixed";      // fixed (cache_gb) | auto (from the machine) | slab (sized at open from what iOS gives)
@@ -206,6 +218,7 @@ struct RunOpts {
   // drafting, once for every front end: an explicit --draft MODE; else --drafts 0|1 (1: the lookup and tool-call drafts);
   // else the profile's declared drafts (Preset::draft_lookup / draft_head: lookup, head or both); drafts = draft != none
   std::string draft = "none";
+  int draft_max = 7;  // drafts per pass at most: explicit --draft-max, else the profile's drafts.max, else 7 (clamped to 1..7)
   int early = 0;
   bool spare_mem = false;  // the OS file cache under the slab (CoreOpts::spare_mem): explicit, else the profile's rule
   double drive_gbs = 0;    // bench only (CoreOpts::drive_gbs): explicit only, 0 = off
@@ -220,6 +233,14 @@ struct RunOpts {
 // options `g`; `r` comes in holding the front end's built-in values. derived_dir, avail_bytes: as resolve_preset.
 bool resolve_run(const std::string& dir, const std::string& profile_req, const Given& g, const std::string& derived_dir, int64_t avail_bytes,
                  RunOpts& r, std::string& err);
+
+// Speculative reads (router and cross-token names, run-ahead) by priority, nearest step first, instead of first in, first
+// out: the resolved rd_prio when set (1 from defaults.priority_reads where a names source runs, or 0 / 1 given), else on
+// with the read planner or in fast mode. dmeng and dmserve apply this rule; the C API keeps its own, which differs in two
+// cases left as they run until measured (bindings/c/dmeng_c.cpp). Every front end reports the value in force as
+// resolved.priority_reads (RunOpts::rd_prio set to it before the block is written). It orders reads only: exact mode's
+// tokens never depend on it.
+bool priority_reads_on(int rd_prio, bool planner, bool fast);
 
 // The batched prompt path's values a model folder declares (its manifest's "prefill" key, else the family's published
 // manifest's; family "" = the folder's manifest's), then the profile's own "prefill" block over them key by key (the

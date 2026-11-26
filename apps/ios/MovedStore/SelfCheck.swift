@@ -10,7 +10,7 @@ import UIKit
 @MainActor
 enum SelfCheck {
     static let requested = ProcessInfo.processInfo.arguments.contains("-selfcheck")
-    /// Read by DmengLaunch.userMode: the Exact pass's mode for this process only (never saved).
+    /// Read by DmengLaunch.modeChoice: the Exact pass's mode for this process only (never saved).
     nonisolated(unsafe) static var modeOverride: String?
     /// A lever's model options for the engine's next open (-selfcheck-lever-opts), this process only.
     nonisolated(unsafe) static var optsOverride: String?
@@ -268,7 +268,7 @@ enum SelfCheck {
         out["model"] = kind.rawValue
         out["profile"] = DmengLaunch.profile
         out["available_at_open_gb"] = Double(DmengLaunch.availableAtOpen) / 1e9
-        out["mode_default"] = DmengLaunch.userMode
+        out["mode_default"] = DmengLaunch.shownMode ?? NSNull()
         out["mode_saved"] = UserDefaults.standard.string(forKey: kind.modeKey) ?? NSNull()
         let convsBefore = ConversationStore.loadAll().count
         out["conversations_before"] = convsBefore
@@ -278,7 +278,7 @@ enum SelfCheck {
             out["cleanup"] = cleanup()
             out["free_after_cleanup"] = freeGB()
         }
-        log("SELFCHECK screen \(out["first_screen"]!) model \(kind.rawValue) profile \(DmengLaunch.profile) mode \(DmengLaunch.userMode)")
+        log("SELFCHECK screen \(out["first_screen"]!) model \(kind.rawValue) profile \(DmengLaunch.profile) mode \(DmengLaunch.shownMode ?? "?")")
 
         // -selfcheck-lever NAME -selfcheck-lever-opts "OPTS" [-selfcheck-lever-mode fast|exact] [-selfcheck-lever-tokens N]:
         // one launch, the engine opened twice in the mode (default, then with OPTS as its model options / run: flags); per
@@ -473,10 +473,10 @@ enum SelfCheck {
         out["engine_default"] = model.engineState.label
         if model.engineState == .ready {
             out["resolved_default"] = resolved((model.engine as? DmengChatEngine)?.selfCheckStats ?? "")
-            out["spare_memory_offered"] = DmengLaunch.spareMemoryOffered
+            out["spare_memory_offered"] = (model.engine as? DmengChatEngine)?.spareMemoryOffered ?? false
             out["spare_memory_choice"] = DmengLaunch.spareMemoryChoice ?? NSNull()
             out["spare_memory_resolved"] = (model.engine as? DmengChatEngine)?.spareMemoryResolved ?? NSNull()
-            log("SELFCHECK spare memory: switch \(DmengLaunch.spareMemoryOffered ? "offered" : "not offered"), choice \(DmengLaunch.spareMemoryChoice.map { "\($0)" } ?? "none"), resolved \((model.engine as? DmengChatEngine)?.spareMemoryResolved.map { "\($0)" } ?? "?")")
+            log("SELFCHECK spare memory: switch \((model.engine as? DmengChatEngine)?.spareMemoryOffered == true ? "offered" : "not offered"), choice \(DmengLaunch.spareMemoryChoice.map { "\($0)" } ?? "none"), resolved \((model.engine as? DmengChatEngine)?.spareMemoryResolved.map { "\($0)" } ?? "?")")
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             let statesBefore = chatStates()
             var th = thermal()

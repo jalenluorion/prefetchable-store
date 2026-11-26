@@ -38,11 +38,8 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     var prefixDirName: String { self == .qwen36 ? "dmeng-prefix" : "dmeng-prefix-inkling" }
     /// The mode setting's key: one per model (each model has its default per profile).
     var modeKey: String { self == .qwen36 ? "engine.mode" : "engine.mode.inkling" }
-    /// Fast on both phone profiles (phone, phone-small), for both models; Exact elsewhere (the manifests' profiles agree).
-    func defaultMode(profile: String) -> String { profile == "phone" || profile == "phone-small" ? "fast" : "exact" }
-    /// The engine's mode string for the app's Fast: "fast", the manifest's own definition for both models (the threshold
-    /// is the manifest's to set: the 35B's 0.08 measured with the calibrated 4-bit in-memory weights is staged for its
-    /// phone-small profile, ModelKind's staged values).
+    /// The engine's mode string for the app's Fast: "fast", the manifest's own definition for both models (modes.fast,
+    /// or a profile's own modes.fast where one declares it; the threshold is the manifest's to set).
     var fastEngineMode: String { "fast" }
     /// The download's size before the manifest is in (the Hub manifest's profile bytes).
     func approxBytes(profile: String) -> Int64 {
@@ -51,12 +48,13 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
         case .inkling: return profile == "phone-small" ? 15_526_167_637 : 17_992_385_621
         }
     }
-    /// Decode speed measured on the iPhone 15 Plus (phone-small), tokens/s; nil elsewhere (not measured).
+    /// Decode speed measured on the iPhone 15 Plus (phone-small), tokens/s; nil elsewhere and in Fast (not measured
+    /// under the Fast rules the manifests declare now).
     func tokensPerSec(profile: String, fast: Bool) -> Double? {
-        guard profile == "phone-small" else { return nil }
+        guard profile == "phone-small", !fast else { return nil }
         switch self {
-        case .qwen36: return fast ? 3.9 : 3.1
-        case .inkling: return fast ? 2.4 : 1.5
+        case .qwen36: return 3.1
+        case .inkling: return 1.5
         }
     }
 

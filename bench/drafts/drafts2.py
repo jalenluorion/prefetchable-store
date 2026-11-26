@@ -6,7 +6,7 @@ is skipped); a failed run is reported and skipped.
   python3 drafts2.py BATCH...   batches: probe, gates, timing, server, table
   probe   one interleaved pair per model (35B file rewrite, Inkling coding answer): exact vs exact + drafts
   gates   sampled ids, drafts on vs off, three seeds per model (release sampler: temperature 1.0, top-p 0.95, top-k 20);
-          fast mode with --read-w 0 (no pick left out) + drafts vs exact
+          fast mode with w 0 (approx:drop:w=0: no pick left out) + drafts vs exact
   timing  per model: coding answer and file rewrite x exact / exact + drafts / fast / fast + drafts, one run per cell
           (REPS=1,2 for repeats); judged by counters (tokens per step, MB per token, compute and wait per token)
   server  the worker (dmserve) over one sampled request (seed 1) on the file rewrite, drafts off vs on
@@ -110,9 +110,9 @@ def gates():
             for c in ("off", "on"):
                 dmeng(f"{model}_toolrw_samp_s{s}_{c}", model, "toolrw", GATE_N, SAMPLER + ["--seed", str(s)] + (["--drafts", "1"] if c == "on" else []))
             print("IDS sampled", model, "seed", s, same(f"{model}_toolrw_samp_s{s}_off", f"{model}_toolrw_samp_s{s}_on"), flush=True)
-        dmeng(f"{model}_toolrw_fastrw0", model, "toolrw", GATE_N, ["--temp", "0", "--mode", "fast", "--read-w", "0", "--drafts", "1"])
+        dmeng(f"{model}_toolrw_fastrw0", model, "toolrw", GATE_N, ["--temp", "0", "--mode", "approx:drop:w=0", "--drafts", "1"])
         ref = f"{model}_toolrw_exact_p0" if ids(f"{model}_toolrw_exact_p0") else f"{model}_toolrw_exact_r1"
-        print("IDS fast read-w 0 + drafts vs", ref, "(prefix):", same(ref, f"{model}_toolrw_fastrw0", prefix=True), flush=True)
+        print("IDS fast w 0 + drafts vs", ref, "(prefix):", same(ref, f"{model}_toolrw_fastrw0", prefix=True), flush=True)
 
 
 def timing():

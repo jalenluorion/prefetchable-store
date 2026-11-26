@@ -271,7 +271,7 @@ final class ChatModel: ObservableObject {
         thinking = conv.thinking  // (no didSet in init)
         engine.thinking = thinking
         _ = appStart
-        log("LAUNCH model \(ModelKind.selected.displayName), profile \(DmengLaunch.profile), mode \(DmengLaunch.userMode)")
+        log("LAUNCH model \(ModelKind.selected.displayName), profile \(DmengLaunch.profile), mode \(DmengLaunch.modeChoice ?? "the profile's")")
         memSample("launch")
         let nc = NotificationCenter.default
         nc.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: .main) { [weak self] _ in

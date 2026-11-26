@@ -61,7 +61,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          engine's built-in values (no names, --cache-gb 5, single-step prompt, ...). A default fills only
                          what the command line leaves unset; any of --prefetch, --routers, --xtok, --oracle,
                          --plan-routers makes the early address entirely the command line's
-  --mode exact|fast|lossless|approx[:PRESET]   exact = lossless, fast = approx:drop (default: the profile's)
+  --mode exact|fast|lossless|approx:drop[:w=W]   exact = lossless, fast = the model's declared approx:drop[:w=W] (default: the profile's)
   --drafts 0|1           1 = --draft lookup (no early names), as in dmserve (a model's draft head: --draft head|both); default:
                          the profile's drafts {lookup, head} (off in every published profile)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
@@ -128,7 +128,6 @@ early address (lossless: names only schedule reads; the released router decides)
   --layer-caps auto|uniform|none   per-layer slot caps (each layer evicts its own records at its cap); auto: the rule
                          (CAPS:fit: a name leaves min(2K + holds, cap - names per step) free in a capped layer, not 2K + holds)
   --router-heavy F       a heavy-pick head (router file of the same format) beside --routers: its positives are named first
-  --drop 0|1             approx mode: leave missing light picks out (kept picks keep their released weights) instead of replacing them
   --evict-policy F.json  learned keep-score (logistic next-use predictor; router features from --prefetch router), or a
                          ranker over hazard's shortlist (a file with "features", e.g. the design study's v3:
                          q36_d_evict3_policy.json; turns hazard on; its early-router features need --routers F with
@@ -137,9 +136,7 @@ early address (lossless: names only schedule reads; the released router decides)
 
 modes
   --mode lossless|exact  (default) token ids never depend on the cache, the routers or the timing
-  --mode approx[:PRESET] opt-in (fast = approx:drop): a released pick that has not landed may be replaced by the released router's
-                         next-ranked expert in memory. Presets: PRESETS
-  --late none|always|MS  --read-w W  --read-mass M  --bg 0|1     the approximate rule set, set by hand
+  --mode approx:drop[:w=W]   opt-in (fast mode): PRESETS
 
 outputs
   --json F --out-ids F --steps-out F --record F --dump-names F
@@ -214,12 +211,11 @@ struct Args {
   std::string model, resident, embeddings, family, prompt_ids, prompt_file, teacher, dump_logits, record, oracle, routers, out_ids, json,
       steps_out, force, pool_share, nll_out, ref_nll, qual_out, ref_qual, dump_names, taps_out, plan_routers, evict_trace;
   std::string prefetch = "none", mem = "mlock", res_mem = "mlock", prec = "i16", lead = "4", mode = "lossless", evict = "auto",
-              plan_calib = "rank", late, evict_policy, router_heavy, layer_caps;
+              plan_calib = "rank", evict_policy, router_heavy, layer_caps;
   int reader_io_low = -1;  // -1: CoreOpts' platform default
-  int n = 120, start_pos = 0, ctx = 16384, threads = 8, readers = 4, split = 1, m = 8, top_k = 0, dump_from = 0, stop_eos = -1, drop = -1;
-  int rt_cand = 16, router_ecache = 0, fast_head = -1, run_ahead = 0, run_ahead_depth = 1, ra_max = 0, ra_sat = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, bg = -1, name_gate = 0;
+  int n = 120, start_pos = 0, ctx = 16384, threads = 8, readers = 4, split = 1, m = 8, top_k = 0, dump_from = 0, stop_eos = -1;
+  int rt_cand = 16, router_ecache = 0, fast_head = -1, run_ahead = 0, run_ahead_depth = 1, ra_max = 0, ra_sat = 0, rd_prio = -1, rd_excl = 0, spec_max = 0, cancel = -1, name_gate = 0;
   int plan_budget = 1, plan_revoke = 1, plan_maxcand = 32;
-  int cold_floor = -1;  // approximate mode's cold-cache floor (Approx::cold_floor)
   int bg_ranks = 0, bg_gate = 0, bg_split = 2, bg_queue = 2, bg_max = 1;
   double bg_margin = 0;  // background reads (the profile's; --bg-ranks 0 = off)
   int teacher_prefill = 0;  // --teacher: the first N ids through the batched prompt path (--prefill-chunk), the rest stepped
@@ -241,13 +237,12 @@ struct Args {
   double file_min_gb = 1.0, file_core_gb = 0;
   double ra_budget = 0;
   double cache_start_gb = 0;
-  double temp = 0, top_p = 1.0, cache_gb = 5.0, half_life = 8.0, rt_tau = -1, read_w = -1, read_mass = -1;
+  double temp = 0, top_p = 1.0, cache_gb = 5.0, half_life = 8.0, rt_tau = -1;
   double plan_u = 0.9, plan_tau_long = 0.5, plan_tau = -1, plan_pin_p = 0.2, plan_revoke_p = 0.1;
   uint64_t seed = 0;
   bool skip_reads = false, router_stats = false, loop_hold = true, state_check = false;
   // the user-facing surface (include/dmeng/presets.h)
   std::string profile = "auto", prompt_text, reasoning_effort;
-  int drafts = -1;
   bool cache_auto = false, print_defaults = false, chat = false;
   MemRule mr;
   std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
@@ -431,14 +426,8 @@ int main(int argc, char** argv) {
     else if (k == "--no-loop-hold") a.loop_hold = false;
     else if (k == "--force-routing") a.force = v();
     else if (k == "--fast-head") a.fast_head = std::stoi(v());
-    else if (k == "--late") a.late = v();
-    else if (k == "--read-w") a.read_w = std::stod(v());
-    else if (k == "--read-mass") a.read_mass = std::stod(v());
-    else if (k == "--bg") a.bg = std::stoi(v());
     else if (k == "--evict-policy") a.evict_policy = v();
     else if (k == "--evict-trace") a.evict_trace = v();
-    else if (k == "--drop") a.drop = std::stoi(v());
-    else if (k == "--cold-floor") a.cold_floor = std::stoi(v());
     else if (k == "--router-heavy") a.router_heavy = v();
     else if (k == "--rd-excl") a.rd_excl = std::stoi(v());
     else if (k == "--name-gate") a.name_gate = std::stoi(v());
@@ -466,7 +455,6 @@ int main(int argc, char** argv) {
     else if (k == "--taps-out") a.taps_out = v();
     else if (k == "--state-check") a.state_check = true;
     else if (k == "--xtok-bg") a.xtok_bg = v();
-    else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--draft-thr") a.draft_thr = std::stod(v());
     else if (k == "--draft-exact") a.draft_exact = std::stoi(v());
     else if (k == "--draft-q8") a.draft_q8 = std::stoi(v());
@@ -549,7 +537,8 @@ int main(int argc, char** argv) {
   if (!set_start_rule(a.mr, ro.cache_start, err)) return die("cache", err);
   a.prefill_gpu_frac = ro.gpu_frac, a.prefill_gpu_experts = ro.gpu_experts, a.prefill_chunk = ro.prefill_chunk;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
-  a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early;
+  a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.draft = ro.draft, a.early = ro.early;
+  a.draft_max = ro.draft_max;  // (--draft-max is a run setting: explicit, else the profile's drafts.max, else 7)
   LoadOpts lo;
   std::string family;
   if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings, profiled ? P.profile : ""))
@@ -680,19 +669,13 @@ int main(int argc, char** argv) {
 
   // ---- the mode
   if (a.mode != "lossless") {
-    const std::string preset = a.mode == "approx" ? "" : a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
+    const std::string preset = a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
     if (!C.ns.preset(preset)) {
-      fprintf(stderr, "--mode lossless|approx[:PRESET]; presets: %s\n", Approx::presets_help());
+      fprintf(stderr, "--mode lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
       return 2;
     }
   }
-  if (!a.late.empty()) C.ns.late_ms = a.late == "none" ? -1 : a.late == "always" ? 1000 : std::stod(a.late);
-  if (a.read_w >= 0) C.ns.read_w = a.read_w;
-  if (a.read_mass >= 0) C.ns.read_mass = a.read_mass;
-  if (a.bg >= 0) C.ns.bg = a.bg != 0;
-  if (a.drop >= 0) C.ns.drop = a.drop != 0;
-  if (a.cold_floor != -1) C.ns.cold_floor = a.cold_floor;  // --cold-floor N: the mode string's floor=N (every front end)
-  C.cache.rd.prio = a.rd_prio < 0 ? (plan || (C.ns.on && C.ns.prio)) : a.rd_prio != 0;
+  C.cache.rd.prio = priority_reads_on(a.rd_prio, plan, C.ns.on && C.ns.prio);
   C.cache.rd.excl = a.rd_excl != 0;
   C.cache.name_gate = a.name_gate != 0;
   if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;
@@ -964,20 +947,19 @@ int main(int argc, char** argv) {
       const Approx& N = C.ns;
       const double ns = std::max(1.0, N.steps);
       js << ",\"approx\":{\"on\":" << (N.on ? "true" : "false") << ",\"late_ms\":" << N.late_ms << ",\"read_w\":" << N.read_w
-         << ",\"read_mass\":" << N.read_mass << ",\"bg\":" << (N.bg ? "true" : "false") << ",\"weight_replaced\":" << N.w_replaced / ns
+         << ",\"read_mass\":" << N.read_mass << ",\"weight_replaced\":" << N.w_replaced / ns
          << ",\"replaced_per_token\":" << per(N.n_replaced) << ",\"steps_with_a_replacement\":" << N.steps_replaced / ns
          << ",\"max_replaced_weight\":" << N.w_replaced_max << ",\"read_now_per_token\":" << per(N.n_read_now)
          << ",\"weight_read_now\":" << N.w_read_now / ns << ",\"late_waited_per_token\":" << per(N.n_late_waited)
-         << ",\"late_got_per_token\":" << per(N.n_late_got) << ",\"late_dropped_per_token\":" << per(N.n_late_dropped)
-         << ",\"late_wait_ms_per_token\":" << per(N.late_wait_ms) << ",\"bg_per_token\":" << per(N.n_bg) << ",\"cold_steps\":" << N.cold
+         << ",\"late_dropped_per_token\":" << per(N.n_late_dropped)
          << ",\"replaced_by_weight_per_token\":[";
       for (int i = 0; i < 6; i++) js << (i ? "," : "") << per(N.w_hist[i]);
       js << "]";
-      std::vector<float> w = N.w_tok;  // released weight replaced / dropped per token (drop: left out)
+      std::vector<float> w = N.w_tok;  // released weight left out per token
       double sw = 0;
       for (float x : w) sw += x;
       std::sort(w.begin(), w.end());
-      js << ",\"drop\":" << (N.drop ? "true" : "false") << ",\"weight_left_out_per_token_mean\":" << sw / std::max<double>(1, w.size())
+      js << ",\"weight_left_out_per_token_mean\":" << sw / std::max<double>(1, w.size())
          << ",\"weight_left_out_per_token_p90\":" << (w.empty() ? 0.0 : (double)w[std::min(w.size() - 1, (size_t)(0.9 * w.size()))])
          << ",\"steps_with_a_drop_share\":" << N.steps_replaced / ns << ",\"picks_read_and_waited_per_token\":" << per(N.n_read_now + N.n_late_waited) << "}";
     }
@@ -992,7 +974,10 @@ int main(int argc, char** argv) {
             if (a.prefetch != "router") r.routers.clear();
             r.bg_ranks = rts.bg_ranks;
             r.cache = a.cache_auto ? r.cache : "fixed";
-            return r.resolved(a.cache_gb).json();
+            r.rd_prio = C.cache.rd.prio ? 1 : 0;  // in force
+            Resolved x = r.resolved(a.cache_gb);
+            x.set_resident(lo.resident_id);  // the in-memory weights opened
+            return x.json();
           }() << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
        << "\",\"m\":" << (a.prefetch == "router" ? a.m : 0) << ",\"cache_gb\":" << a.cache_gb << ",\"slots\":[";

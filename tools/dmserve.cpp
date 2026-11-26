@@ -107,7 +107,8 @@ struct Args {
   double draft_margin = 0.05;
   double gpu_frac = 0;       // prefill: share of each attention projection's rows on the GPU (exact); 0 = CPU only
   double gpu_experts = 0;    // prefill: share of the experts' rows on the GPU (exact); 0 = CPU only
-  int gpu_min = 0;           // prefill: GPU for sub-chunks of at least this many positions; 0 = the model's default (256)
+  int gpu_min = 0;           // prefill: GPU for sub-chunks of at least this many positions; 0 = the model's declared
+                             // prefill.gpu_min (64 in every published manifest; 256 built in)
   std::string gpu_kernel;    // prefill: "integer" or "matrix" (default) GPU kernel (the same bits)
   bool ref_no_gpu = false;   // --check: the reference run with the GPU split off
   int run_ahead = 0, run_ahead_depth = 1;  // run-ahead while a step waits on reads: picks named (0 = off), depth (profile's)
@@ -133,7 +134,6 @@ struct Args {
   int rd_prio = -1, rt_cand = 16, name_gate = 0;
   // the user-facing surface (include/dmeng/presets.h)
   std::string profile = "auto", mode;
-  int drafts = -1;
   int fast_head = 1;  // the screened head (exact) for greedy and top-k <= 64 requests; 0 = the full head always
   bool print_defaults = false;
   std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
@@ -160,7 +160,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
   --profile auto|mac|phone|phone-small|none   defaults from the profile (auto: the device's; none: the worker's
                          built-in values). A default fills only what the command line leaves unset; --routers or --xtok
                          makes the early address entirely the command line's (--routers none: no names)
-  --mode exact|fast|lossless|approx[:PRESET]   default: the profile's
+  --mode exact|fast|lossless|approx:drop[:w=W]   default: the profile's
   --drafts 0|1           1 = --draft lookup (no early names) (as in dmeng); default: the profile's drafts {lookup, head} (off)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)
@@ -432,7 +432,6 @@ int main(int argc, char** argv) {
     else if (k == "--gpu-min-wave") a.gpu_min_wave = std::stoi(v());
     else if (k == "--ref-no-gpu") a.ref_no_gpu = true;
     else if (k == "--keep-scratch") a.keep_scratch = true;
-    else if (k == "--draft-max") a.draft_max = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
     else if (k == "--draft-thr") a.draft_thr = std::stod(v());
     else if (k == "--head-backoff") {
@@ -513,7 +512,8 @@ int main(int argc, char** argv) {
   }
   a.gpu_frac = ro.gpu_frac, a.gpu_experts = ro.gpu_experts;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
-  a.readers = ro.readers, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early, a.chunk = ro.prefill_chunk;
+  a.readers = ro.readers, a.draft = ro.draft, a.early = ro.early, a.chunk = ro.prefill_chunk;
+  a.draft_max = ro.draft_max;  // (--draft-max is a run setting: explicit, else the profile's drafts.max, else 7)
   if (ro.bg_ranks > 0) {  // background reads are a dmeng option only: say so, never resolve to something not done
     fprintf(stderr, "dmserve: the profile's background reads (ranks %d) are not implemented in the server: off\n", ro.bg_ranks);
     ro.bg_ranks = 0;
@@ -613,19 +613,18 @@ int main(int argc, char** argv) {
     C.hook = &xt;
   }
   if (a.mode != "lossless") {  // opt-in approximate mode, as dmeng --mode
-    const std::string preset = a.mode == "approx" ? "" : a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
+    const std::string preset = a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
     if (!C.ns.preset(preset)) {
-      fprintf(stderr, "--mode exact|fast|lossless|approx[:PRESET]; presets: %s\n", Approx::presets_help());
+      fprintf(stderr, "--mode exact|fast|lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
       return 2;
     }
-    if (C.ns.prio) C.cache.rd.prio = true;
     if (C.ns.cancel) C.cancel_stale = true;
   }
   C.cache.name_gate = a.name_gate != 0;
   C.ra_budget = a.ra_budget;
   C.ra_max_tok = a.ra_max;
   C.ra_sat_skip = a.ra_sat != 0;
-  if (a.rd_prio >= 0) C.cache.rd.prio = a.rd_prio != 0;  // speculative reads by priority instead of first in, first out
+  C.cache.rd.prio = priority_reads_on(a.rd_prio, false, C.ns.on && C.ns.prio);  // (no read planner in the server)
   std::unique_ptr<State> S = M->new_state(a.ctx, err);
   if (!S) {
     fprintf(stderr, "state: %s\n", err.c_str());
@@ -733,17 +732,7 @@ int main(int argc, char** argv) {
     if (!M->set_option("verify_old", "1", e)) fprintf(stderr, "dmserve: --verify-old: %s\n", e.c_str());
   }
   C.chunk_names = a.verify_names != 0;
-  struct PcTarget : DraftTarget {
-    PrefixCache& pc;
-    LM& lm;
-    PcTarget(PrefixCache& p, LM& l) : pc(p), lm(l) {}
-    int pos() const override { return lm.pos(); }
-    void step(int id) override { pc.step(id, nullptr); }
-    const float* logits() const override { return pc.logits(); }
-    bool verify(const int* ids, int n) override { return pc.verify(ids, n); }
-    const float* logits_at(int i) const override { return pc.logits_at(i); }
-    void commit(int a2) override { pc.commit(a2); }
-  } tgt(pc, lm);
+  PrefixTarget tgt(pc, lm);
   AheadRunner ahead(lm, pc, a.ahead_span > 0 ? a.ahead_span : a.span, a.span, a.ahead_park, a.ahead_min);
   std::unique_ptr<HotSet> hot;
   if (!a.hotset.empty()) hot.reset(new HotSet(lm, a.hotset));
@@ -760,7 +749,10 @@ int main(int argc, char** argv) {
            r.draft = a.draft;
            r.drafts = a.draft != "none" ? 1 : 0;
            r.cache = a.cache_auto ? r.cache : "fixed";
-           return r.resolved(a.cache_gb).json();
+           r.rd_prio = C.cache.rd.prio ? 1 : 0;  // in force
+           Resolved x = r.resolved(a.cache_gb);
+           x.set_resident(lo.resident_id);  // the in-memory weights opened
+           return x.json();
          }()
       << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << ",\"routers_file_mb\":" << [&] {
            struct stat rs;

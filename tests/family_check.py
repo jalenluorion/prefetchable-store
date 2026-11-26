@@ -19,11 +19,15 @@ checked):
   drafting    dmeng --verify-check (verify passes with rollbacks equal to single steps), --draft fixed / lookup equal to plain
               decoding (greedy and sampled), the server worker the same; the same with drafting as the profile's declared
               default (a folder whose profiles declare drafts.lookup, no flag: ids, --verify-check, the server); a declared
-              draft head the folder cannot load refused at open; without a verify pass: every front end refuses, also a
-              declared default
+              draft head the folder cannot load refused at open; the C API (dm_gate, dm_step_n): fixed / lookup drafts with
+              fragments (the reply as a given text, every 6th token changed) and a regenerated reply (the lookup copying the
+              session's earlier one) equal to plain decoding (dm_step + dm_sample), greedy and sampled with penalties, tokens
+              per step above 1, the draft counters reported; dm_step_n without drafting equal to plain decoding with no
+              draft block; the profile's declared drafts on through it; the slab on iOS giving drafting's memory; without a
+              verify pass: every front end refuses, also a declared default
   presets     the precedence (explicit > profile > manifest > built-in) in dmeng, the C API (dm_gate) and dmserve, each
               read back from its "resolved" JSON, and the three front ends printing the same resolved settings (the
-              profile's drafts too; the C API, which has no drafting, leaves a declared default off and refuses a request)
+              profile's drafts and the pass width too, a declared default and an explicit request alike)
   files       every engine-ready file the engine uses is listed in the manifest with its sha256 and checked at load: a
               copy with one byte changed is refused; the manifest declares its in-memory rule (resident.q8_rule)
   caps        per-layer caps of 2K + 4 slots with the routers naming K per step: the :fit reserve refuses almost no name (under
@@ -282,7 +286,11 @@ if wanted("drafting"):
                         ("dmserve --draft lookup", [DMSERVE, "--model", M, "--profile", "none", "--cache-gb", f"{ALL_GB:.6f}", "--draft", "lookup"]),
                         ("dmserve --drafts 1", [DMSERVE, "--model", M, "--profile", "none", "--cache-gb", f"{ALL_GB:.6f}", "--drafts", "1"]),
                         ("dmeng, the profile declaring lookup", [DMENG, "--model", declared("dl", LOOKUP), *PB, "--prompt-ids", "11,12,13", "--n", "4", "--cache-gb", f"{ALL_GB:.6f}"]),
-                        ("dmserve, the profile declaring lookup", [DMSERVE, "--model", declared("dl", LOOKUP), "--profile", "mac", "--cache-gb", f"{ALL_GB:.6f}"])):
+                        ("dmserve, the profile declaring lookup", [DMSERVE, "--model", declared("dl", LOOKUP), "--profile", "mac", "--cache-gb", f"{ALL_GB:.6f}"]),
+                        ("the C API run:draft=lookup", [DMGATE, "--model", M, "--profile", "none", "--prompt-ids", os.path.join(T, "ids40.txt"), "--n", "4",
+                                                        "--cache-gb", f"{ALL_GB:.6f}", "--draft", "lookup"]),
+                        ("the C API, the profile declaring lookup", [DMGATE, "--model", declared("dl", LOOKUP), "--profile", "mac", "--prompt-ids",
+                                                                     os.path.join(T, "ids40.txt"), "--n", "4", "--cache-gb", f"{ALL_GB:.6f}"])):
             r = run(cmd, inp="")
             refusals.append((nm, r.returncode != 0 and "not supported for this family" in r.stderr))
         ok = all(x for _, x in refusals)
@@ -353,11 +361,68 @@ if wanted("drafting"):
             w = worker("wdd", reqs, model=FD, profile="mac")
             acc = sum(x["E"]["json"].get("draft", {}).get("accepted", 0) for x in w)
             ([okd, bad][not ([x["gen"] for x in w] == [x["gen"] for x in plain_w] and acc > 0)]).append(f"server, the profile declaring lookup ({acc} accepted)")
+            # the C API (dm_gate: dm_step + dm_sample as the app decodes, against dm_step_n): the same ids with drafts off and on,
+            # greedy and sampled (the C sampler, penalties included), tokens per step above 1 where drafts are kept, dmeng's
+            # counters in the stats' draft block; fragments: the reply as a given text (every 6th token changed); repeat: the
+            # same prompt regenerated in one engine, the lookup copying the session's earlier reply
+            CB = ["--profile", "none", "--threads", "4", "--readers", "2", "--mem", "plain", "--ctx", "2048", "--cache-gb", f"{FEW_GB:.6f}",
+                  "--model-options", "run:draft-cost=none"]
+
+            def gate(name, *flags, model=None, prompt=40, n=100, env=None):
+                op, jp = os.path.join(T, name + ".ids"), os.path.join(T, name + ".json")
+                r = run([DMGATE, "--model", model or M, "--prompt-ids", os.path.join(T, f"ids{prompt}.txt"), "--n", str(n), *flags, "--out", op, "--json", jp], env=env)
+                if r.returncode:
+                    raise RuntimeError(f"dm_gate {' '.join(flags)}: rc {r.returncode} {(r.stdout + r.stderr)[-400:]}")
+                return open(op).read().strip(), json.load(open(jp))
+            COUNTERS = ("offered", "declined", "drafted", "accepted", "verifies", "tokens_per_step")
+            for sm, S in (("greedy", []), ("sampled", ["--temp", "1", "--top-k", "20", "--top-p", "0.95", "--seed", "7"]),
+                          ("sampled with penalties", ["--temp", "0.8", "--top-k", "40", "--seed", "5", "--repetition-penalty", "1.1",
+                                                      "--presence-penalty", "0.3", "--frequency-penalty", "0.1"])):
+                plain, pj = gate("cp", *CB, *S)
+                g = plain.split(",")
+                frag = os.path.join(T, "cfrag.txt")
+                open(frag, "w").write(" ".join([str(x) for x in ids[40][-6:]] + [t if i % 6 != 5 else str(LO + (int(t) + 1 - LO) % (V - LO)) for i, t in enumerate(g)]) + "\n")
+                off, oj = gate("cn", *CB, *S, "--step-n", "1")  # dm_step_n without drafting: dm_step + dm_sample, no draft block
+                (okd if off == plain and "draft" not in oj["stats"] and "draft" not in oj["stats"]["policy"] and "draft" not in pj["stats"] else bad).append(
+                    f"C API {sm}: dm_step_n without drafting = dm_step + dm_sample, no draft block")
+                for d in ("fixed", "lookup"):
+                    out, js = gate("cd", *CB, *S, "--draft", d, "--skeleton", frag)
+                    dj = js["stats"].get("draft", {})
+                    ok = out == plain and all(k in dj for k in COUNTERS) and js["stats"]["policy"].get("draft") == d and js["stats"]["resolved"]["draft"] == d
+                    if d == "fixed":
+                        ok = ok and dj["tokens_per_step"] > 1 and js["tokens_per_call"] > 1
+                    (okd if ok else bad).append(f"C API {sm} drafts {d} with fragments ({dj.get('accepted')} kept, {js['tokens_per_call']:.2f} tokens per step)")
+                out, js = gate("cr", *CB, *S, "--draft", "lookup", "--repeat", "2")
+                rp = (js.get("repeats") or [{}])[0]
+                rd = rp.get("draft", {})
+                ok = out == plain and js.get("repeats_identical") and rp.get("tokens_per_call", 0) > 1 and rd.get("verifies_by_source", {}).get("lookup", 0) > 0
+                (okd if ok else bad).append(f"C API {sm} lookup drafts on a regenerated reply ({rd.get('accepted')} kept, {rp.get('tokens_per_call', 0):.2f} tokens per step)")
+            # the profile's declared drafting on through the C API (no option): the same ids as drafts off under that profile
+            FDc = declared("dlc", LOOKUP)
+            PC = ["--profile", "mac"] + CB[2:]
+            plain, _ = gate("cdp", *PC, "--model-options", "run:drafts=0;run:draft-cost=none", model=FDc)
+            out, js = gate("cdd", *PC, "--step-n", "1", "--repeat", "2", model=FDc)
+            rp = (js.get("repeats") or [{}])[0]
+            ok = out == plain and js["stats"]["resolved"]["draft"] == "lookup" and js["stats"]["policy"]["preset"]["drafts"] == LOOKUP and js.get("repeats_identical") and rp.get("tokens_per_call", 0) > 1
+            (okd if ok else bad).append(f"C API, the profile declaring lookup ({rp.get('tokens_per_call', 0):.2f} tokens per step on the regenerated reply)")
+            # memory: on iOS (DMENG_TEST_AVAIL_OPEN) the slab rule gives drafting's memory out of the slab; drafts off: no reserve
+            AVd = {"DMENG_TEST_AVAIL_OPEN": str(int(4e9))}
+            sl = {}
+            for d in ("none", "lookup"):
+                _, js = gate("cs" + d, "--profile", "phone" if "phone" in man["profiles"] else "mac", "--threads", "2", "--mem", "plain", "--cache-gb", "auto",
+                             "--model-options", "run:draft-cost=none", "--draft", d, n=8, env=AVd)
+                sl[d] = js["stats"]["policy"]
+            rv = sl["lookup"]["slab_rule"].get("draft_reserve_gb", 0)
+            ok = "draft_reserve_gb" not in sl["none"]["slab_rule"] and rv > 0 and abs(sl["none"]["slab_rule"]["gb"] - sl["lookup"]["slab_rule"]["gb"] - rv) < 1e-4
+            (okd if ok else bad).append(f"C API on iOS: the slab gives drafting {rv * 1e3:.1f} MB")
             # what a value needs and the folder lacks fails at open: a declared draft head without the head's files
             # (no tiny folder carries one; the 35B and Flash-Next have none at all)
             FH = declared("dh", HEAD)
             for nm, cmd in (("dmeng", [DMENG, "--model", FH, *PB, "--prompt-ids", "11,12,13", "--n", "4", "--cache-gb", f"{ALL_GB:.6f}"]),
-                            ("dmserve", [DMSERVE, "--model", FH, "--profile", "mac", "--cache-gb", f"{ALL_GB:.6f}"])):
+                            ("dmserve", [DMSERVE, "--model", FH, "--profile", "mac", "--cache-gb", f"{ALL_GB:.6f}"]),
+                            ("the C API", [DMGATE, "--model", FH, "--profile", "mac", "--prompt-ids", os.path.join(T, "ids40.txt"), "--n", "4", "--cache-gb", f"{ALL_GB:.6f}"]),
+                            ("the C API run:draft=head", [DMGATE, "--model", M, "--profile", "none", "--prompt-ids", os.path.join(T, "ids40.txt"), "--n", "4",
+                                                          "--cache-gb", f"{ALL_GB:.6f}", "--draft", "head"])):
                 r = run(cmd, inp="")
                 (okd if r.returncode != 0 and "draft head" in r.stderr else bad).append(f"{nm} refuses a declared head it cannot load (rc {r.returncode})")
             verdict("drafting", "FAIL" if bad else "PASS", ("differ: " + "; ".join(bad) + " | " if bad else "") + f"{len(okd)} equal to plain decoding: " + "; ".join(okd))
@@ -385,7 +450,7 @@ if wanted("presets"):
             return json.loads(ready[0][6:])["resolved"] if ready else {"error": r.stderr[-300:]}
 
         def spell(front, flags):
-            out, i = [], 0
+            out, i, mo = [], 0, []
             while i < len(flags):
                 f, v = flags[i], (flags[i + 1] if i + 1 < len(flags) else None)
                 if f == "--gpu":
@@ -395,10 +460,12 @@ if wanted("presets"):
                     out += ["--gpu-frac", "-1", "--gpu-experts", "-1"] if front == "capi" else ["--prefill-gpu", "off"]; i += 1
                 elif f == "--ra-off":
                     out += ["--run-ahead", "-1" if front == "capi" else "0"]; i += 1
-                elif f == "--drafts" and front == "capi":  # (no field of its own: the run-flag passthrough)
-                    out += ["--model-options", f"run:drafts={v}"]; i += 2
+                elif f in ("--drafts", "--draft-max") and front == "capi":  # (no field of its own: the run-flag passthrough)
+                    mo.append(f"run:{f[2:]}={v}"); i += 2
                 else:
                     out += [f, v]; i += 2
+            if mo:
+                out += ["--model-options", ";".join(mo)]
             if front == "capi" and "--cache-gb" not in out:
                 out += ["--cache-gb", "auto"]
             return out
@@ -412,7 +479,7 @@ if wanted("presets"):
                 return [] if g is not None and abs(float(g) - float(e)) < 1e-6 else [f"{k}: {g!r} != {e!r}"]
             return [] if g == e else [f"{k}: {g!r} != {e!r}"]
 
-        bad, ncell, cross = [], 0, []
+        bad, ncell, cross, n_capi_prio = [], 0, [], 0
         FRONT_SPECIFIC = set()  # (the prompt's sub-chunk is the model's declared one in all three: printed as 0)
 
         def slab_rule(prof):
@@ -437,8 +504,8 @@ if wanted("presets"):
                            "names": names if P["routers"] else None}
             if P["readers"] > 0:
                 exp_default["readers"] = P["readers"]
-            # the profile's declared drafting (the C API has none: off there, below); the tiny folders' profiles declare it
-            # as the published manifests do (a family without what it needs would fail at open: the drafting check)
+            # the profile's declared drafting; the tiny folders' profiles declare it as the published manifests do (a family
+            # without what it needs would fail at open: the drafting check)
             exp_default["drafts"] = P["drafts"]
             exp_default["slab"] = slab_exp(prof)  # (the mac profile: not printed, the block unchanged)
             # the profile's declared context positions (profiles.<p>.ctx: N or {"positions": N}; not printed when undeclared)
@@ -465,18 +532,24 @@ if wanted("presets"):
                      ("readers 2", ["--readers", "2"], {"readers": 2}),
                      ("ctx 2048", ["--ctx", "2048"], {"ctx": 2048 if ctx_decl else None}),  # an explicit ctx over the declared one
                      ("drafts 0", ["--drafts", "0"], {"drafts": {"lookup": False, "head": False}, "draft": "none"})]
+            if caps.get("verify"):  # (the pass width: printed while drafting is on)
+                cells.append(("drafts 1 max 3", ["--drafts", "1", "--draft-max", "3"], {"drafts": {"lookup": True, "head": False}, "draft": "lookup", "draft_max": 3}))
             if routers:
                 cells.append(("router file", ["--routers", routers[0]], {"routers": routers[0], "names": {"rule": "top", "m": 8}}))
             for nm, fl, exp in cells:
                 got = {fe: resolved(fe, prof, spell(fe, fl)) for fe in ("dmeng", "capi", "dmserve")}
                 ncell += 1
                 for fe, g in got.items():
-                    e = sub({**exp, "drafts": {"lookup": False, "head": False}} if fe == "capi" and "drafts" in exp else exp, g)
+                    e = sub(exp, g)
                     if e:
                         bad.append(f"{prof} {nm} {fe}: {'; '.join(e)}")
-                drafting_declared = P["drafts"]["lookup"] or P["drafts"]["head"]  # (the C API reports it off: no drafting there)
+                # priority reads in force: the C API's own rule (dmeng_c.cpp) leaves them off in exact mode with in-token
+                # routers only, where dmeng and dmserve apply defaults.priority_reads (left as it runs until measured)
+                capi_prio = all(isinstance(g, dict) for g in got.values()) and got["capi"].get("mode") == "lossless" and not got["capi"].get("cross_token") \
+                    and (got["capi"].get("priority_reads"), got["dmeng"].get("priority_reads"), got["dmserve"].get("priority_reads")) == (0, 1, 1)
+                n_capi_prio += capi_prio
                 norm = {fe: json.dumps({k: v for k, v in g.items() if k not in FRONT_SPECIFIC and not (k == "cache_gb" and g.get("cache_auto"))
-                                        and not (drafting_declared and k in ("drafts", "draft"))}, sort_keys=True)
+                                        and not (capi_prio and k == "priority_reads")}, sort_keys=True)
                         for fe, g in got.items()}
                 if len(set(norm.values())) > 1:
                     keys = set().union(*[g.keys() for g in got.values()]) - FRONT_SPECIFIC
@@ -501,7 +574,8 @@ if wanted("presets"):
             clamp = lambda x: min(e["max_gb"], max(e["min_gb"], x))
             want_gb = clamp(e["target_gb"] - e["non_cache_gb"]) if e["rule"] == "footprint_target" else \
                 clamp(sr.get("available_gb", -9) - sr.get("resident_gb", 9) - sr.get("router_gb", 9) - e["state_gb"] - e["margin_gb"])
-            errs = sub(e, sr) + sub(e, rs.get("slab"))
+            # the start rule printed is the slab's own (the C API applies no automatic start rule and runs no watcher)
+            errs = sub(e, sr) + sub(e, rs.get("slab")) + sub("slab:" + e["rule"], rs.get("cache_start"))
             # (slab_rule.gb and resolved.cache_gb are printed to 6 digits, dm_stats_json's slab_auto_gb to 3)
             for k, g, tol in (("policy.slab_rule.gb", sr.get("gb"), 1e-4), ("resolved.cache_gb", rs.get("cache_gb"), 1e-4),
                               ("policy.slab_auto_gb", st["policy"].get("slab_auto_gb"), 5e-3)):
@@ -516,23 +590,32 @@ if wanted("presets"):
             if errs:
                 bad.append(f"{prof} capi iOS slab: {'; '.join(errs)}")
             ncell += 1
-        # the C API has no drafting: a profile's declared drafts are left off with a note, an explicit request is refused
-        FD = declared("pd", {"lookup": True, "head": False})
-        j = os.path.join(T, "pr.json")
-        r = run([DMGATE, "--model", FD, "--profile", "mac", "--prompt-ids", ip, "--n", "4", "--threads", "2", "--cache-gb", "auto", "--json", j])
-        st = json.load(open(j))["stats"] if r.returncode == 0 else {}
-        if not (r.returncode == 0 and st["resolved"]["draft"] == "none" and st["policy"]["preset"]["drafts"]["lookup"] is True and "the C API has no drafting" in r.stderr):
-            bad.append(f"capi, the profile declaring lookup: rc {r.returncode}, resolved {st.get('resolved', {}).get('draft')}, {r.stderr[-200:]}")
-        r = run([DMGATE, "--model", M, "--profile", "mac", "--prompt-ids", ip, "--n", "4", "--threads", "2", "--cache-gb", "auto", "--model-options", "run:drafts=1"])
-        if not (r.returncode != 0 and "the C API has no drafting" in r.stderr):
-            bad.append(f"capi --drafts 1 not refused (rc {r.returncode})")
-        ncell += 2
+        # a profile declaring drafting and its pass width (drafts.max): resolved the same in the three front ends (the
+        # family's drafting check runs it; a family without a verify pass refuses it at open, the drafting check)
+        if caps.get("verify"):
+            FD = declared("pd", {"lookup": True, "head": False, "max": 4})
+            j = os.path.join(T, "pr.json")
+            gotd = {}
+            r = run([DMENG, "--model", FD, "--profile", "mac", "--prompt-file", ip, "--n", "4", "--threads", "2", "--json", j])
+            gotd["dmeng"] = json.load(open(j))["resolved"] if r.returncode == 0 else {"error": r.stderr[-200:]}
+            r = run([DMGATE, "--model", FD, "--profile", "mac", "--prompt-ids", ip, "--n", "4", "--threads", "2", "--cache-gb", "auto",
+                     "--model-options", "run:draft-cost=none", "--json", j])
+            gotd["capi"] = json.load(open(j))["stats"]["resolved"] if r.returncode == 0 else {"error": r.stderr[-200:]}
+            r = run([DMSERVE, "--model", FD, "--profile", "mac", "--threads", "2", "--draft-cost", "none", "--disk", "none", "--hotset", "none"], inp="", timeout=120)
+            ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+            gotd["dmserve"] = json.loads(ready[0][6:])["resolved"] if ready else {"error": r.stderr[-200:]}
+            for fe, g in gotd.items():
+                e = sub({"draft": "lookup", "drafts": {"lookup": True, "head": False}, "draft_max": 4}, g)
+                if e:
+                    bad.append(f"the profile declaring lookup, max 4, {fe}: {'; '.join(e)}")
+            ncell += 1
         # the prompt path's values under each profile: the profile's own prefill block over the model-level one, the same
         # in all three front ends (their "prefill_declared")
         for prof in man["profiles"]:
-            want = {**{k: v for k, v in man.get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")},
+            # (want_pf: not `want`, the --only filter every later check reads)
+            want_pf = {**{k: v for k, v in man.get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")},
                     **{k: v for k, v in man["profiles"][prof].get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")}}
-            want = {k: str(int(v)) if isinstance(v, bool) else (f"{v:.17g}" if isinstance(v, (int, float)) else v) for k, v in want.items()}
+            want_pf = {k: str(int(v)) if isinstance(v, bool) else (f"{v:.17g}" if isinstance(v, (int, float)) else v) for k, v in want_pf.items()}
             got = {}
             r = run([DMENG, "--model", M, "--profile", prof, "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
             got["dmeng"] = json.load(open(j)).get("prefill_declared") if r.returncode == 0 else r.stderr[-200:]
@@ -542,21 +625,21 @@ if wanted("presets"):
             ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
             got["dmserve"] = json.loads(ready[0][6:]).get("prefill_declared") if ready else r.stderr[-200:]
             for fe, g in got.items():
-                if g != want:
-                    bad.append(f"{prof} prefill {fe}: {g} != {want}")
+                if g != want_pf:
+                    bad.append(f"{prof} prefill {fe}: {g} != {want_pf}")
             ncell += 1
         # a profile's own mode declaration (profiles.<p>.modes.fast) over the model-level modes.fast, in a temporary
-        # manifest: that profile resolves to its string, every other profile to the folder's own declaration (the 35B's
-        # phone-small: approx:drop:w=0.08) or the model-level one, in all three front ends ("preset": engine_mode,
-        # engine_mode_from; "resolved": mode); an explicit engine string is kept as given
-        OVER = "approx:drop:w=0.15:mass=0.15:late=-1"
+        # manifest: that profile resolves to its string, every other profile to the folder's own declaration if it has one
+        # (none of the published manifests does: the model-level mode, modes.fast), in all three front ends ("preset":
+        # engine_mode, engine_mode_from; "resolved": mode); an explicit engine string is kept as given
+        OVER = "approx:drop:w=0.12"
         op = "phone" if "phone" in man["profiles"] else next(iter(man["profiles"]))
 
         PER_MODE = {"exact": {"rule": "top", "m": 5}, "fast": {"rule": "confidence", "tau": 0.25, "candidates": 12}, "calibration": {"measured": "(a test value)"}}
 
         def over(m2):
             m2["profiles"][op]["modes"] = {"fast": {"definition": "the fast mode with this profile's own leave-out threshold", "engine": OVER,
-                                                    "read_if": {"missing_routing_weight_over": 0.15}, "calibration": {"measured": "(a test value)"}}}
+                                                    "read_if": {"missing_routing_weight_over": 0.12}, "calibration": {"measured": "(a test value)"}}}
             m2["profiles"][op]["names"] = PER_MODE  # a names rule per mode (profiles.<p>.names: {"exact": rule, "fast": rule})
 
         FO = declared("pm", edit=over)
@@ -592,8 +675,9 @@ if wanted("presets"):
                     bad.append(f"{prof} --mode {mode} with {op}'s own fast {fe}: {got_s} != {(s, src, s)}")
             ncell += 1
         # the names rule per mode: a profile's names may be one rule or {"exact": rule, "fast": rule}, taken for the mode in
-        # force; resolved.names in all three front ends, in the folder (its own declarations: the 35B's phone-small) and
-        # in the temporary manifest above (op's per-mode rule), for --mode exact / fast and an engine string
+        # force; resolved.names in all three front ends, in the folder (its own declarations, one rule per profile: the
+        # 35B's phone-small a top 3) and in the temporary manifest above (op's per-mode rule), for --mode exact / fast and
+        # an engine string
         m_over = json.loads(json.dumps(man))
         over(m_over)
 
@@ -630,7 +714,41 @@ if wanted("presets"):
                         if e:
                             bad.append(f"{prof} names --mode {mode} {fe}{' (per-mode test manifest)' if fold == FO else ''}: {'; '.join(e)}")
                     ncell += 1
-        detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])})"
+        # the in-memory weights opened: where phone-small declares the 4-bit file (resident_q4) and the folder holds it, the
+        # C API's resident_bits 0 (the profile decides) opens it and reports it (policy.resident_bits / policy.resident,
+        # resolved.resident_bits / resolved.resident), as dmeng and dmserve do; an explicit resident_bits 8 still wins;
+        # without the file the profile falls back to the 8-bit one, and says so
+        if man["profiles"].get("phone-small", {}).get("resident") == "resident_q4":
+            RQ = declared("rq4")
+            r = run([os.path.join(B, "ms_derive"), "resident", RQ, "--bits", "4"])
+            if r.returncode:
+                bad.append(f"ms_derive resident --bits 4: {r.stderr[-200:]}")
+            for fold, bits, wbits in ((RQ, 0, 4), (RQ, 8, 8), (M, 0, 8)):
+                if os.path.exists(j):
+                    os.remove(j)
+                r = run([DMGATE, "--model", fold, "--profile", "phone-small", "--resident-bits", str(bits), "--prompt-ids", ip, "--n", "2", "--threads", "2",
+                         "--cache-gb", "auto", "--json", j])
+                d = json.load(open(j))["stats"] if r.returncode == 0 else None
+                got = (d["policy"].get("resident_bits"), d["policy"].get("resident"), d["resolved"].get("resident_bits"), d["resolved"].get("resident")) if d else r.stderr[-200:]
+                wid = "resident_q4" if wbits == 4 else "resident_q8"
+                if got != (wbits, wid, wbits, wid):
+                    bad.append(f"phone-small resident_bits {bits}{' (no 4-bit file)' if fold == M else ''} capi: {got} != {(wbits, wid, wbits, wid)}")
+                ncell += 1
+            for fe in ("dmeng", "dmserve"):  # the profile's file, opened and reported the same way
+                if os.path.exists(j):
+                    os.remove(j)
+                if fe == "dmeng":
+                    r = run([DMENG, "--model", RQ, "--profile", "phone-small", "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
+                    g = json.load(open(j))["resolved"] if r.returncode == 0 else None
+                else:
+                    r = run([DMSERVE, "--model", RQ, "--profile", "phone-small", "--threads", "2"], inp="", timeout=120)
+                    ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+                    g = json.loads(ready[0][6:])["resolved"] if ready else None
+                got = (g.get("resident_bits"), g.get("resident")) if g else r.stderr[-200:]
+                if got != (4, "resident_q4"):
+                    bad.append(f"phone-small resident {fe}: {got} != (4, 'resident_q4')")
+            ncell += 1
+        detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])}); priority reads off in the C API's exact mode only (in-token routers): {n_capi_prio} cells"
         verdict("presets", "FAIL" if bad or cross else "PASS", detail + ("" if not bad else " | precedence: " + " || ".join(bad[:6]))
                 + ("" if not cross else " | front ends differ: " + " || ".join(cross[:6])))
     except Exception as e:

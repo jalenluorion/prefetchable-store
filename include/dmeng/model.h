@@ -27,6 +27,9 @@ namespace dm {
 struct LoadOpts {
   std::string dir;       // the model folder (store/, resident.safetensors, ...)
   std::string resident;  // the engine's 8-bit resident file (DMENGRES1); empty: <dir>/dmeng_resident.bin
+  // the in-memory weights opened, as resolve_model found them: resident_q8 | resident_q4 (a derived file of that id, by the
+  // engine's derived naming <id>.<format>.<hash>.bin; with no file given, resident_q8) or "" (another file given)
+  std::string resident_id;
   Mem res_mem = Mem::MLOCK;
   // from the manifest (moved-store.json): the configuration the model reads, in place of the resident file's cfg lines
   std::vector<std::pair<std::string, std::string>> cfg;

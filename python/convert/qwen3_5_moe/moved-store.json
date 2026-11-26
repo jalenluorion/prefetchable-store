@@ -1046,63 +1046,124 @@
    "engine": "lossless"
   },
   "fast": {
-   "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
-   "engine": "approx:drop",
+   "definition": "The model's own router still picks. A picked expert that is not in memory is read and waited for if its routing weight is over 0.15, and waited for if its read is already in flight; otherwise it is left out (no substitute, no renormalisation). No cap on the weight left out per step. Router names are on.",
+   "engine": "approx:drop:w=0.15",
    "wait_if": {
-    "routing_weight_over": 0.1,
+    "routing_weight_over": 0.15,
     "read_in_flight": true
    },
    "otherwise": "left out",
    "substitute": false,
    "renormalise": false,
    "calibration": {
-    "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
-    "rows": [
-     {
-      "setting": "weight 0.1, wait for reads in flight (this)",
-      "tok_s": [
-       13.06,
-       6.38
-      ],
-      "mb_per_token": [
-       92.0,
-       91.8
-      ],
-      "top1_agree": [
-       0.982,
-       0.983
-      ],
-      "nll_delta": [
-       0.0021,
-       0.0012
-      ]
-     },
-     {
-      "setting": "leave-out rule 0.13 (fast-eps)",
-      "tok_s": [
-       14.61,
-       15.11
-      ],
-      "mb_per_token": [
-       92.7,
-       92.8
-      ],
-      "top1_agree": [
-       0.982,
-       0.978
-      ],
-      "nll_delta": [
-       0.0021,
-       0.0034
-      ]
-     }
-    ],
-    "reason": "kept: the one leave-out rule (fast-eps) measured worse on the iPhone (phone-small, where fast mode is the default: 3.57 against 4.1 tok/s); on the Mac it ran faster (14.9 against 13.1 tok/s in the clean run; the 6.38 run had 400% other CPU) at agreement 0.980 against 0.982"
+    "phone": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights); agreement: each arm against exact on the device over the same 600 teacher-forced positions; speed: one launch on a cooled phone (thermal fair at the start, serious from the second arm on), the steady 200-token prompt, arms in the order 0.10, 0.15, 0.20, 0.10, 0.20, 0.15",
+     "rows": [
+      {
+       "setting": "w 0.10, waiting for reads in flight (the rule before)",
+       "top1_agree": "591/600 = 0.985",
+       "tok_s": [
+        5.86,
+        5.83
+       ]
+      },
+      {
+       "setting": "w 0.13",
+       "top1_agree": "585/600 = 0.975"
+      },
+      {
+       "setting": "w 0.15, waiting for reads in flight (this)",
+       "top1_agree": "581/600 = 0.968",
+       "tok_s": [
+        7.39,
+        7.88
+       ]
+      },
+      {
+       "setting": "w 0.20",
+       "top1_agree": "579/600 = 0.965",
+       "tok_s": [
+        10.86,
+        9.95
+       ]
+      }
+     ]
+    },
+    "phone_earlier": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), the same launch, 600 teacher-forced positions against exact on the device",
+     "rows": [
+      {
+       "setting": "weight 0.1, wait for reads in flight (the rule then)",
+       "tok_s": 4.75,
+       "mb_per_token": 112,
+       "top1_agree": "589/600 = 0.982"
+      },
+      {
+       "setting": "weight 0.08, wait for reads in flight (approx:drop:w=0.08, the phone-small override declared before)",
+       "tok_s": "3.95-3.98",
+       "mb_per_token": 159,
+       "top1_agree": "590/600 = 0.983"
+      }
+     ],
+     "reason": "no profile overrides this rule: on the 4-bit in-memory weights 0.08 read 159 against 112 MB per token and ran 3.95-3.98 against 4.75 tok/s for one more agreeing position in 600",
+     "note": "the earlier comparison (it removed the phone-small override w 0.08; the rule then was w 0.10)"
+    },
+    "mac": {
+     "measured": "base M4, 2,200 teacher-forced positions at 2.8 and 6.6 GB caches",
+     "rows": [
+      {
+       "setting": "w 0.10, 0.15 and others",
+       "status": "to be added (being measured)"
+      }
+     ]
+    },
+    "mac_earlier": {
+     "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
+     "rows": [
+      {
+       "setting": "weight 0.1, wait for reads in flight (this)",
+       "tok_s": [
+        13.06,
+        6.38
+       ],
+       "mb_per_token": [
+        92.0,
+        91.8
+       ],
+       "top1_agree": [
+        0.982,
+        0.983
+       ],
+       "nll_delta": [
+        0.0021,
+        0.0012
+       ]
+      },
+      {
+       "setting": "leave-out rule 0.13: w = mass = 0.13, a pick in flight not waited for (formerly --mode fast-eps, removed)",
+       "tok_s": [
+        14.61,
+        15.11
+       ],
+       "mb_per_token": [
+        92.7,
+        92.8
+       ],
+       "top1_agree": [
+        0.982,
+        0.978
+       ],
+       "nll_delta": [
+        0.0021,
+        0.0034
+       ]
+      }
+     ],
+     "reason": "the weight threshold kept over the capped leave-out rule: that rule measured worse on the iPhone (phone-small, 3.57 against 4.1 tok/s); on the Mac it ran faster (14.9 against 13.1 tok/s in the clean run; the 6.38 run had 400% other CPU) at agreement 0.980 against 0.982; one leave-out method for this model: a weight threshold with reads in flight waited for",
+     "note": "the earlier Mac comparison (w 0.10 against the capped rule 0.13), kept as history"
+    },
+    "reason": "the owner's choice (2026-11-26): the same form as Inkling's, a weight threshold of 0.15 with a pick whose read is in flight always waited for and no cap, on every profile; on the iPhone 7.39-7.88 against 5.83-5.86 tok/s at 0.10, top choice agreement 0.968 against 0.985"
    }
-  },
-  "fast-eps": {
-   "definition": "Fast mode under the one leave-out rule (Flash-Next's and Inkling's fast mode): the picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation); a light pick whose read is in flight is not waited for. Selectable (--mode fast-eps), not this model's fast mode: measured worse on the iPhone (3.57 against 4.1 tok/s); on the Mac faster (see fast.calibration).",
-   "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
   }
  },
  "profiles": {
@@ -1409,7 +1470,7 @@
        }
       }
      ],
-     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value until measured on the iPhone"
+     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value, measured on the iPhone: profiles.phone-small.prefill.calibration"
     }
    },
    "run_ahead": {
@@ -1707,16 +1768,6 @@
   "phone-small": {
    "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
    "mode": "fast",
-   "modes": {
-    "fast": {
-     "definition": "the model-level fast mode with the leave-out threshold of this profile's calibrated 4-bit in-memory weights: a picked expert not in memory is waited for if its routing weight is over 0.08 or its read is in flight, otherwise left out",
-     "engine": "approx:drop:w=0.08",
-     "calibration": {
-      "measured": "top choice equal to the exact 8-bit engine, prose / agent text, the calibrated 4-bit in-memory weights (engine session, Mac): 0.900 / 0.885 at threshold 0.08, 0.888 / 0.878 at 0.09, 0.860 / 0.873 at 0.10 (the model-level value); exact 0.913 / 0.884; on the iPhone 15 Plus (phone-small, 1.42 GB slab, 400 tokens of prose) 3.52 tok/s at 0.08 (results/ios/p2/P2.md)",
-      "reason": "0.10 gives up 0.04 of prose agreement on these weights; 0.08 keeps fast within 0.013 of exact; the 8-bit profiles keep the model-level threshold"
-     }
-    }
-   },
    "drafts": {
     "lookup": false,
     "head": false
@@ -1725,18 +1776,12 @@
    "precision": "4-bit",
    "precision_detail": "4-bit affine, groups of 64, calibrated",
    "names": {
-    "exact": {
-     "rule": "confidence",
-     "tau": 0.5,
-     "candidates": 16
-    },
-    "fast": {
-     "rule": "top",
-     "m": 3
-    },
+    "rule": "top",
+    "m": 3,
     "calibration": {
-     "measured": "iPhone 15 Plus, phone-small, fast at threshold 0.08 with linear_k2, 8 readers, slab 1.485 GB, 200 tokens each, one run per cell, judged by counters (results/ios/p2/P2.md, names at threshold 0.08, 2026-11-23): plain top 3 4.33 tok/s, wait / compute 157 / 74 ms, 153 MB per token; the confidence rule (tau 0.5 over 16) 3.94 tok/s, 183 / 70 ms, 167 MB; plain top 2 4.06 tok/s; no names 3.92 tok/s",
-     "reason": "fast: a plain top 3, the lowest wait; exact: the confidence rule, as every profile; the app set this pair before it was declared here; the confidence rule in fast is to be measured again on the phone for the 35B once its restore is in (staged 2026-11-26)"
+     "measured": "iPhone 15 Plus, phone-small, cooled start, each arm twice in mixed order in one launch. Fast at w 0.15: top 3 8.99 and 8.62 tok/s, 77.6 MB per token (2.7 MB named and unused); the confidence rule 0.5 of 16 7.89 and 6.86 tok/s, 91 MB (5.7 unused); confidence 0.7 of 16 7.25 and 7.18 tok/s, 101.5 MB (5.3 unused). Exact, run-ahead on, 200 tokens per arm, exact ids identical in all six arms: top 3 3.35 and 3.00 tok/s, 234 MB per token; confidence 0.5 of 16 3.14 and 3.28 tok/s, 233 MB; top 5 2.85 and 3.11 tok/s, 234 MB",
+     "reason": "one rule for both modes: top 3 is the fastest in fast mode; in exact every missing pick is read anyway, so the rule only moves bytes between named and read on the spot (a tie), and the simpler single value is taken",
+     "earlier": "iPhone 15 Plus, phone-small, fast at threshold 0.08 with linear_k2, 8 readers, slab 1.485 GB, 200 tokens each, one run per cell, judged by counters (results/ios/p2/P2.md, names at threshold 0.08, 2026-11-23): plain top 3 4.33 tok/s, wait / compute 157 / 74 ms, 153 MB per token; the confidence rule (tau 0.5 over 16) 3.94 tok/s, 183 / 70 ms, 167 MB; plain top 2 4.06 tok/s; no names 3.92 tok/s"
     }
    },
    "cache": "slab",
@@ -1998,7 +2043,7 @@
     }
    ],
    "bytes": 20352447020,
-   "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast (threshold 0.08) 0.891 / 0.881",
+   "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast at the threshold then declared (0.08) 0.891 / 0.881; not measured against this reference at the rule now in force (w 0.15; against exact on the device: modes.fast.calibration.phone)",
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
    "prefill_gpu": {
@@ -2007,6 +2052,29 @@
     "calibration": {
      "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
      "reason": "the GPU split pays on this phone for this model"
+    }
+   },
+   "prefill": {
+    "apart": 1,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), 2026-11-26: decode after a ~460-token prompt, the prompt kept apart from the decode's cache statistics (apart 1) or not (0)",
+     "rows": [
+      {
+       "setting": "apart 1 (this, the model-level value)",
+       "tok_s": 3.91,
+       "mb_per_token": 174,
+       "cache_kept_after_prompt_gb": 1.37,
+       "memory_warnings": 0
+      },
+      {
+       "setting": "apart 0",
+       "tok_s": 3.43,
+       "mb_per_token": 170,
+       "cache_kept_after_prompt_gb": 1.42,
+       "memory_warnings": 0
+      }
+     ],
+     "reason": "kept apart on the phone: 3.91 against 3.43 tok/s for 4 MB more read per token, no memory warning either way (on the Mac it is off: profiles.mac.prefill.calibration); measured on phone-small, carried to phone"
     }
    },
    "ctx": {

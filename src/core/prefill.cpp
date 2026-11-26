@@ -161,7 +161,7 @@ bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std
                   // short prompt under fast mode's leave-out rule (PrefillOpts::drop_upto)
     Approx& a;
     bool on;
-    NsOff(Approx& x, bool keep) : a(x), on(x.on) { a.on = keep && x.on && x.drop; }
+    NsOff(Approx& x, bool keep) : a(x), on(x.on) { a.on = keep && x.on; }
     ~NsOff() { a.on = on; }
   } ns_off(core.ns, n <= o.drop_upto);
   struct InPrefill {  // the hooks' previous-token state follows the prompt (Core::chunk_prefill)

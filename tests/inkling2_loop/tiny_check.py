@@ -68,18 +68,26 @@ def pr_logits(m, ids):
 
 
 def new_flags(flags):
-    """the merged binary's names: --mx-frac F -> --pool-share 1-F,F; --ns 1 -> --mode approx; --ns-late -> --late; ..."""
-    out, f, i = [], list(flags), 0
+    """the merged binary's names: --mx-frac F -> --pool-share 1-F,F; --ns 1 [--ns-late none] [--ns-read-w W] [--ns-read-mass M]
+    -> --mode approx:drop:w=W[:mass=M][:late=-1] (the leave-out rule; w 2 unless given: every missing pick left out)"""
+    out, f, i, ns = [], list(flags), 0, None
     while i < len(f):
         k = f[i]
         if k == "--mx-frac":
             x = float(f[i + 1]); out += ["--pool-share", f"{1 - x},{x}"]; i += 2
         elif k == "--ns":
-            out += ["--mode", "approx", "--late", "always", "--read-w", "2", "--read-mass", "2", "--bg", "1", "--rd-prio", "1", "--cancel", "1"] if f[i + 1] != "0" else []; i += 2
-        elif k in ("--ns-late", "--ns-read-w", "--ns-read-mass", "--ns-bg"):
-            out += [{"--ns-late": "--late", "--ns-read-w": "--read-w", "--ns-read-mass": "--read-mass", "--ns-bg": "--bg"}[k], f[i + 1]]; i += 2
+            ns = {"w": "2"} if f[i + 1] != "0" else None; i += 2
+        elif k in ("--ns-late", "--ns-read-w", "--ns-read-mass"):
+            v = f[i + 1]
+            if k == "--ns-late" and v not in ("always", "none"):
+                raise SystemExit(f"--ns-late {v}: always or none (a pick in flight waited for or not)")
+            if ns is not None and not (k == "--ns-late" and v == "always"):
+                ns[{"--ns-late": "late", "--ns-read-w": "w", "--ns-read-mass": "mass"}[k]] = "-1" if v == "none" else v
+            i += 2
         else:
             out.append(k); i += 1
+    if ns is not None:
+        out += ["--mode", "approx:drop:" + ":".join(f"{k}={v}" for k, v in ns.items()), "--rd-prio", "1", "--cancel", "1"]
     return out
 
 
@@ -151,14 +159,15 @@ for nm, fl in (("40/12 slots", FEW), ("16/10 slots, no loop hold", FEWNH)):
 for k in ("1", "2", "4", "token"):
     g, info = dmeng(ids40, "--resident", RES8, *FEW, "--prefetch", "oracle", "--oracle", rec, "--lead", k, name="d2")
     compare(f"D oracle lead {k}, 40/12 slots (reads {info['reads']}) vs all held", g, base, 0.0)
-for nsf in (["--ns", "1", "--ns-late", "always"], ["--ns", "1", "--ns-late", "none", "--ns-read-w", "0.1"], ["--ns", "1", "--ns-late", "0", "--ns-read-mass", "0.1"]):
+for nsf in (["--ns", "1", "--ns-late", "always"], ["--ns", "1", "--ns-late", "none", "--ns-read-w", "0.1"], ["--ns", "1", "--ns-read-mass", "0.1"]):
     g, _ = dmeng(ids40, "--resident", RES8, *ALL, *nsf, name="dns")
-    # with every pick's weight > 0.1 (top-4 of 16) the read-w / mass rules guarantee every pick: nothing is replaced and the
-    # result must equal lossless bit for bit; "late always" replaces never-named misses even before the cache fills (info)
+    # with every pick's weight > 0.1 (top-4 of 16) the read-w / mass rules guarantee every pick: nothing is left out and the
+    # result must equal lossless bit for bit; w 2 ("late always" alone) leaves out never-named misses even before the cache
+    # fills (info)
     exact = "always" not in nsf
-    compare(f"D approximate mode {' '.join(nsf[2:])}, budget for every expert" + ("" if exact else " (info: early misses replaced)"), g, base, 0.0 if exact else None)
+    compare(f"D approximate mode {' '.join(nsf[2:])}, budget for every expert" + ("" if exact else " (info: early misses left out)"), g, base, 0.0 if exact else None)
     g, info = dmeng(ids40, "--resident", RES8, *FEW, *nsf, "--prefetch", "oracle", "--oracle", rec, "--lead", "1", name="dns2")
-    compare(f"E approximate mode {' '.join(nsf[2:])}, 40/12 slots, oracle lead 1 (info: replacements happen)", g, base, None)
+    compare(f"E approximate mode {' '.join(nsf[2:])}, 40/12 slots, oracle lead 1 (info: picks are left out)", g, base, None)
 g, _ = dmeng(ids40, "--resident", RES8, *ALL, "--threads", "5", name="d3")
 compare("D 5 compute threads vs 2", g, base, 0.0)
 

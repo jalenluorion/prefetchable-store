@@ -1155,7 +1155,33 @@
       },
       {
        "setting": "w 0.15, waiting for reads in flight (this)",
-       "status": "to be added (being measured)"
+       "status": "measured over both texts: modes.fast.calibration.mac_two_texts"
+      }
+     ]
+    },
+    "mac_two_texts": {
+     "measured": "base M4, phone profile, 4.0 GB cache, the same 2,200 teacher-forced positions (1,100 code + 1,100 prose), the declared form with reads in flight waited for",
+     "rows": [
+      {
+       "setting": "w 0.10",
+       "top1_agree": 0.983,
+       "positions_differing": 38,
+       "nll_delta": 0.0058,
+       "mb_per_token": 253
+      },
+      {
+       "setting": "w 0.13",
+       "top1_agree": 0.976,
+       "positions_differing": 52,
+       "nll_delta": 0.0075,
+       "mb_per_token": 234
+      },
+      {
+       "setting": "w 0.15 (this)",
+       "top1_agree": 0.978,
+       "positions_differing": 48,
+       "nll_delta": 0.0072,
+       "mb_per_token": 228
       }
      ]
     },
@@ -1455,7 +1481,7 @@
        }
       }
      ],
-     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value until measured on the iPhone"
+     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value, measured on the iPhone: profiles.phone-small.prefill.calibration"
     }
    },
    "run_ahead": {
@@ -1929,6 +1955,25 @@
      "reason": "off by measurement: 20% slower with the split (the CPU waits on the GPU's NVFP4 expert share); the same as the built-in CPU only, declared to keep the measurement beside it"
     }
    },
+   "prefill": {
+    "apart": 1,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), 2026-11-26: a long chat, the prompt kept apart from the decode's cache statistics (apart 1) or not (0)",
+     "rows": [
+      {
+       "setting": "apart 1 (this, the model-level value)",
+       "tok_s": "1.5-1.8",
+       "memory_warning": true
+      },
+      {
+       "setting": "apart 0",
+       "tok_s": "1.5-1.8",
+       "memory_warning": true
+      }
+     ],
+     "reason": "no difference measured on the phone, so the model-level value stays (on the Mac it is off: profiles.mac.prefill.calibration); measured on phone-small, carried to phone"
+    }
+   },
    "ctx": {
     "positions": 4096,
     "calibration": {
@@ -2082,20 +2127,8 @@
   "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, else (a span of one sub-chunk) its released router's picks on this application's MoE inputs (short_names, as the 35B and Flash-Next), the last span joined under a quarter span, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next; the experts in waves as they land (a wave on the GPU from 128 rows), packed kernels from one user where the format has them (NVFP4 keeps its own threshold; MXFP8 has none), down projections in 64-row jobs, as the 35B; the prompt kept apart from the decode's cache statistics (apart, the hazard policy only: placement), as Flash-Next; fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (drop_upto 64, the value Flash-Next declares, the old runner's threshold), longer prompts lossless (iPhone 15 Plus, phone-small, fast, against the lossless pass: a new chat's first token 15.9 -> 11.8 s, a follow-up 17.9 -> 6.8 s, 10.8 / 9.3 -> 6.0 / 4.8 GB read for 24 / 21 positions)"
  },
  "drafting": {
-  "cost_prior": {
-   "pass_ms_over_step_ms": [
-    0,
-    1.0,
-    1.64,
-    2.07,
-    2.5,
-    2.95,
-    3.41,
-    3.86,
-    4.32
-   ],
-   "measured": "base M4, dmeng step costs of passes of 1-8 positions (the drafting controller's prior; a draft_cost.txt measured by the engine replaces it)"
-  },
+  "cost_prior": null,
+  "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it. The prior declared before (0, 1.0, 1.64, 2.07, 2.5, 2.95, 3.41, 3.86, 4.32, 'base M4, dmeng step costs') is the 35B's number for number; the published engine's code held the same array for Inkling (src/core/draft.cpp, DraftCtl::cost_prior, `ink` beside `q36`), and no Inkling measurement of pass costs is recorded: unmeasured",
   "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: the release's draft head (mtp.safetensors, the mac profile's optional part, with resident.safetensors)), resolved once for dmeng, dmserve and the C API (which has no drafting: a declared default stays off there, an explicit request is refused); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile until measured on the real model"
  }
 }

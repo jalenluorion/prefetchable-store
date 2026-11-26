@@ -123,7 +123,7 @@ int Qwen35::head_argmax(const float* hn, float* conf) {
 
 bool Qwen35::verify(State& s0, const int32_t* ids, int n, Want want) {
   S = (QState*)&s0;
-  if (n < 1 || n > TMAX || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n) || S->pos + n > S->ctx) return false;
+  if (n < 1 || n > TMAX || (core->force && S->pos < core->force_n) || S->pos + n > S->ctx) return false;
   const int H = c.H, C = c.conv_dim(), ZD = c.NVH * c.DV, QD = c.NQ * c.HD, KD = c.NKV * c.HD, G = C + ZD + 2 * c.NVH;
   const int FP = 2 * QD + 2 * KD;
   Pool& pool = *core->pool;

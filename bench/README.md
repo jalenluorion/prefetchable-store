@@ -36,7 +36,7 @@ Useful work is `work + main_serial`. Spins are left out.
 
 ```
 python bench/run.py --model DIR --out DIR [--cells cache,routers,policy,approx] [--gb 3.3,5] [--prompts pitt,code]
-                    [--routers F.dmr] [--router-args "--m 12"] [--evict-policy F.json] [--hazard] [--approx bounded]
+                    [--routers F.dmr] [--router-args "--m 12"] [--evict-policy F.json] [--hazard] [--approx drop]
                     [--cell NAME=FLAGS] [--reps 2] [--bin build/dmeng] [--count-bin build-counters/dmeng | --no-counts]
                     [--guard GUARD | $DM_GUARD] [--resident F] [--extra "..."] [--dry-run] [--report [--symbolize]]
 ```
@@ -66,7 +66,7 @@ python bench/run.py --model DIR --out DIR [--cells cache,routers,policy,approx] 
 | `cache` | the cache alone (`--prefetch none`) | |
 | `routers` | `--prefetch router --routers F` + `--router-args` | `--routers` |
 | `policy` | the routers + `--evict-policy F` and / or `--evict hazard` + `--policy-args` | `--evict-policy` (with `--routers`) or `--hazard` |
-| `approx` | the routers + `--mode approx:PRESET` (`--approx`, default `bounded`) | `--routers` |
+| `approx` | the routers + `--mode approx:RULE` (`--approx`, default `drop`; `drop:w=0.12` for another weight) | `--routers` |
 | `--cell NAME=FLAGS` | any dmeng flags; `{routers}` expands to the routers' flags | |
 
 With no `--cells`, the campaign runs every standard cell whose inputs are given, then the `--cell` ones. Each cell runs
@@ -109,7 +109,7 @@ The wall-clock columns follow. A wall-clock figure is marked `!` when the others
 - the timed run's `hit_rate`, `late_rate`, `miss_rate` and `hit_rate_looped` / `hit_rate_other`;
 - from `read_queue`: `misses_per_token`, `late_per_token`, `wait_miss_ms_per_token`; from `drive`: `gb_s_while_busy` (the one drive rate: reader bytes / wall time with a read in flight);
 - the routers' `top_k_in_named8/12/16` and `router_ms_per_token`;
-- the approx cells' `weight_replaced`, `steps_with_a_replacement`, `weight_read_now` and `bg_per_token`;
+- the approx cells' `weight_replaced`, `steps_with_a_replacement` and `weight_read_now`;
 - from `draft`, when it is used: `tokens_per_step`, `accepted` and `offered`;
 - `policy_ms_per_token`, the swap growth, and `time -l`'s whole-process `proc_ins` / `proc_cyc`;
 - for the counting run: `work_*`, `main_serial_*`, `spin_*`, `pool_runs`, `useful_*_per_token`, `cnt_reclaims` and

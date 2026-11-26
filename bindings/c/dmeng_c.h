@@ -62,10 +62,14 @@ typedef struct dm_open_opts {
   int qos;                 /* DM_QOS_* of the compute workers and of the caller during dm_sync / dm_step */
   int core_class;          /* DM_CORES_*: DM_CORES_PERF caps threads at the performance cores (sysctl hw.perflevel0) */
   int readers;             /* expert reader threads; 0 = 4 */
-  int64_t cache_bytes;     /* expert cache budget in bytes; 0 = 3.3e9 on macOS; on iOS sized at open from
-                              os_proc_available_memory(): available - resident file - router file - 0.3 GB (state,
-                              scratch) - 0.9 GB (margin), clamped to [0.6, 8.0] GB (P2: at 4.27 GB available a 1.0 GB
-                              slab drew no warning, 1.3 GB did) */
+  int64_t cache_bytes;     /* expert cache budget in bytes; 0 = the profile's: on macOS a profile's automatic cache
+                              (mac: cache auto, and a phone profile's slab) with DM_MEM_MLOCK is sized by the Mac's rule
+                              (profiles.mac.cache_start and the ceiling, as dmeng and dmserve), else 3.3e9; on iOS (not DM_MEM_FILE) a slab
+                              sized once at open by the profile's cache_slab rule (presets.h SlabRule): "available" =
+                              os_proc_available_memory() - resident file - router file - 0.3 GB (state, scratch) - 0.9 GB
+                              (margin) (P2: at 4.27 GB available a 1.0 GB slab drew no warning, 1.3 GB did), or
+                              "footprint_target" = the device class's footprint target - the model's non-cache footprint
+                              (phone-small: 2.96 GB less 1.54 / 1.26 GB for the 35B / Inkling); clamped to [0.6, 8.0] GB */
   int memory_mode;         /* DM_MEM_* of the expert cache; default DM_MEM_MLOCK on both (iOS since P2: the FILE tier
                               read at 0.56 GB/s against 0.74 for a locked slab, and the OS kept 0.85 GB of it) */
   int res_memory_mode;     /* resident weights: DM_MEM_MLOCK, DM_MEM_PLAIN, or DM_MEM_FILE (mapped read-only from the
@@ -112,12 +116,15 @@ typedef struct dm_open_opts {
                               router_m whatever the profile) */
   int router_cand;         /* candidates of the confidence rule; 0 = 16 */
   int split;               /* pieces per record read; 0 = 1 */
-  const char* mode;        /* NULL = the profile's; "exact" (= "lossless") or "fast" (= "approx:drop", approximate: tokens
-                              can differ from the exact ones); the advanced "approx[:PRESET]" ("approx:bounded", ...) */
+  const char* mode;        /* NULL = the profile's; "exact" (= "lossless") or "fast" (the model's declared leave-out rule,
+                              approx:drop[:w=W]; approximate: tokens can differ from the exact ones); or that rule as an
+                              engine string, "approx:drop:w=0.12" */
   int resident_bits;       /* 0 = the profile's (8-bit; phone-small 35B: 4-bit when the file is there); 8 = the 8-bit
                               resident (resident_q8); 4 = the 4-bit variant resident_q4
                               (<derived_dir>/resident_q4.dmres1.<12 hex of resident.safetensors' sha256>.bin, made by
-                              `ms_derive resident DIR --bits 4`; for memory-limited devices: tokens differ from 8-bit) */
+                              `ms_derive resident DIR --bits 4`; for memory-limited devices: tokens differ from 8-bit).
+                              The file opened is reported in dm_stats_json: policy.resident_bits / policy.resident and
+                              resolved.resident_bits / resolved.resident (8 | 4; 0 and "" for another file given) */
   int prefill_threads;     /* compute threads during dm_sync (the prompt's prefill); 0 = threads (P2: 6 measured slower
                               than 4 on the 15 Plus for a 472-token prompt with the 4-bit resident) */
   int disk_min;            /* prefix cache: write a disk copy for a marked prefix of at least this many positions;
@@ -130,15 +137,18 @@ typedef struct dm_open_opts {
                               NULL = none (iOS: prefill_release=1, the batched prefill's scratch freed after each prompt) */
   /* Batched prefill split with the GPU (Metal; exact: the GPU's rows are the CPU kernels' bits, so tokens do not
    * change). The GPU computes this share of each matrix's rows while the CPU computes the rest, for prefill sub-chunks
-   * of at least prefill_gpu_min positions. 0 = the profile's share (mac: 0.4 and 0.4 for both models;
-   * every other profile: CPU only), < 0 = CPU only. Builds without Metal refuse > 0 (the profile's is 0 there). */
+   * of at least prefill_gpu_min positions. 0 = the profile's share (profiles.<p>.prefill_gpu: mac 0.4 and 0.4 for the
+   * three models; phone and phone-small 0.65 and 0.65 for the 35B, CPU only for Inkling), < 0 = CPU only. Builds without
+   * Metal refuse > 0 (the profile's is 0 there). */
   double prefill_gpu_frac;    /* attention projections (8- or 4-bit resident) */
   double prefill_gpu_experts; /* experts' products: routed experts in a locked / plain slab, and the shared expert */
-  int prefill_gpu_min;        /* 0 = 256 */
+  int prefill_gpu_min;        /* 0 = the model's declared prefill.gpu_min (64 in every published manifest; 256 built in) */
   int prefill_gpu_int_kernel; /* 0 = the matrix-unit kernel (default), 1 = the integer kernel (the same bits; slower) */
-  int prefill_gpu_min_wave;   /* a wave of landed experts uses the GPU from this many (position, expert) pairs; 0 = 128 */
-  int run_ahead;              /* run-ahead while a step waits on reads: the picks it names; 0 = the profile's (mac: 8;
-                                 phones: off), < 0 = off */
+  int prefill_gpu_min_wave;   /* a wave of landed experts uses the GPU from this many (position, expert) pairs; 0 = the
+                                 model's declared prefill.gpu_min_wave (128 in every published manifest) */
+  int run_ahead;              /* run-ahead while a step waits on reads: the picks it names; 0 = the profile's (the 35B and
+                                 Inkling: 8 on every profile, on phone and phone-small in exact mode only; Flash-Next's
+                                 mac: 10), < 0 = off */
   int run_ahead_depth;        /* its depth in layers; 0 = the profile's (1) */
   double run_ahead_budget;    /* its speculative ms per token at most this x the running-average compute per token;
                                  0 = the profile's (phones, exact: 0.2), < 0 = no limit */
@@ -233,6 +243,39 @@ void dm_sampler_default(dm_sampler* s); /* greedy */
 int32_t dm_sample(const float* logits, int vocab, const dm_sampler* s, const int32_t* history, int n_history);
 int32_t dm_argmax(const float* logits, int vocab);
 
+/* Drafting (docs/ADVANCED.md, "Drafting"): one pass verifies several tokens and keeps exactly the tokens plain decoding
+ * would produce; the controller, its sources and its statistics are dmeng's and dmserve's (include/dmeng/draft.h).
+ * Whether it is on is resolved at dm_open as in dmeng and dmserve: model_options "run:draft=MODE" (none | lookup | head |
+ * both | fixed; "run:drafts=1" = lookup, "run:drafts=0" = none) > the profile's declared "drafts" {"lookup", "head"} >
+ * off. lookup: copy drafts from text already in the sequence (the prompt, the reply so far, earlier replies of the
+ * session) plus the fragments of dm_set_draft_fragments; head: the model's own draft head (Inkling's mtp.safetensors);
+ * both: the two. "run:draft-max=N" (1..7, default the profile's drafts.max, else 7): drafts per pass at most.
+ * "run:draft-cost=FILE|none": the pass costs measured (read at open, written at the end of each generation; default
+ * under a profile <derived_dir>/draft_cost.txt, as dmserve). A family without a multi-position verify, or a head the
+ * folder does not have, fails dm_open (dm_last_error says why), the declared default too. With drafting off nothing of
+ * it is allocated and every call behaves as before. On iOS the slab sizing rule gives drafting's memory (a verify
+ * pass's buffers, the head's weights) out of the slab (dm_stats_json policy.slab_rule.draft_reserve_gb).
+ *
+ * dm_step_n: one decode step that may produce several tokens. Feeds `id` (the token just chosen, as dm_step) and writes
+ * the next tokens to out[0 .. *n_out), 1 <= *n_out <= max_out, each exactly the token the app's own loop
+ * would choose there:
+ *   out[0] = dm_sample(logits after id, s, history, n_history)
+ *   out[i] = dm_sample(logits after out[i-1], s, history + out[0 .. i), n_history + i)
+ * (history: this reply's tokens so far, id included, as the app passes dm_sample; s NULL = greedy: dm_argmax, as is a
+ * sampler with temp <= 0 and no penalties; with penalties dm_sample applies them before its argmax). The state then holds
+ * every position up to out[*n_out - 2]: the next call feeds out[*n_out - 1]. Without drafting it is dm_step followed by
+ * dm_sample (*n_out = 1). Stops after a token in stop[0 .. n_stop) (it is the last one written). max_out bounds the
+ * tokens of this call (out holds max_out; 8 is the most a call produces): pass 1 for a step whose next token the app
+ * forces, or the number of tokens up to a token it will force. logits (NULL = not wanted): the logits out[*n_out - 1]
+ * was drawn from. DM_ECANCELLED (nothing computed) if a cancel is pending. dm_counters' decode_steps and step_ns count
+ * the positions fed and the time inside the call. */
+int dm_step_n(dm_engine* e, int32_t id, const dm_sampler* s, const int32_t* history, int n_history, const int32_t* stop,
+              int n_stop, int max_out, int32_t* out, int* n_out, float* logits);
+/* The text lookup drafts copy from besides the sequence itself: n fragments of token ids, fragment i = lens[i] ids,
+ * concatenated in ids (e.g. the tool-call format of a request's tools, dmserve's skeleton source). Kept for the following
+ * dm_step_n calls until replaced; n = 0 clears them. Without drafting they are kept and not used. */
+int dm_set_draft_fragments(dm_engine* e, const int32_t* ids, const int32_t* lens, int n);
+
 /* Change the expert cache budget at run time (any thread). Applied at once if the engine is idle, else at the next
  * token or prefill-layer boundary. Lower: entries are dropped and their memory given back (DM_MEM_FILE: bookkeeping
  * only, the lowest-value entries first); higher: up to the budget given at dm_open. With file_adapt it is also the new
@@ -271,7 +314,10 @@ int dm_spare_memory_pause(dm_engine* e);
 int64_t dm_store_resident_bytes(dm_engine* e);
 
 /* JSON of what ran since the last call (decode ms per stage, hit rate, MB read, prefix-cache counters, memory: process
- * footprint, the policy's held GB and, in DM_MEM_FILE, the store pages resident in the file cache by mincore). The
+ * footprint, the policy's held GB and, in DM_MEM_FILE, the store pages resident in the file cache by mincore; with
+ * drafting, "draft": dmeng's counters (offered, declined, drafted, accepted, verifies, tokens per step, the controller's
+ * cost model), dm_step_n's calls and tokens per call, its memory (the first verify pass's footprint rise, the head's
+ * weights and state, the slab's reserve), and policy.draft / draft_max). The
  * string is owned by the engine and valid until the next call on it. */
 const char* dm_stats_json(dm_engine* e);
 

@@ -6,7 +6,7 @@
  *   dm_gate --model DIR --prompt-ids FILE --n 400 --out OUT.ids [--mem file|mlock|plain] [--cache-gb 3.3]
  *           [--routers-id mlp_k2_h512] [--threads 8] [--readers 4] [--json OUT.json] [--embeddings F]
  *           [--file-adapt 1 --file-min-gb G] [--file-core-gb G] [--model-options S] [--file-hint 0|1|2]
- *           [--profile P] [--ctx N (0: the profile's ctx, else 16384)]
+ *           [--profile P] [--ctx N (0: the profile's ctx, else 16384)] [--resident-bits 0|8|4]
  *
  * --arms LIST (with --warm-n N): arms of one prompt in ONE process, each its own dm_open .. dm_close, in order, after a
  * warm-up open of N tokens (tier off): "off" (spare memory off: run:spare-mem=0), "on" (run:spare-mem=1), "nothing"
@@ -28,6 +28,18 @@
  * run:--FLAG=V), /alt=1 (the model folder given by --alt-model instead of --model). Per arm also: the sampled peak
  * footprint (prefill progress and every 10 tokens), the reads split (urgent, named, named and never used, MB per
  * pool), the run-ahead's and the approximate mode's accounts.
+ *
+ * Sampling and drafting (both modes): --temp T --top-k K --top-p P --min-p M --seed S, --repetition-penalty R
+ * --presence-penalty P --frequency-penalty F (default greedy, no penalties) decode with
+ * dm_sample over the reply's tokens, as the app does; --step-n 1 decodes through dm_step_n (the drafting entry point;
+ * without drafting it is dm_step + dm_sample); --draft MODE (none|lookup|head|both|fixed: model option run:draft=MODE,
+ * implies --step-n 1), --draft-max N (run:draft-max=N), --skeleton F (lookup fragments, one line of token ids each:
+ * dm_set_draft_fragments), --drive-gbs X (run:drive-gbs=X, the bench-only drive cap). An arm may carry /draft=MODE (and
+ * then decodes through dm_step_n) and /stepn=0|1. With dm_step_n the line reports the calls, tokens per call and the
+ * stats' "draft" block (offered, declined, drafted, accepted, tokens per step, memory). --repeat R (not with --arms): the
+ * same prompt again R - 1 times in the same engine (dm_sync of the prompt, then n tokens), each compared with the first
+ * generation's ids, its tokens per call and "draft" block under "repeats" (a regenerated reply: the lookup drafts copy
+ * the session's earlier one).
  */
 #include <dirent.h>
 #include <fcntl.h>
@@ -159,6 +171,24 @@ static const char* arm_opt(const char* arm, const char* key, char* buf, size_t c
   return buf;
 }
 
+static dm_sampler g_s;      /* --temp ... (default greedy) */
+static int g_stepn = 0;     /* --step-n / --draft: decode through dm_step_n */
+static int32_t *g_frag = NULL, *g_flen = NULL;  /* --skeleton: fragments for dm_set_draft_fragments */
+static int g_nfrag = 0;
+
+/* the tokens after feeding `in`: dm_step + dm_sample (the app's loop) or dm_step_n, into gen[k ..], at most max; the
+ * sampler's history is the reply so far, gen[0 .. k). Returns how many (< 0: error) */
+static int next_tokens(dm_engine* e, int stepn, int32_t in, int32_t* gen, int k, int max, float* lg, int vocab) {
+  if (!stepn) {
+    if (dm_step(e, in, lg) != DM_OK) return -1;
+    gen[k] = dm_sample(lg, vocab, &g_s, gen, k);
+    return 1;
+  }
+  int m = 0;
+  if (dm_step_n(e, in, &g_s, gen, k, NULL, 0, max, gen + k, &m, NULL) != DM_OK) return -1;
+  return m;
+}
+
 static int arm_exact(const char* mode) { return !strcmp(mode, "exact") || !strcmp(mode, "lossless"); }
 
 static uint64_t pageins(void) {
@@ -204,7 +234,14 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   if (arm_opt(arm, "cache", v, sizeof v)) o.cache_bytes = (int64_t)(atof(v) * 1e9);
   if (arm_opt(arm, "drive", v, sizeof v)) snprintf(drive, sizeof drive, ";run:drive-gbs=%s", v);
   if (arm_opt(arm, "n", v, sizeof v) && atoi(v) > 1) n = atoi(v);
+  int stepn = g_stepn;
   char extra[512] = "", ov[256];
+  if (arm_opt(arm, "draft", ov, sizeof ov)) snprintf(extra + strlen(extra), sizeof extra - strlen(extra), ";run:draft=%s", ov), stepn = 1;
+  if (arm_opt(arm, "stepn", v, sizeof v)) stepn = atoi(v) != 0;
+  if (stepn && force) {
+    fprintf(stderr, "arm %s: teacher forcing goes with dm_step (no /draft, no --step-n)\n", arm);
+    return -1;
+  }
   if (arm_opt(arm, "opt", ov, sizeof ov))
     for (char *sv = NULL, *t = strtok_r(ov, "+", &sv); t; t = strtok_r(NULL, "+", &sv)) {
       char* c = strchr(t, ':');
@@ -235,18 +272,20 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   dm_info_t inf;
   dm_info(e, &inf);
   float* lg = malloc(sizeof(float) * inf.vocab);
+  if (g_nfrag) dm_set_draft_fragments(e, g_frag, g_flen, g_nfrag);
   dm_sync_result sr;
   double tp = now_ms();
   if (dm_sync(e, ids, np, NULL, 0, lg, on_progress_peak, NULL, &sr) != DM_OK) return -1;
   peak_sample();
   const double prefill_s = (now_ms() - tp) / 1e3;
-  gen[0] = dm_argmax(lg, inf.vocab);
+  gen[0] = dm_sample(lg, inf.vocab, &g_s, NULL, 0);
   dm_counters_t c0, c1;
-  int k = 1, agree = 0, forced = 0;
-  for (; k <= after; k++) {  /* not measured */
+  int k = 1, agree = 0, forced = 0, calls = 0;
+  while (k <= after) {  /* not measured */
     const int32_t in = force && k - 1 < nforce ? force[k - 1] : gen[k - 1];
-    if (dm_step(e, in, lg) != DM_OK) break;
-    gen[k] = dm_argmax(lg, inf.vocab);
+    const int m = next_tokens(e, stepn, in, gen, k, after - k + 1, lg, inf.vocab);
+    if (m <= 0) break;
+    k += m;
   }
   const int k0 = k;
   double pool0[4] = {0, 0, 0, 0};
@@ -258,13 +297,15 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   dm_counters(e, &c0);
   const uint64_t d0 = disk_read_bytes(), pi0 = pageins();
   double td = now_ms(), t300 = 0;
-  for (; k < n; k++) {
+  while (k < n) {
     const int32_t in = force && k - 1 < nforce ? force[k - 1] : gen[k - 1];
-    if (dm_step(e, in, lg) != DM_OK) break;
-    gen[k] = dm_argmax(lg, inf.vocab);
+    const int m = next_tokens(e, stepn, in, gen, k, n - k, lg, inf.vocab);
+    if (m <= 0) break;
+    calls++;
     if (force && k < nforce) agree += gen[k] == force[k], forced++;
-    if (k % 10 == 0) peak_sample();
-    if (k - k0 + 1 == 300) t300 = now_ms();  /* the first 300 measured tokens' rate too (arms of different lengths) */
+    if ((k + m) / 10 != k / 10) peak_sample();
+    if (k - k0 + 1 <= 300 && k + m - k0 >= 300) t300 = now_ms();  /* the first 300 measured tokens' rate too (arms of different lengths) */
+    k += m;
   }
   const double dec_ms = now_ms() - td;
   const uint64_t d1 = disk_read_bytes(), pi1 = pageins();
@@ -275,7 +316,8 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   if (rs) rs += strlen("\"resolved\":");
   const int rlen = rs && re ? (int)(re - rs) : 4;
   if (!rs || !re) rs = "null";
-  char loop[1024], reads[1024], ra[2048], apx[1024];
+  char loop[1024], reads[1024], ra[2048], apx[1024], drj[8192];
+  json_obj(st, "draft", drj, sizeof drj);
   json_obj(st, "loop", loop, sizeof loop);
   json_obj(st, "reads", reads, sizeof reads);
   json_obj(st, "run_ahead", ra, sizeof ra);
@@ -288,21 +330,23 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   const int steps = k - k0 > 0 ? k - k0 : 1;
   const uint64_t picks = c1.picks - c0.picks;
   const double wait = (c1.wait_ms - c0.wait_ms) / steps;
-  char line[16384];
+  char line[32768];
   snprintf(line, sizeof line,
            "{\"arm\":\"%s\",\"mode\":\"%s\",\"mem\":%d,\"threads\":%d,\"readers\":%d,\"spare_memory\":%d,\"evict_hint\":%d,\"store_cache_gb_before\":%.2f,"
            "\"store_cache_gb_at_start\":%.2f,\"store_cache_gb_at_end\":%.2f,\"cache_gb\":%.2f,\"load_s\":%.2f,\"prefill_s\":%.2f,\"prefill_mb\":%.0f,"
            "\"tokens\":%d,\"measured_tokens\":%d,\"tok_s\":%.3f,\"ms_per_token\":%.2f,\"wait_ms_per_token\":%.2f,\"compute_ms_per_token\":%.2f,"
            "\"hit_rate\":%.4f,\"mb_drive_counter_per_token\":%.2f,\"mb_spare_per_token\":%.2f,\"mb_disk_rusage_per_token\":%.2f,"
            "\"read_gb_s_busy\":%.3f,\"pageins_per_token\":%.2f,\"file_refaults_per_token\":%.3f,\"teacher_forced\":%d,\"agreement_with_exact\":%.4f,"
-           "\"tok_s_first_300\":%.3f,\"peak_footprint_gb\":%.2f,\"mb_by_pool_per_token\":[%.2f,%.2f],\"loop\":%s,\"reads\":%s,\"run_ahead\":%s,\"approx\":%s,\"resolved\":%.*s}",
+           "\"tok_s_first_300\":%.3f,\"peak_footprint_gb\":%.2f,\"mb_by_pool_per_token\":[%.2f,%.2f],\"loop\":%s,\"reads\":%s,\"run_ahead\":%s,\"approx\":%s,"
+           "\"sampler\":{\"temp\":%g,\"top_k\":%d,\"top_p\":%g,\"min_p\":%g,\"seed\":%llu},\"step_n\":%d,\"calls\":%d,\"tokens_per_call\":%.3f,\"draft\":%s,\"resolved\":%.*s}",
            arm, o.mode ? o.mode : "", inf.memory_mode, inf.threads, inf.readers, c1.spare_memory, o.file_evict_hint, before, at_start,
            store_cache_gb(model, 0), inf.cache_bytes / 1e9, load_s, prefill_s, sr.mb_read, k, k - k0, (k - k0) / (dec_ms / 1e3),
            dec_ms / steps, wait, dec_ms / steps - wait, picks ? (double)(c1.hits - c0.hits) / picks : 0,
            (c1.bytes_read - c0.bytes_read) / 1e6 / steps, (c1.bytes_spare - c0.bytes_spare) / 1e6 / steps, (d1 - d0) / 1e6 / steps,
            (c1.bytes_read - c0.bytes_read) / 1e9 / ((c1.read_busy_ns - c0.read_busy_ns) / 1e9 + 1e-12), (double)(pi1 - pi0) / steps,
            (double)(c1.file_refaults - c0.file_refaults) / steps, force != NULL, forced ? (double)agree / forced : -1.0,
-           t300 > 0 ? 300 / ((t300 - td) / 1e3) : -1.0, arm_peak / 1e9, (pool1[0] - pool0[0]) * 1e3 / steps, (pool1[1] - pool0[1]) * 1e3 / steps, loop, reads, ra, apx, rlen, rs);
+           t300 > 0 ? 300 / ((t300 - td) / 1e3) : -1.0, arm_peak / 1e9, (pool1[0] - pool0[0]) * 1e3 / steps, (pool1[1] - pool0[1]) * 1e3 / steps, loop, reads, ra, apx,
+           g_s.temp, g_s.top_k, g_s.top_p, g_s.min_p, (unsigned long long)g_s.seed, stepn, calls, calls ? (double)(k - k0) / calls : 0.0, drj, rlen, rs);
   printf("%s\n", line);
   fflush(stdout);
   if (jf) fprintf(jf, "%s\n", line), fflush(jf);
@@ -321,6 +365,7 @@ int main(int argc, char** argv) {
   const char *arms = NULL, *alt_model = NULL;  /* --arms off,on,nothing (one process) */
   int warm_n = 50, file_hint = 0, measure_after = 0, force_exact = 0;
   const char *resident = NULL, *mode = NULL;  /* --resident FILE (e.g. the 4-bit resident_q4), --mode approx:drop */
+  int resident_bits = 0;                      /* --resident-bits 0|8|4 (dm_open_opts.resident_bits; 0: the profile's) */
   const char* model_options = NULL;           /* --model-options "k=v;run:FLAG=VALUE" (dm_open_opts.model_options) */
   double gpu_frac = 0, gpu_experts = 0;      /* --gpu-frac F --gpu-experts F: the prefill's exact GPU split */
   int gpu_min = 0, prefill_threads = 0;      /* --gpu-min N (sub-chunks of at least N positions), --prefill-threads N */
@@ -333,6 +378,11 @@ int main(int argc, char** argv) {
   int ctx = 0;                               /* --ctx N (0: the profile's, else 16384) */
   double ra_budget = 0;                      /* --run-ahead-budget X --run-ahead-max N --run-ahead-sat-skip 0|1 */
   int ra_max = 0, ra_sat = 0;
+  const char *draft = NULL, *skeleton = NULL;  /* --draft MODE (run:draft=MODE), --skeleton F */
+  int draft_max = 0;                           /* --draft-max N (run:draft-max=N) */
+  double drive_gbs = 0;                        /* --drive-gbs X (run:drive-gbs=X) */
+  int repeat = 1;                              /* --repeat R */
+  dm_sampler_default(&g_s);
   for (int i = 1; i < argc; i++)  /* --gpu-check [SECONDS]: the GPU kernels' self-test (no model), then exit */
     if (!strcmp(argv[i], "--gpu-check")) {
       printf("%s\n", dm_gpu_check(0, i + 1 < argc ? atof(argv[i + 1]) : 1.0));
@@ -371,6 +421,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--embeddings")) emb = v, i++;
     else if (!strcmp(k, "--policy-probe")) policy_probe = v, i++;
     else if (!strcmp(k, "--resident")) resident = v, i++;
+    else if (!strcmp(k, "--resident-bits")) resident_bits = atoi(v), i++;
     else if (!strcmp(k, "--model-options")) model_options = v, i++;
     else if (!strcmp(k, "--mode")) mode = v, i++;
     else if (!strcmp(k, "--gpu-frac")) gpu_frac = atof(v), i++;
@@ -385,6 +436,20 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--alt-model")) alt_model = v, i++;
     else if (!strcmp(k, "--force-exact")) force_exact = atoi(v), i++;
     else if (!strcmp(k, "--file-hint")) file_hint = atoi(v), i++;
+    else if (!strcmp(k, "--temp")) g_s.temp = atof(v), i++;
+    else if (!strcmp(k, "--top-k")) g_s.top_k = atoi(v), i++;
+    else if (!strcmp(k, "--top-p")) g_s.top_p = atof(v), i++;
+    else if (!strcmp(k, "--min-p")) g_s.min_p = atof(v), i++;
+    else if (!strcmp(k, "--seed")) g_s.seed = strtoull(v, NULL, 10), i++;
+    else if (!strcmp(k, "--repetition-penalty")) g_s.repetition_penalty = atof(v), i++;
+    else if (!strcmp(k, "--presence-penalty")) g_s.presence_penalty = atof(v), i++;
+    else if (!strcmp(k, "--frequency-penalty")) g_s.frequency_penalty = atof(v), i++;
+    else if (!strcmp(k, "--step-n")) g_stepn = atoi(v) != 0, i++;
+    else if (!strcmp(k, "--draft")) draft = v, i++;
+    else if (!strcmp(k, "--draft-max")) draft_max = atoi(v), i++;
+    else if (!strcmp(k, "--skeleton")) skeleton = v, i++;
+    else if (!strcmp(k, "--drive-gbs")) drive_gbs = atof(v), i++;
+    else if (!strcmp(k, "--repeat")) repeat = atoi(v), i++;
     else {
       fprintf(stderr, "unknown flag %s\n", k);
       return 2;
@@ -399,6 +464,36 @@ int main(int argc, char** argv) {
   if (np <= 0) {
     fprintf(stderr, "no prompt ids in %s\n", prompt);
     return 2;
+  }
+  if (skeleton) {  /* one fragment per line */
+    FILE* f = fopen(skeleton, "r");
+    if (!f) {
+      fprintf(stderr, "cannot read %s\n", skeleton);
+      return 2;
+    }
+    char ln[65536];
+    int cap = 4096, at = 0;
+    g_frag = malloc(sizeof(int32_t) * cap);
+    g_flen = malloc(sizeof(int32_t) * 4096);
+    while (fgets(ln, sizeof ln, f) && g_nfrag < 4096) {
+      int len = 0, off = 0, v2, used;
+      while (sscanf(ln + off, " %d%n", &v2, &used) == 1) {
+        if (at == cap) g_frag = realloc(g_frag, sizeof(int32_t) * (cap *= 2));
+        g_frag[at++] = v2, len++, off += used;
+        while (ln[off] == ',') off++;
+      }
+      if (len) g_flen[g_nfrag++] = len;
+    }
+    fclose(f);
+  }
+  char run_opts[512] = "";  /* --draft, --draft-max, --drive-gbs as run: model options */
+  if (draft) snprintf(run_opts + strlen(run_opts), sizeof run_opts - strlen(run_opts), ";run:draft=%s", draft), g_stepn = 1;
+  if (draft_max > 0) snprintf(run_opts + strlen(run_opts), sizeof run_opts - strlen(run_opts), ";run:draft-max=%d", draft_max);
+  if (drive_gbs > 0) snprintf(run_opts + strlen(run_opts), sizeof run_opts - strlen(run_opts), ";run:drive-gbs=%g", drive_gbs);
+  char mo_all[2048];
+  if (run_opts[0]) {
+    snprintf(mo_all, sizeof mo_all, "%s%s", model_options ? model_options : "", model_options && *model_options ? run_opts : run_opts + 1);
+    model_options = mo_all;
   }
   dm_open_opts o;
   dm_default_opts(&o);
@@ -419,6 +514,7 @@ int main(int argc, char** argv) {
   o.run_ahead_sat_skip = ra_sat;
   o.embeddings = emb;
   o.resident = resident;
+  o.resident_bits = resident_bits;
   if (model_options) o.model_options = model_options;
   o.mode = mode;
   o.file_adapt = adapt;
@@ -510,6 +606,7 @@ int main(int argc, char** argv) {
           inf.vocab, inf.n_layers, inf.n_experts, inf.threads, inf.readers, inf.cache_bytes / 1e9, inf.memory_mode,
           inf.routers[0] ? inf.routers : "none", load_ms / 1e3);
   float* lg = malloc(sizeof(float) * inf.vocab);
+  if (g_nfrag) dm_set_draft_fragments(e, g_frag, g_flen, g_nfrag);
   int cancel_ok = -1;
   if (cancel_test) {  // stop a cold prefill of the prompt 300 ms in; the state must be consistent
     pthread_t th;
@@ -532,20 +629,24 @@ int main(int argc, char** argv) {
     return 1;
   }
   int32_t* gen = malloc(sizeof(int32_t) * (n + 1));
-  gen[0] = dm_argmax(lg, inf.vocab);
+  gen[0] = dm_sample(lg, inf.vocab, &g_s, NULL, 0);
   dm_counters_t c0, c1;
   dm_stats_json(e);  // decode statistics from here
   dm_counters(e, &c0);
   double td = now_ms();
-  int k = 1;
-  for (; k < n; k++) {
-    if (k == resize_at && resize_gb > 0) {
+  int k = 1, calls = 0, resized = 0;
+  while (k < n) {
+    if (k >= resize_at && resize_at >= 0 && resize_gb > 0 && !resized) {
       dm_set_cache_bytes(e, (int64_t)(resize_gb * 1e9));
       fprintf(stderr, "cache budget -> %.2f GB at token %d\n", resize_gb, k);
+      resized = 1;
     }
-    if (dm_step(e, gen[k - 1], lg) != DM_OK) break;
-    gen[k] = dm_argmax(lg, inf.vocab);
-    if (k % 50 == 0) {
+    const int m = next_tokens(e, g_stepn, gen[k - 1], gen, k, n - k, lg, inf.vocab);
+    if (m <= 0) break;
+    calls++;
+    const int k_prev = k;
+    k += m;
+    if (k / 50 != k_prev / 50) {
       dm_counters_t c;
       dm_counters(e, &c);
       fprintf(stderr, "token %d: budget %.2f GB, held %.2f GB, refaults so far %llu\n", k, c.budget_bytes / 1e9, c.held_bytes / 1e9,
@@ -554,7 +655,35 @@ int main(int argc, char** argv) {
   }
   const double dec_ms = now_ms() - td;
   dm_counters(e, &c1);
-  const char* st = dm_stats_json(e);
+  char* st = strdup(dm_stats_json(e));
+  /* --repeat: the same prompt again in this engine; each generation's ids against the first's */
+  size_t rcap = 256 + (size_t)repeat * 10240, rlen0 = 0;
+  char* reps = malloc(rcap);
+  reps[0] = 0;
+  int rep_same = 1;
+  int32_t* gen2 = malloc(sizeof(int32_t) * (n + 1));
+  for (int r = 1; r < repeat; r++) {
+    dm_sync_result sr2;
+    if (dm_sync(e, ids, np, NULL, 0, lg, NULL, NULL, &sr2) != DM_OK) break;
+    gen2[0] = dm_sample(lg, inf.vocab, &g_s, NULL, 0);
+    int k2 = 1, calls2 = 0;
+    const double t2 = now_ms();
+    while (k2 < k) {
+      const int m = next_tokens(e, g_stepn, gen2[k2 - 1], gen2, k2, k - k2, lg, inf.vocab);
+      if (m <= 0) break;
+      calls2++;
+      k2 += m;
+    }
+    const double ms2 = now_ms() - t2;
+    const int same = k2 == k && !memcmp(gen, gen2, sizeof(int32_t) * k);
+    rep_same &= same;
+    char drj[8192];
+    json_obj(dm_stats_json(e), "draft", drj, sizeof drj);
+    rlen0 += snprintf(reps + rlen0, rcap - rlen0, "%s{\"source\":\"%s\",\"tokens\":%d,\"identical\":%s,\"tok_s\":%.3f,\"calls\":%d,\"tokens_per_call\":%.3f,\"draft\":%s}",
+                      r > 1 ? "," : "", sr2.source, k2, same ? "true" : "false", (k2 - 1) / (ms2 / 1e3), calls2, calls2 ? (double)(k2 - 1) / calls2 : 0.0, drj);
+    fprintf(stderr, "repeat %d: %d ids, %s the first generation's, %.3f tokens per call\n", r, k2, same ? "identical to" : "DIFFERENT from",
+            calls2 ? (double)(k2 - 1) / calls2 : 0.0);
+  }
   if (out) {
     FILE* f = fopen(out, "w");
     for (int i = 0; i < k; i++) fprintf(f, "%s%d", i ? "," : "", gen[i]);
@@ -569,16 +698,18 @@ int main(int argc, char** argv) {
            "{\"engine\":\"dm_gate (C API)\",\"mem\":\"%s\",\"cache_gb\":%.2f,\"routers\":\"%s\",\"threads\":%d,\"readers\":%d,\"prompt_tokens\":%d,"
            "\"load_s\":%.3f,\"prefill_s\":%.3f,\"prefill_source\":\"%s\",\"prefill_mb_read\":%.1f,\"tokens\":%d,\"decode_s\":%.3f,"
            "\"tok_s\":%.3f,\"ms_per_token\":%.2f,\"wait_ms_per_token\":%.2f,\"compute_ms_per_token\":%.2f,\"hit_rate\":%.4f,"
-           "\"mb_issued_per_token\":%.2f,\"mb_preads_per_token\":%.2f,\"file_refaults\":%llu,\"cancel_test\":%d,\"stats\":",
+           "\"mb_issued_per_token\":%.2f,\"mb_preads_per_token\":%.2f,\"file_refaults\":%llu,\"cancel_test\":%d,"
+           "\"sampler\":{\"temp\":%g,\"top_k\":%d,\"top_p\":%g,\"min_p\":%g,\"seed\":%llu},\"step_n\":%d,\"calls\":%d,\"tokens_per_call\":%.3f,\"stats\":",
            mem, gb, inf.routers, inf.threads, inf.readers, np, load_ms / 1e3, prefill_ms / 1e3, sr.source, sr.mb_read, k, dec_ms / 1e3,
            steps / (dec_ms / 1e3), dec_ms / steps, wait / steps, (dec_ms - wait) / steps, picks ? (double)(c1.hits - c0.hits) / picks : 0,
            (c1.bytes_issued - c0.bytes_issued) / 1e6 / steps, (c1.bytes_read - c0.bytes_read) / 1e6 / steps,
-           (unsigned long long)(c1.file_refaults - c0.file_refaults), cancel_ok);
+           (unsigned long long)(c1.file_refaults - c0.file_refaults), cancel_ok, g_s.temp, g_s.top_k, g_s.top_p, g_s.min_p,
+           (unsigned long long)g_s.seed, g_stepn, calls, calls ? (double)steps / calls : 0.0);
   const char* pj = dm_last_prefill_json(e);  /* the prefill's account (with the GPU split's, when on) */
-  printf("%s%s,\"prefill\":%s}\n", head, st, pj && *pj ? pj : "{}");
+  printf("%s%s,\"prefill\":%s,\"repeats\":[%s],\"repeats_identical\":%s}\n", head, st, pj && *pj ? pj : "{}", reps, rep_same ? "true" : "false");
   if (json) {
     FILE* f = fopen(json, "w");
-    fprintf(f, "%s%s,\"prefill\":%s}\n", head, st, pj && *pj ? pj : "{}");
+    fprintf(f, "%s%s,\"prefill\":%s,\"repeats\":[%s],\"repeats_identical\":%s}\n", head, st, pj && *pj ? pj : "{}", reps, rep_same ? "true" : "false");
     fclose(f);
   }
   if (policy_probe) {  /* the policy the core chose at each budget (dm_set_cache_bytes applies at once when idle) */
@@ -594,5 +725,5 @@ int main(int argc, char** argv) {
     }
   }
   dm_close(e);
-  return cancel_ok == 0 ? 3 : 0;
+  return cancel_ok == 0 ? 3 : rep_same ? 0 : 4;
 }

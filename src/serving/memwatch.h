@@ -74,7 +74,8 @@ class MemWatch {
   MemWatch(Cache& c, double start_gb, double max_gb, double min_gb)
       : c_(c), max_b_((int64_t)(max_gb * 1e9)), min_b_((int64_t)(min_gb * 1e9)), start_b_((int64_t)(start_gb * 1e9)) {}
   ~MemWatch() { stop(); }
-  int low_pct = 12, high_pct = 35;  // below low_pct (before the ~9% where compute slows) the cache shrinks
+  int low_pct = 20, high_pct = 35;  // below low_pct (before the ~9% where compute slows) the cache shrinks; the caller
+                                    // sets it (dmserve: watch_low_pct, the start rule's: headroom 20, free_level its floor - 2)
   double step_gb = 1.0, period_s = 2.0, grow_after_s = 30.0;
   double retry_s = 600;  // a size that met pressure is not grown into again for this long (calm)
   std::function<void()> wake;                    // a budget was requested (the worker applies it when idle)

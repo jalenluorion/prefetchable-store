@@ -2438,7 +2438,7 @@ int Inkling::head_argmax(const float* hn, float* conf) {
 
 bool Inkling::verify(State& s0, const int32_t* ids, int n, Want want) {
   S = (IState*)&s0;
-  if (n < 1 || n > RING_SLACK + 1 || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n)) return false;
+  if (n < 1 || n > RING_SLACK + 1 || (core->force && S->pos < core->force_n)) return false;
   ver_want = want;
   const double r0 = T->bytes_res;
   ver_hb_full_ = 0;
@@ -2484,7 +2484,7 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
   // fast mode (approx:drop): the prompt runs the batched pass losslessly, as the 35B's and Flash-Next's prefills do
   // (prefill_spans turns the leave-out rule off for the prompt, short prompts under drop_upto aside): a span reads each
   // layer's union once, where single fast steps read every position's misses (P2: 462 positions in 230 s on the phone)
-  if (po.chunk <= 1 || (core->ns.on && !core->ns.drop) || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n)) {
+  if (po.chunk <= 1 || (!taps_.empty() && !dh) || (core->force && S->pos < core->force_n)) {
     const bool r = Model::prefill(s0, ids, n, want_logits, capture, sink, st, cancel);  // single steps
     if (r && fast_head && want_logits) greedy_ = argmax(lgts.data(), c.VU);
     return r;

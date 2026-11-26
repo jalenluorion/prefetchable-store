@@ -24,20 +24,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    ]
   },
   "drafting": {
-   "cost_prior": {
-    "measured": "base M4, dmeng step costs of passes of 1-8 positions (the drafting controller's prior; a draft_cost.txt measured by the engine replaces it)",
-    "pass_ms_over_step_ms": [
-     0,
-     1.0,
-     1.64,
-     2.07,
-     2.5,
-     2.95,
-     3.41,
-     3.86,
-     4.32
-    ]
-   }
+   "cost_prior": null
   },
   "modes": {
    "exact": {
@@ -138,6 +125,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "rule": "confidence",
      "tau": 0.5
     },
+    "prefill": {
+     "apart": 1
+    },
     "prefill_gpu": {
      "experts": 0,
      "projections": 0
@@ -191,10 +181,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "engine": "lossless"
    },
    "fast": {
-    "engine": "approx:drop"
-   },
-   "fast-eps": {
-    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
+    "engine": "approx:drop:w=0.15"
    }
   },
   "prefill": {
@@ -283,21 +270,12 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "lookup": false
     },
     "mode": "fast",
-    "modes": {
-     "fast": {
-      "engine": "approx:drop:w=0.08"
-     }
-    },
     "names": {
-     "exact": {
-      "candidates": 16,
-      "rule": "confidence",
-      "tau": 0.5
-     },
-     "fast": {
-      "m": 3,
-      "rule": "top"
-     }
+     "m": 3,
+     "rule": "top"
+    },
+    "prefill": {
+     "apart": 1
     },
     "prefill_gpu": {
      "experts": 0.65,

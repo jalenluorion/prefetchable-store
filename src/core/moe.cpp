@@ -30,22 +30,23 @@ std::string Times::stages_json(double n) const {
 
 constexpr int MAXK = 16;
 
-// ------------------------------------------------------------------------------------------------ approximate presets
+// ------------------------------------------------------------------------------------------------ fast mode's rule
 void Approx::reset_stats() {
-  steps = w_replaced = n_replaced = n_read_now = w_read_now = n_late_waited = n_late_got = n_late_dropped = n_bg = 0;
-  steps_replaced = w_replaced_max = late_wait_ms = cold = 0;
+  steps = w_replaced = n_replaced = n_read_now = w_read_now = n_late_waited = n_late_dropped = 0;
+  steps_replaced = w_replaced_max = 0;
   for (auto& h : w_hist) h = 0;
   w_tok_cur = 0;
   w_tok.clear();
 }
 
 bool Approx::preset(const std::string& spec) {
-  // PRESET[:k=v...]: a preset, then its rule set by key (a model's manifest tunes fast mode this way): w = read_w, mass =
-  // read_mass, late = late_ms (< 0: never wait for a light pick in flight), bg = background fetch of left-out picks
+  // drop[:k=v...]: the leave-out rule, then its threshold by key (a model's manifest declares fast mode this way): w =
+  // read_w; Flash-Next's capped form also mass = read_mass and late = -1 (a light pick in flight is not waited for)
   const size_t c = spec.find(':');
-  const std::string name = spec.substr(0, c);
-  if (!preset_base(name)) return false;
-  cold_floor = -1;
+  if (spec.substr(0, c) != "drop") return false;
+  late_ms = 1000;  // a missing pick of weight <= 0.1 is left out (no substitute, no renormalisation of the kept weights);
+  read_w = 0.1;    // a pick in flight is waited for
+  read_mass = 2;
   for (size_t i = c == std::string::npos ? spec.size() : c + 1; i < spec.size();) {
     size_t j = spec.find(':', i);
     if (j == std::string::npos) j = spec.size();
@@ -58,38 +59,9 @@ bool Approx::preset(const std::string& spec) {
     if (end == kv.c_str() + q + 1 || *end) return false;
     if (k == "w") read_w = v;
     else if (k == "mass") read_mass = v;
-    else if (k == "late") late_ms = v;
-    else if (k == "bg") bg = v != 0;
-    else if (k == "floor") cold_floor = (int)v;  // the cold-cache floor (-1: 2K; 0: never: substitute from whatever is held)
+    else if (k == "late" && (v < 0 || v >= 1000)) late_ms = v;  // waited for (>= 1000, the default) or not (< 0)
     else return false;
     i = j + 1;
-  }
-  return true;
-}
-
-bool Approx::preset_base(const std::string& name) {
-  if (name == "bounded" || name.empty()) {  // wait for named picks in flight, read on the spot any pick with weight > 0.1
-    late_ms = 1000;
-    read_w = 0.1;
-    read_mass = 2;
-    bg = true;
-    drop = false;
-  } else if (name == "drop") {  // P2 (phone sizes): as bounded, but a missing pick of weight <= 0.1 is left out (no
-                                // substitute, no renormalisation of the kept weights), so no floor of experts in memory
-                                // is needed; no background fetch of the dropped picks
-    late_ms = 1000;
-    read_w = 0.1;
-    read_mass = 2;
-    bg = false;
-    drop = true;
-  } else if (name == "never") {  // never wait: replace whatever has not landed (a speed bound, not for use)
-    late_ms = -1;
-    read_w = 2;
-    read_mass = 2;
-    bg = true;
-    drop = false;
-  } else {
-    return false;
   }
   on = true;
   prio = cancel = true;
@@ -97,10 +69,10 @@ bool Approx::preset_base(const std::string& name) {
 }
 
 const char* Approx::presets_help() {
-  return "bounded (wait for named picks in flight, read any missing pick with released weight > 0.1, replace the rest), "
-         "drop (as bounded, but the rest is left out: no substitute, released weights kept, no floor of experts in memory), "
-         "never (replace whatever has not landed: a speed bound); each may be followed by :w=W:mass=M:late=MS:bg=0|1:floor=N "
-         "(the rule set; floor: the cold-cache floor of the replacing rules, 0 = never read on the spot for it)";
+  return "drop (a missing pick of released weight <= 0.1 is left out: no substitute, the kept picks keep their released "
+         "weights; a heavier one is read and waited for; a pick whose read is in flight is waited for), followed by :w=W "
+         "for another weight; Flash-Next's capped form adds :mass=M:late=-1 (then the heaviest missing picks are read until "
+         "those left out weigh <= M; a light pick in flight is left out)";
 }
 
 // ------------------------------------------------------------------------------------------------ setup
@@ -1147,43 +1119,29 @@ std::string Core::ra_json() const {
   return out;
 }
 
-// The approximate MoE. The released router has decided (picks / pw hold its top K and their weights). Each released
-// pick is landed, late (named, still in flight) or missing. Guaranteed: missing picks with released weight > read_w,
-// then the largest missing until the missing weight <= read_mass, every late pick when late_ms >= 1000, and every
-// missing pick when fewer than 2K other experts of the layer have landed (a cold cache). The rest are replaced by the
-// released ranking's next experts that have landed; the final set is weighted as the release weights its top K and
-// combined in rank order.
+// Fast mode's MoE (approx:drop). The released router has decided (picks / pw hold its top K and their weights). Each
+// released pick is landed, late (named, still in flight) or missing. Used: every landed pick; every late pick (unless
+// late_ms < 0: then only a late pick read under the guarantees); a missing pick with released weight > read_w (then the
+// largest missing until the missing weight <= read_mass), read now. The rest are left out; the kept picks keep their
+// released weights and are combined in rank order.
 void Core::approx(int step, const float* x, float* y, const MoeView& v) {
   const int L = mi.step_layer[step], pass = mi.step_pass[step];
   const ExpertFormat& F = mi.formats[mi.layer_fmt[L]];
-  const long st = now(step);
   const int reg = looped(step) ? 0 : 1;
   const auto t_dec = clk::now();
   stage_mark(ST_MOE_CACHE);
   const int32_t* pk = picks.data() + (size_t)step * K;
   const float* pwl = pw.data() + (size_t)step * K;
-  const float* key = v.rule == MoeView::SOFTMAX_TOPK_RENORM ? lg.data() : bz.data();
   const float wscale = v.rule == MoeView::SOFTMAX_TOPK_RENORM ? 1.f : v.route_scale;
   auto& S = cache.st;
   if (cache.learn_on) cache.learn_use(L, pk, tok_clock);
   if (cache.hazard_evict) cache.pre_use(L, pk, K, tok_clock);
-  // the released ranking beyond its top K (where replacements come from); the first K equal pk
-  for (int e = 0; e < NE; e++) ord[e] = e;
-  auto by_key = [&](int a, int b) { return key[a] > key[b] || (key[a] == key[b] && a < b); };
-  int nord = std::min(NE, 64);
-  std::partial_sort(ord.begin(), ord.begin() + nord, ord.end(), by_key);
-  auto ensure = [&](int need) {
-    if (need > nord && nord < NE) {
-      std::sort(ord.begin() + nord, ord.end(), by_key);
-      nord = NE;
-    }
-  };
   struct Ch {
     int e, rank, slot, row;
-    int kind;  // 0 landed, 1 in flight and waited for, 2 in flight and tentative (late rule), 3 read now
+    int kind;  // 0 landed, 1 in flight and waited for, 3 read now
     bool done;
   };
-  Ch ch[2 * MAXK];
+  Ch ch[MAXK];
   int stt[MAXK];
   bool must[MAXK] = {false}, dropped[MAXK] = {false};
   double frac[MAXK];
@@ -1227,39 +1185,17 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
     must[b] = true;
     miss_mass -= frac[b];
   }
-  if (!ns.drop) {  // too few other experts of this layer in memory to replace from (a cold cache): this step runs lossless
-                   // (the drop rule replaces nothing, so it needs no floor)
-    int nd = 0;
-    for (int j = 0; j < K; j++) nd += stt[j] != 0 && !must[j] && !(stt[j] == 1 && ns.late_ms >= 1000);
-    if (nd > 0) {
-      int n = 0;
-      for (int e = 0; e < NE; e++) {
-        const int s = cache.slot_of(L, e);
-        if (s < 0 || !cache.ready(L, s) || std::find(pk, pk + K, e) != pk + K) continue;
-        n++;
-      }
-      if (n < std::min(ns.cold_floor >= 0 ? ns.cold_floor : 2 * K, NE - K)) {
-        for (int j = 0; j < K; j++)
-          if (stt[j]) must[j] = true;
-        ns.cold++;
-      }
-    }
-  }
-  // decide what is replaced now; read the guaranteed misses
-  int bg[MAXK], nbg = 0, need = 0;
+  // decide what is left out; read the guaranteed misses
   for (int j = 0; j < K; j++) {
     if (stt[j] == 0) {
       ch[j].kind = 0;
     } else if (stt[j] == 1) {
-      if (must[j] || ns.late_ms >= 1000) {
+      if (must[j] || ns.late_ms >= 0) {
         ch[j].kind = 1;
-      } else if (ns.late_ms < 0) {
+      } else {
         dropped[j] = true;
         cache.unpin(L, ch[j].slot);
         ns.n_late_dropped++;
-        need++;
-      } else {
-        ch[j].kind = 2;
       }
     } else if (must[j]) {
       ch[j].slot = take_slot(L, pk[j], step);
@@ -1268,46 +1204,12 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
       ns.w_read_now += frac[j];
     } else {
       dropped[j] = true;
-      need++;
-      if (ns.bg) bg[nbg++] = pk[j];
     }
   }
-  int rpos = K, nch = K;
-  int freerow[MAXK], nfree = 0;
-  for (int j = 0; j < K; j++)
-    if (dropped[j]) freerow[nfree++] = j;
-  auto replace = [&](int n) {  // n more experts from the ranking, landed now, not chosen yet
-    while (n > 0) {
-      ensure(rpos + 1);
-      if (rpos >= NE) {
-        fprintf(stderr, "approximate mode: fewer than %d experts of layer %d in memory\n", K, L);
-        abort();
-      }
-      const int e = ord[rpos++];
-      const int s = cache.slot_of(L, e);
-      if (s < 0 || !cache.ready(L, s)) continue;
-      cache.slot(L, s).pins++;
-      ch[nch++] = {e, rpos - 1, s, freerow[--nfree], 0, false};
-      n--;
-    }
-  };
-  if (!ns.drop) replace(need);
   auto t1 = clk::now();
   t.cache += ms_between(t_dec, t1);
   stage_mark(ST_PREFETCH);
   if (hook) hook->after_router(*this, step);
-  for (int i = 0; i < nbg; i++) {  // behind the names for later steps: these are for this layer's next use
-    const int e = bg[i];
-    if (cache.slot_of(L, e) >= 0) continue;
-    cache.evict_pf_ctx = true;
-    const int s = cache.victim(L, 2 * K + cache.extra_reserve[cache.layer_pool[L]]);
-    cache.evict_pf_ctx = false;
-    if (s < 0) continue;
-    if (cache.mem == Mem::PURGEABLE) cache.touch_nonvolatile(L, s);
-    cache.issue(L, s, e, false, next_use(step));
-    cache.use(L, s, tok_clock, st);  // as the lossless engine would have used it
-    ns.n_bg++;
-  }
   auto t2 = clk::now();
   t.pf += ms_between(t1, t2);
   stage_mark(ST_MOE_EXPERTS);
@@ -1318,9 +1220,9 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
     ExpJob jb[MAXK + 1];
     int n = 0;
     if (first && v.shared) jb[n++] = shared_job(v);
-    for (int i = 0; i < nch; i++) {
+    for (int i = 0; i < K; i++) {
       Ch& q = ch[i];
-      if (q.done || (q.rank < K && dropped[q.rank])) continue;
+      if (q.done || dropped[i]) continue;
       if (!cache.ready(L, q.slot)) continue;
       F.mats(cache.rec(L, q.slot), jb[n].gu, jb[n].up, jb[n].dn);
       jb[n].inter = F.I;
@@ -1340,55 +1242,26 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
     }
     if (wj >= 0) ra_predict(step, v, dn, pwl, cache.pending_of(L, ch[wj].slot));
   }
-  int need2 = 0;
-  const auto deadline = t_dec + std::chrono::microseconds((long)(std::max(0.0, ns.late_ms) * 1000.0));
   for (int j = 0; j < K; j++) {
     Ch& q = ch[j];
-    if (dropped[j] || q.done) continue;
-    if (q.kind == 1 || q.kind == 3) {
-      if (q.kind == 1 && !cache.ready(L, q.slot)) ns.n_late_waited++;
-      const double w0 = S.wait_ms;
-      cache.wait(L, q.slot);
-      (q.kind == 3 ? S.wait_ms_miss : S.wait_ms_late) += S.wait_ms - w0;
-    } else if (q.kind == 2) {
-      if (!cache.ready(L, q.slot) && ns.late_ms > 0 && clk::now() < deadline) {
-        ns.n_late_waited++;
-        if (cache.rd.promote(cache.layer_pool[L], q.slot)) S.n_late_queued++;
-        auto tw = clk::now();
-        while (!cache.ready(L, q.slot) && clk::now() < deadline) __builtin_arm_yield();
-        const double dw = ms_since(tw);
-        S.wait_ms += dw;
-        S.wait_ms_late += dw;
-        ns.late_wait_ms += dw;
-      }
-      if (cache.ready(L, q.slot)) {
-        ns.n_late_got++;
-      } else {
-        dropped[j] = true;
-        cache.unpin(L, q.slot);
-        ns.n_late_dropped++;
-        freerow[nfree++] = q.row;
-        need2++;
-      }
-    }
+    if (dropped[j] || q.done || (q.kind != 1 && q.kind != 3)) continue;
+    if (q.kind == 1 && !cache.ready(L, q.slot)) ns.n_late_waited++;
+    const double w0 = S.wait_ms;
+    cache.wait(L, q.slot);
+    (q.kind == 3 ? S.wait_ms_miss : S.wait_ms_late) += S.wait_ms - w0;
   }
-  if (!ns.drop) replace(need2);
   run_pass(false);
-  // the final set in the released ranking's order, the release's weighting over it, fixed-order combination
-  int fin[2 * MAXK], nf = 0;
-  for (int i = 0; i < nch; i++)
-    if (!(ch[i].rank < K && dropped[ch[i].rank])) fin[nf++] = i;
-  std::sort(fin, fin + nf, [&](int a, int b) { return ch[a].rank < ch[b].rank; });
-  int set[2 * MAXK], rows[2 * MAXK], slots[2 * MAXK];
-  float wf[2 * MAXK];
-  for (int i = 0; i < nf; i++) {
-    set[i] = ch[fin[i]].e;
-    rows[i] = ch[fin[i]].row;
-    slots[i] = ch[fin[i]].slot;
-  }
-  weights(v, set, nf, wf);
-  if (ns.drop)  // the kept released picks keep their released weights (equal to weights() when nothing was left out)
-    for (int i = 0; i < nf; i++) wf[i] = pwl[ch[fin[i]].rank];
+  // the kept released picks in the released ranking's order, with their released weights (equal to weights() when nothing
+  // was left out), fixed-order combination
+  int set[MAXK], rows[MAXK], slots[MAXK], nf = 0;
+  float wf[MAXK];
+  for (int j = 0; j < K; j++)
+    if (!dropped[j]) {
+      set[nf] = ch[j].e;
+      rows[nf] = ch[j].row;
+      slots[nf] = ch[j].slot;
+      wf[nf++] = pwl[j];
+    }
   t.bytes_exp += (double)nf * F.touched;
   stage_mark(ST_MOE_COMBINE);
   combine(v, wf, rows, nf, shw_, y);
