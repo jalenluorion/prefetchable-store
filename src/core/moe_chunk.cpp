@@ -459,6 +459,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   const bool packable = !o.ref && o.prec == Prec::I16;
   auto compute = [&](std::vector<int>& run, bool gpu_ok) {  // gate/up then down of the entries in run, into their C.eout rows
     DM_WC("moe.waves", 1);
+    const double gm_before = moe_gpu_macs;
     parallel_for(*pool, (int)run.size(), [&](int k) {  // the packed inputs of each entry
       Chunk::Ent& E = C.ent[run[k]];
       if (!E.packed) return;
@@ -640,6 +641,14 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
         pool->run(chunk_dn, &X);
       }
       for (const GT& r : gt) moe_gpu_macs += (double)r.rd * C.ent[run[r.k]].dn.cols * C.ent[run[r.k]].users.size();
+    }
+    if (moe_gpu) {  // the CPU's part of the split's account: every entry's multiply-adds less the GPU's
+      double tot = 0;
+      for (int q : run) {
+        const Chunk::Ent& E = C.ent[q];
+        tot += (2.0 * E.inter * E.gu.cols + (double)H * E.dn.cols) * E.users.size();
+      }
+      moe_cpu_macs += std::max(0.0, tot - (moe_gpu_macs - gm_before));
     }
   };
   // ---- the fast prompt path (moe_half): once every record of the union has landed, the experts and the combination on the

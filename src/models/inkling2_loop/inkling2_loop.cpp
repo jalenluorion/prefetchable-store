@@ -2478,7 +2478,7 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
   const long c0 = n_chunks;
   if (gpu) gpu->set_kernel(po.gpu_kernel);
   const GpuSplitAcct ga0 = gacct;
-  const double me_w0 = core->moe_gpu_wait_ms, me_s0 = core->moe_gpu_stage_ms, me_m0 = core->moe_gpu_macs;
+  const double me_w0 = core->moe_gpu_wait_ms, me_s0 = core->moe_gpu_stage_ms, me_m0 = core->moe_gpu_macs, me_c0 = core->moe_cpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
   const int sub = std::min(po.chunk, CHUNK_MAX), span = std::max(sub, po.span);
   PrefillOpts o = po;
@@ -2521,7 +2521,7 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
         << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9
         << ",\"wait_ms\":" << gacct.ms_wait - ga0.ms_wait << ",\"stage_ms\":" << gacct.ms_stage - ga0.ms_stage << ",\"sets\":" << gacct.sets - ga0.sets
         << ",\"failed\":" << gacct.failed - ga0.failed << "},\"experts\":{\"frac\":" << po.gpu_experts << ",\"gmac_gpu\":" << (core->moe_gpu_macs - me_m0) / 1e9
-        << ",\"wait_ms\":" << core->moe_gpu_wait_ms - me_w0 << ",\"stage_ms\":" << core->moe_gpu_stage_ms - me_s0 << ",\"sets\":" << core->moe_gpu_sets - me_n0
+        << ",\"gmac_cpu\":" << (core->moe_cpu_macs - me_c0) / 1e9 << ",\"wait_ms\":" << core->moe_gpu_wait_ms - me_w0 << ",\"stage_ms\":" << core->moe_gpu_stage_ms - me_s0 << ",\"sets\":" << core->moe_gpu_sets - me_n0
         << ",\"failed\":" << core->moe_gpu_failed - me_f0 << "}}";
     o << "}";
     st->json = o.str();

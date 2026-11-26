@@ -552,7 +552,7 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
   const Times tt0 = *T;  // the stages of this prefill (ms in all, under the decode's names)
   const long c0 = n_chunks;
   const GpuSplitAcct ga0 = gacct;
-  const double me_w0 = core->moe_gpu_wait_ms, me_m0 = core->moe_gpu_macs;
+  const double me_w0 = core->moe_gpu_wait_ms, me_m0 = core->moe_gpu_macs, me_c0 = core->moe_cpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
   int spans = 0;
   // The fast path (half-precision products and experts on the GPU) in fast mode only, when the build and the device have
@@ -647,7 +647,7 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac
         << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9
         << ",\"wait_ms\":" << gacct.ms_wait - ga0.ms_wait << ",\"sets\":" << gacct.sets - ga0.sets << ",\"failed\":" << gacct.failed - ga0.failed
-        << "},\"experts\":{\"frac\":" << po.gpu_experts << ",\"gmac_gpu\":" << (core->moe_gpu_macs - me_m0) / 1e9 << ",\"wait_ms\":" << core->moe_gpu_wait_ms - me_w0
+        << "},\"experts\":{\"frac\":" << po.gpu_experts << ",\"gmac_gpu\":" << (core->moe_gpu_macs - me_m0) / 1e9 << ",\"gmac_cpu\":" << (core->moe_cpu_macs - me_c0) / 1e9 << ",\"wait_ms\":" << core->moe_gpu_wait_ms - me_w0
         << ",\"sets\":" << core->moe_gpu_sets - me_n0 << ",\"failed\":" << core->moe_gpu_failed - me_f0 << "}}";
     // what this prefill held before the release below: the span's scratch and the GPU paths' buffers (MB)
     o << ",\"held_mb\":{\"scratch\":" << span_bytes() / MB << ",\"gpu_split\":" << (gpu ? gpu->buffer_bytes() / MB : 0.0)

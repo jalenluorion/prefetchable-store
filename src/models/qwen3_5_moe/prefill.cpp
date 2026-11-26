@@ -85,7 +85,7 @@ struct PrefillCounters {
   uint64_t positions = 0, chunks = 0, hits = 0, misses = 0, late = 0;  // the experts of the span's layers (Cache::st)
   uint64_t union_batches = 0;  // layer applications whose union ran in batches (Core::n_union_batches; phone sizes)
   void reset() { *this = PrefillCounters(); }
-  std::string json() const;
+  std::string json(double mb_read) const;  // mb_read: the prompt's reads (PrefillStats::mb_read)
 };
 
 }  // namespace
@@ -112,7 +112,7 @@ struct Prefill {
 };
 
 namespace {
-std::string PrefillCounters::json() const {
+std::string PrefillCounters::json(double mb_read) const {
   std::ostringstream s;
   s.setf(std::ios::fixed);
   s.precision(3);
@@ -133,7 +133,7 @@ std::string PrefillCounters::json() const {
     s << "}";
   }
   s
-    << ",\"hits\":" << hits << ",\"late\":" << late << ",\"misses\":" << misses << ",\"union_batches\":" << union_batches << "}";
+    << ",\"hits\":" << hits << ",\"late\":" << late << ",\"misses\":" << misses << ",\"union_batches\":" << union_batches << ",\"mb_read\":" << mb_read << "}";
   return s.str();
 }
 
@@ -212,7 +212,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
   MoePass moe_pass(Co, o);  // the span's MoE settings (waves, packed kernels, down rows: this model's declared values)
   const Times t0c = Co.t;
   const auto st0 = Co.cache.st;
-  const double gw0 = Co.moe_gpu_wait_ms, gs0 = Co.moe_gpu_stage_ms, gm0 = Co.moe_gpu_macs;
+  const double gw0 = Co.moe_gpu_wait_ms, gs0 = Co.moe_gpu_stage_ms, gm0 = Co.moe_gpu_macs, gc0 = Co.moe_cpu_macs;
   const uint64_t gn0 = Co.moe_gpu_sets, gf0 = Co.moe_gpu_failed;
   const long ub0 = Co.n_union_batches;
   auto moe_counts = [&]() {  // the MoE's part of this span: the core's stage times and cache counters, the GPU's account
@@ -227,6 +227,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     k.ge.ms_wait += Co.moe_gpu_wait_ms - gw0;
     k.ge.ms_stage += Co.moe_gpu_stage_ms - gs0;
     k.ge.macs_gpu += Co.moe_gpu_macs - gm0;
+    k.ge.macs_cpu += Co.moe_cpu_macs - gc0;
     k.ge.sets += Co.moe_gpu_sets - gn0;
     k.ge.failed += Co.moe_gpu_failed - gf0;
     k.union_batches += Co.n_union_batches - ub0;
@@ -666,7 +667,7 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
   }, st, nullptr);
   if (st) {
     st->chunks = (int)P->k.chunks;
-    st->json = P->k.json();
+    st->json = P->k.json(st->mb_read);
   }
   if (po.release) {  // the scratch back to the system (re-created by the next prefill)
     P.reset();
