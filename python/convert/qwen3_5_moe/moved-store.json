@@ -1047,7 +1047,7 @@
   },
   "fast": {
    "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
-   "engine": "approx:drop",
+   "engine": "approx:drop:w=0.1",
    "wait_if": {
     "routing_weight_over": 0.1,
     "read_in_flight": true
@@ -1060,7 +1060,7 @@
      "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), the same launch, 600 teacher-forced positions against exact on the device",
      "rows": [
       {
-       "setting": "weight 0.1, wait for reads in flight (this, approx:drop)",
+       "setting": "weight 0.1, wait for reads in flight (this, approx:drop:w=0.1; approx:drop's default weight, written out)",
        "tok_s": 4.75,
        "mb_per_token": 112,
        "top1_agree": "589/600 = 0.982"

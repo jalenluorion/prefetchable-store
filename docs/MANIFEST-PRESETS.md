@@ -68,7 +68,7 @@ the declared sub-chunk and span in every front end.
 ```json
 "modes": {
   "exact": {"definition": "Generated tokens never depend on the cache, the routers or timing.", "engine": "lossless"},
-  "fast":  {"definition": "The model's router still picks; a picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight, otherwise it is left out.", "engine": "approx:drop"}
+  "fast":  {"definition": "The model's router still picks; a picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight, otherwise it is left out.", "engine": "approx:drop:w=0.1"}
 }
 ```
 
@@ -76,7 +76,7 @@ The engine reads only `engine` (the internal mode string: `lossless` or `approx:
 people. Fast mode has one leave-out method: `approx:drop:w=W`, a missing pick of released weight at most `W` is left out
 (no substitute; the kept picks keep their released weights), a heavier one is read and waited for, and a pick whose read is
 in flight is waited for; `w` defaults to 0.1. Built-in: `exact` = `lossless`, `fast` = `approx:drop`. Inkling declares
-`approx:drop:w=0.15`; the 35B keeps `approx:drop`, measured: `modes.fast.calibration`. Flash-Next alone keeps a capped
+`approx:drop:w=0.15`; the 35B `approx:drop:w=0.1` (the default weight, written out), measured: `modes.fast.calibration`. Flash-Next alone keeps a capped
 form until it is recalibrated, `approx:drop:w=0.13:mass=0.13:late=-1`: then the heaviest missing picks are read until
 those left out weigh at most `mass`, and a light pick in flight is left out (`late=-1`; the default waits for it).
 A profile can declare a mode's `engine` of its own (`profiles.<p>.modes.<mode>`, below), over this one for that profile.
