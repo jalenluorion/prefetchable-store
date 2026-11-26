@@ -389,6 +389,8 @@ if wanted("presets"):
                     out += ["--gpu-frac", "-1", "--gpu-experts", "-1"] if front == "capi" else ["--prefill-gpu", "off"]; i += 1
                 elif f == "--ra-off":
                     out += ["--run-ahead", "-1" if front == "capi" else "0"]; i += 1
+                elif f == "--drafts" and front == "capi":  # (no field of its own: the run-flag passthrough)
+                    out += ["--model-options", f"run:drafts={v}"]; i += 2
                 else:
                     out += [f, v]; i += 2
             if front == "capi" and "--cache-gb" not in out:
