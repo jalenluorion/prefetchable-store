@@ -45,9 +45,11 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     /// The engine's mode string for the app's Fast. 35B: approx:drop at the threshold measured for the calibrated 4-bit
     /// in-memory weights (0.08); Inkling: the engine's own fast preset.
     var fastEngineMode: String { self == .qwen36 ? "approx:drop:w=0.08" : "fast" }
-    /// phone-small's expert cache for a 2.96 GB app footprint. 35B: 2.96 - 1.54 GB measured beside the cache. Inkling:
-    /// 1.7 GB (its 4-bit in-memory weights and 4-bit late expert layers at the same footprint).
-    var phoneSmallSlabGB: Double { self == .qwen36 ? DmengLaunch.footprintTargetGB - DmengLaunch.nonSlabGB : 1.7 }
+    /// phone-small's expert cache, one rule for both models: the 2.96 GB app footprint target less what the model holds
+    /// beside the cache (measured on the iPhone 15 Plus in decode: the 35B 1.54 GB, Inkling 1.26 GB, its footprint
+    /// 2.90-2.98 GB at a 1.70 GB cache). A model property: it belongs in the manifests' phone-small profile (staged).
+    var phoneSmallNonSlabGB: Double { self == .qwen36 ? 1.54 : 1.26 }
+    var phoneSmallSlabGB: Double { DmengLaunch.footprintTargetGB - phoneSmallNonSlabGB }
     /// The download's size before the manifest is in (the Hub manifest's profile bytes).
     func approxBytes(profile: String) -> Int64 {
         switch self {
