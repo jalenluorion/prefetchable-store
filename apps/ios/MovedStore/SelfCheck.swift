@@ -152,7 +152,24 @@ enum SelfCheck {
                 }
             }
             do { try fm.removeItem(at: root); log("SELFCHECK remove-35b removed \(root.lastPathComponent)/") }
-            catch { log("SELFCHECK remove-35b could not remove \(root.path): \(error)") }
+            catch {
+                // a folder copied onto the phone by cable is not the app's to unlink from: each file is emptied in place
+                // instead (its space freed; the empty name stays, and a later copy overwrites it)
+                log("SELFCHECK remove-35b could not remove \(root.lastPathComponent)/ (\(error.localizedDescription)): emptying its files")
+                var emptied = 0
+                if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) {
+                    for case let u as URL in e {
+                        guard (try? u.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+                        if (try? fm.removeItem(at: u)) != nil { emptied += 1; continue }
+                        if let h = try? FileHandle(forWritingTo: u) {
+                            do { try h.truncate(atOffset: 0); emptied += 1 } catch { log("SELFCHECK remove-35b could not empty \(u.lastPathComponent): \(error)") }
+                            try? h.close()
+                        } else { log("SELFCHECK remove-35b could not open \(u.lastPathComponent)") }
+                    }
+                }
+                r["emptied_\(root.lastPathComponent)"] = emptied
+                log("SELFCHECK remove-35b emptied \(emptied) files in \(root.lastPathComponent)/")
+            }
         }
         r["files"] = files
         r["bytes"] = total
