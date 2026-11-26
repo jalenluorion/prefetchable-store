@@ -226,7 +226,9 @@ def worker(name, reqs, *flags, model=None, profile="none"):
     rq, op = os.path.join(T, name + ".reqs.json"), os.path.join(T, name + ".json")
     json.dump(reqs, open(rq, "w"))
     r = run([sys.executable, DRIVE, op, rq, "--", DMSERVE, "--model", model or M, "--profile", profile, "--cache-gb", f"{FEW_GB:.6f}", "--ctx", "2048",
-             "--threads", "2", "--readers", "2", "--mem", "plain", "--res-mem", "plain", *flags])
+             "--threads", "2", "--readers", "2", "--mem", "plain", "--res-mem", "plain",
+             # (under a profile the server keeps its prefix cache, hot set and pass costs in the engine folder: not here)
+             *(["--disk", "none", "--hotset", "none", "--draft-cost", "none"] if profile != "none" else []), *flags])
     if r.returncode:
         raise RuntimeError(f"worker {' '.join(flags)}: {(r.stdout + r.stderr)[-500:]}")
     return json.load(open(op))
@@ -457,7 +459,7 @@ if wanted("presets"):
         j = os.path.join(T, "pr.json")
         r = run([DMGATE, "--model", FD, "--profile", "mac", "--prompt-ids", ip, "--n", "4", "--threads", "2", "--cache-gb", "auto", "--json", j])
         st = json.load(open(j))["stats"] if r.returncode == 0 else {}
-        if not (r.returncode == 0 and st["resolved"]["draft"] == "none" and st["preset"]["drafts"]["lookup"] is True and "the C API has no drafting" in r.stderr):
+        if not (r.returncode == 0 and st["resolved"]["draft"] == "none" and st["policy"]["preset"]["drafts"]["lookup"] is True and "the C API has no drafting" in r.stderr):
             bad.append(f"capi, the profile declaring lookup: rc {r.returncode}, resolved {st.get('resolved', {}).get('draft')}, {r.stderr[-200:]}")
         r = run([DMGATE, "--model", M, "--profile", "mac", "--prompt-ids", ip, "--n", "4", "--threads", "2", "--cache-gb", "auto", "--model-options", "run:drafts=1"])
         if not (r.returncode != 0 and "the C API has no drafting" in r.stderr):
@@ -466,14 +468,14 @@ if wanted("presets"):
         # the prompt path's values under each profile: the profile's own prefill block over the model-level one, the same
         # in all three front ends (their "prefill_declared")
         for prof in man["profiles"]:
-            want = {**{k: v for k, v in man.get("prefill", {}).items() if isinstance(v, (int, float, str, bool))},
-                    **{k: v for k, v in man["profiles"][prof].get("prefill", {}).items() if isinstance(v, (int, float, str, bool))}}
+            want = {**{k: v for k, v in man.get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")},
+                    **{k: v for k, v in man["profiles"][prof].get("prefill", {}).items() if isinstance(v, (int, float, str, bool)) and k not in ("notes", "note")}}
             want = {k: str(int(v)) if isinstance(v, bool) else (f"{v:.17g}" if isinstance(v, (int, float)) else v) for k, v in want.items()}
             got = {}
             r = run([DMENG, "--model", M, "--profile", prof, "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
             got["dmeng"] = json.load(open(j)).get("prefill_declared") if r.returncode == 0 else r.stderr[-200:]
             r = run([DMGATE, "--model", M, "--profile", prof, "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j])
-            got["capi"] = json.load(open(j))["stats"].get("prefill_declared") if r.returncode == 0 else r.stderr[-200:]
+            got["capi"] = json.load(open(j))["stats"]["policy"].get("prefill_declared") if r.returncode == 0 else r.stderr[-200:]
             r = run([DMSERVE, "--model", M, "--profile", prof, "--threads", "2"], inp="", timeout=120)
             ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
             got["dmserve"] = json.loads(ready[0][6:]).get("prefill_declared") if ready else r.stderr[-200:]
