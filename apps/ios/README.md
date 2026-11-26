@@ -1,6 +1,6 @@
-# Prefetchable Store for iPhone
+# PhoneStore for iPhone
 
-A chat app that runs Qwen3.6-35B-A3B or Inkling 2 Mini on the iPhone itself, with the engine in this repository. The
+PhoneStore is a chat app that runs Qwen3.6-35B-A3B or Inkling 2 Mini on the iPhone itself, with the engine in this repository. The
 experts stay on the phone's storage and are read as they are needed; the app holds about 2.9 GB in memory. Once a model
 is downloaded, chats work without a connection.
 
@@ -69,7 +69,7 @@ in our use.
 4. Choose the iPhone as the run destination and press **Run**. The shared scheme builds the Release configuration,
    which is what the numbers below were measured with. The first build compiles the engine and takes a few minutes.
 5. On the first launch of an app from a free Apple ID, iOS asks you to trust the developer: Settings › General ›
-   VPN & Device Management, then your Apple ID, then Trust.
+   VPN & Device Management, then your Apple ID, then Trust. Then open PhoneStore from the home screen.
 
 The model does not run in the Simulator. The Simulator shows the screens only.
 
