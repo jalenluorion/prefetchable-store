@@ -20,7 +20,7 @@ With page reads enabled, DuckDuckGo finds candidate URLs and the app fetches the
 passages. It can retry with a more specific query when fewer than two sources qualify. The model is prompted to
 open a numbered result before answering. Recent numbered results reuse the page already fetched by the app.
 The evidence budgets are 128 tokens per search and 256 per read on iPhone 15, and 448/896 on the 12 GB class
-such as iPhone 17 Pro. The latter uses a provisional 3.5× prefill estimate. The phone’s local date is passed with
+such as iPhone 17 Pro. The latter uses a 3.5× prefill-speed estimate. The phone’s local date is passed with
 each user turn so the warmed system prompt stays the same across days.
 
 ## What you need
@@ -47,7 +47,7 @@ Below 3 GB available the app says the phone does not have enough memory instead 
 
 The app asks iOS for more memory with the `com.apple.developer.kernel.increased-memory-limit` entitlement
 (`MovedStore/MovedStore.entitlements`, device builds only). Xcode's automatic signing with a free Apple ID accepted it
-in our use.
+in testing.
 
 ## Build and run
 
@@ -132,11 +132,11 @@ app removes everything.
 reading your message while you type. Settings › Diagnostics shows the engine's settings, the last reply's speed and
 the app's memory.
 
-**Drafting** (in the engine's C API, not yet in the app's settings; off in every profile). Opened with
+**Drafting** (in the engine's C API; the app has no setting for it; off in every profile). Opened with
 `model_options` holding `run:draft=lookup` (or `run:draft=head` / `run:draft=both` for Inkling's draft head,
 `run:draft=none` to turn a profile's default off; optional `run:draft-max=N`, 1..7), the engine drafts when the reply
 is decoded with `dm_step_n` instead of `dm_step` + `dm_sample`: pass the token just chosen, the sampler (NULL where
-the loop takes `dm_argmax` today, temperature 0: `dm_sample` would apply the penalties there), the reply's tokens so far (the same `hist` given to `dm_sample` today, that token included), the stop ids and `max_out` (at most
+the loop takes `dm_argmax`, temperature 0: `dm_sample` would apply the penalties there), the reply's tokens so far (the same `hist` given to `dm_sample`, that token included), the stop ids and `max_out` (at most
 8; the number of tokens before one the thinking budget will force, 1 when the next token is forced), and handle the
 returned tokens in order as if each had been sampled; the next call feeds the last one. The tokens are the ones the
 current loop produces, only several per step where drafts are kept. Text the reply is likely to copy (a file being

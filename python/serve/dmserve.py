@@ -36,7 +36,7 @@ ap.add_argument("--model-dir", "--model", required=True, help="the model folder,
 ap.add_argument("--port", type=int, default=8090)
 ap.add_argument("--mode", default=None, choices=["exact", "fast"], help="exact: generated tokens never depend on the cache, the routers or timing (the Mac's default); fast: a picked expert that is not in memory and has a small routing weight is left out (default: the profile's)")
 ap.add_argument("--profile", default="auto", help="mac | phone | phone-small (default: from the device); none: the worker's built-in values")
-ap.add_argument("--drafts", type=int, default=0, help="1: draft and verify for greedy requests (lookup + tool-call skeletons), experimental (default 0)")
+ap.add_argument("--drafts", type=int, default=0, help="1: draft and verify (the lookup and tool-call drafts), greedy and sampled requests, the same tokens as plain decoding (default: the profile's drafts, off in every published profile)")
 ap.add_argument("--format", default=None, help=adv("folder holding the model's chat_format.py (default: python/serve/<family> if it exists, else python/serve/generic, which reads the model folder's own template and response format)"))
 ap.add_argument("--model-id", default=None, help=adv("the model name /v1/models reports (default: the release's name from the manifest's source repo, lower case, e.g. qwen3.6-35b-a3b)"))
 ap.add_argument("--worker", default=os.path.join(REPO, "build", "dmserve"), help=adv("the worker binary"))

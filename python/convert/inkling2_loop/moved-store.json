@@ -1458,7 +1458,7 @@
     }
    ],
    "bytes_with_optional": 21867894869,
-   "optional_note": "the background cross-token source (source 41); the release's draft head (dmeng --draft head|both, command-line tool only), which also needs resident.safetensors (its output layer is folded from the bf16 unembedding)",
+   "optional_note": "the background cross-token source (source 41); the release's draft head (--draft head|both in dmeng and dmserve, run:draft=head|both in the C API), which also needs resident.safetensors (its output layer is folded from the bf16 unembedding)",
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "prefill_gpu": {
     "projections": 0.4,

@@ -29,17 +29,19 @@ Apple Silicon with 16 GB or more and about 25 GB of free disk per model (about 1
 ```bash
 git clone https://github.com/jalenluorion/prefetchable-store && cd prefetchable-store
 cmake -S . -B build && cmake --build build -j
-pip install tokenizers jinja2
+pip install huggingface_hub tokenizers jinja2    # huggingface_hub provides the hf command
 
-hf download jalenluorion/Qwen3.6-35B-A3B-prefetchable-store --local-dir model
+hf download jalenluorion/Qwen3.6-35B-A3B-prefetchable-store --local-dir model \
+  --include "store/*" "derived/router.*" "derived/resident_q8.*" embeddings.safetensors moved-store.json config.json \
+            generation_config.json tokenizer.json tokenizer_config.json chat_template.jinja LICENSE NOTICE.md
 build/dmeng --model model --chat --prompt "Write a haiku about rivers." --n 200
 
 python3 python/serve/dmserve.py --model-dir model --port 8090    # OpenAI-compatible server
 ```
 
-For Inkling 2 Mini, download `jalenluorion/Inkling-2-Mini-prefetchable-store` instead; everything else is the same. A folder
-downloaded from the Hub runs as it is. Each weight repo's card lists the files one device needs, so a Mac does not
-download the phone's files.
+For Inkling 2 Mini, download `jalenluorion/Inkling-2-Mini-prefetchable-store` with the same `--include` list; everything
+else is the same. The list is the `mac` profile of the weight repo's `moved-store.json`, so a Mac does not download the
+phone's files; a folder downloaded from the Hub runs as it is, the whole repository too.
 
 **The 180B model.** Qwen3.8-Flash-Next runs on the Mac. Fetch its `mac` profile (about 127 GB: the experts, the
 n-gram memory, the engine-ready in-memory weights and routers, the embedding table and the text files):
@@ -110,9 +112,9 @@ Names and run-ahead only schedule reads. What the model computes is decided by i
 - **`exact` (default on the Mac).** Every chosen expert is used; one that is not in memory yet is waited for. The
   tokens never depend on the cache, the routers or timing.
 - **`fast` (default on the iPhone).** A chosen expert that is not in memory is waited for only if its routing weight
-  is above a threshold; otherwise the layer goes on without it. Faster on small caches and slow drives, with a small measured change in
-  output (see Quality). The threshold is 0.15 for the 35B and for Inkling 2 Mini, and a pick whose read is already in flight is waited for. For Qwen3.8-Flash-Next (whose
-  router picks 10 experts per layer) the missing picks are read heaviest first until at most 0.13 of the routing weight
+  is above a threshold; otherwise the layer goes on without it. Faster on small caches and slow drives, with a small
+  measured change in output (see Quality). The threshold is 0.15 for the 35B and for Inkling 2 Mini, and a pick whose
+  read is already in flight is waited for. For Qwen3.8-Flash-Next (whose router picks 10 experts per layer) the missing picks are read heaviest first until at most 0.13 of the routing weight
   would be left out, and the rest are left out, without waiting for reads in flight.
 
 Prompts run through a batched prefill that reads each expert once per span and leaves the same state, bit for bit, as
@@ -128,7 +130,10 @@ while idle.
 | early routers | memory |
 | input embedding | SSD, one row per token |
 
-On an iPhone the same engine runs with a smaller cache and 4-bit in-memory weights fitted on calibration text.
+On an iPhone the same engine runs with a smaller cache and 4-bit in-memory weights fitted on calibration text. On a
+phone with at least 11 GB of memory it also uses the system's spare memory: expert records the OS file cache already
+holds are copied from it instead of read from storage (on by default there, paused for the session after a memory
+warning; a switch in the app turns it off).
 
 ## Speed and memory
 
@@ -291,14 +296,14 @@ step, the routers and the serving are shared. The weight repos share one layout 
 | `include/dmeng/`, `src/core/` | the engine: expert store and readers, the expert step, early routers, run-ahead, kernels |
 | `src/models/` | one folder per model family (`qwen3_5_moe`, `inkling2_loop`, `qwen4_exp`); `common/` the Gated DeltaNet both Qwen families share |
 | `src/serving/` | prefix cache, idle-time prefill, memory watcher |
-| `tools/` | `dmeng` (command line), `dmserve` (model worker), `ms_derive` (engine-ready files from a weight repo) |
+| `tools/` | `dmeng` (command line), `dmserve` (model worker), `ms_derive` (engine-ready files from a weight repo), `manifest_dump` (checks a download against its manifest) |
 | `python/` | text in and out, the OpenAI-compatible front end, conversion from released weights |
 | `bindings/c/`, `apps/ios/` | the C API and the iPhone chat app ([apps/ios/README.md](apps/ios/README.md)) |
 | `tests/` | small random models of each family checked against independent references; exactness checks for prefill |
 | `bench/` | measurement scripts: benchmarks, serving and agent sessions |
 | `results/` | the run records behind the tables above; `results/flash_next/` the 180B model's conversion checks, router evaluation and the llama.cpp logs |
 
-The default build targets Apple M4 (`-DDM_ARCH=...` to change); `-DDM_METAL=OFF` builds without the GPU prefill path.
+The default build targets Apple M4 (`-DDM_ARCH=-mcpu=apple-m3`, for example, to change); `-DDM_METAL=OFF` builds without the GPU prefill path.
 
 ## Limits
 
@@ -314,10 +319,10 @@ The default build targets Apple M4 (`-DDM_ARCH=...` to change); `-DDM_METAL=OFF`
 
 ## Paper
 
-Paper soon. This repository retrofits released models. Models built for this from the first training step are what we
-call prefetchable, and they are the subject of the paper.
+Paper soon. This repository makes released models prefetchable after the fact, with their weights frozen; the paper is
+about models built to be prefetchable from the first training step.
 
 ## License
 
-Code: MIT (`LICENSE`). Each model is under its upstream licence (Qwen3.6-35B-A3B: Apache-2.0; Qwen3.8-Flash-Next: the
+Code: MIT (`LICENSE`). Each model is under its upstream license (Qwen3.6-35B-A3B: Apache-2.0; Qwen3.8-Flash-Next: the
 Qwen Community License 1.0; Inkling 2 Mini: Apache-2.0).

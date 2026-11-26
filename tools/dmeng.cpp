@@ -95,7 +95,7 @@ model and memory
 
 generation
   --n N --temp T --top-k K --top-p P --seed S --stop-eos ID
-  --fast-head 0|1|2      screened head (Qwen3.6, Inkling; default 1): the exact argmax (temperature 0, no drafting) or the exact
+  --fast-head 0|1|2      screened head (every family; default 1): the exact argmax (temperature 0, no drafting) or the exact
                          top-k logits (--top-k 1..64); 0 = the full head; 2 also checks it against the full head
   --start-pos P          timing of long contexts: the first token sits at position P
 
@@ -113,13 +113,13 @@ early address (lossless: names only schedule reads; the released router decides)
   --plan-routers F1,F2,..          read planner over a cascade of router sets (longest lag first); --plan-u,
                                    --plan-budget 0|1|2, --plan-tau-long, --plan-tau, --plan-pin-p, --plan-revoke,
                                    --plan-revoke-p, --plan-maxcand, --plan-calib rank|q
-  --evict auto|freq|pred|hazard  --rd-prio 0|1  --rd-excl 0|1  --spec-max N  --cancel 0|1
+  --rd-prio 0|1  --rd-excl 0|1  --spec-max N  --cancel 0|1
   --bg-ranks D --bg-gate G --bg-split P --bg-queue Q --bg-max N   background reads for the drive's idle time: the routers' ranks
                          m+1..D of the steps already named, while no urgent read and at most G speculative ones are in
                          flight, in P pieces (N in flight), at most Q records queued (default off; split 2, queue 2, max 1; under
                          the confidence names rule, the top D's ranks it left unnamed)
   --name-gate 0|1        1: a name that needs a read is not issued while urgent reads wait for a reader (default 0)
-                         auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
+  --evict auto|freq|pred|hazard   auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
                          EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
                          pick (35B below 2.26 GB), else one pool (results/cache-policy/POLICY.md); freq: the decayed use
                          count (one pool); hazard: the table, caps as --layer-caps says
@@ -158,7 +158,7 @@ outputs
                          printed as 0; 1 with --record or --profile none)
   --prefill-gpu-frac F   with --prefill-chunk: that share of each attention projection's rows on the GPU beside
                          the CPU (builds with DM_METAL; the same bits); 0 = CPU only (default: the profile's; the
-                         mac profile 0.4 for both models, else 0)
+                         mac profile 0.4 for every model, else 0)
   --prefill-gpu-experts F  the same for the experts' products (routed experts in the slab, the shared expert;
                          the mac profile 0.4; Inkling: its NVFP4 layers)
   --prefill-gpu off      the batched prefill on the CPU only (both shares 0)

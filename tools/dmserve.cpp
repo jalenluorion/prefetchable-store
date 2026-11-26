@@ -23,10 +23,10 @@
 // must be bit-identical), --prefill-bench IDS_FILE (one cold prefill, timings), --record-routing F (with --prefill-bench:
 // write every position's picks per layer, int16 [pos][NL][K]).
 //
-// Prefill memory and speed: the batched prefill's scratch (~0.5 GB) is freed after every prefill (as the earlier serving
-// worker did; --keep-scratch keeps it between prefills); --gpu-frac F computes that share of each attention projection's
-// rows on the GPU beside the CPU, --gpu-experts F the same for the experts' products (builds with DM_METAL; the same
-// bits; default 0 = CPU only; --gpu-min N: sub-chunks of at least N positions).
+// Prefill memory and speed: the batched prefill's scratch (~0.5 GB) is freed after every prefill (--keep-scratch keeps it
+// between prefills); --gpu-frac F computes that share of each attention projection's rows on the GPU beside the CPU,
+// --gpu-experts F the same for the experts' products (builds with DM_METAL; the same bits; default: the profile's, the
+// mac profile 0.4 / 0.4; --gpu-min N: sub-chunks of at least N positions).
 #include <mach/mach.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -165,7 +165,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)
 model and memory
-  --resident F --family F --ctx N (33792) --threads N (8) --readers N (4) --mem plain|mlock --res-mem plain|mlock
+  --resident F --family F --ctx N (33792) --threads N (8) --readers N (4) --mem plain|mlock|purgeable|file --res-mem plain|mlock
   --kv-plan N            positions of per-position state the automatic cache plans for at start (4096); past them the
                          watcher lowers the cache as the context grows
   --cache-gb G|auto      default auto under a profile (5 with --profile none); --reserve-gb G (5.5) --cache-min-gb G
@@ -663,7 +663,7 @@ int main(int argc, char** argv) {
     return check_ahead(lm, a.s, A, B, al, a.chunk, a.span, a.ahead_span > 0 ? a.ahead_span : a.span, a.stream, a.check_gen);
   }
 
-  // the screened head (Qwen3.6): built once here; each request then asks for the k it needs (a family without it: none)
+  // the screened head (every family): built once here; each request then asks for the k it needs (a family without it: none)
   bool screened = false;
   if (a.fast_head > 0) {
     std::string e;

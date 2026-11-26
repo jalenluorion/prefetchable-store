@@ -188,9 +188,9 @@ class Core {
   // picks of the positions they ran, so a position rolled back by a verify is overwritten when it runs again (a model's
   // own batched prefill, Qwen3.6's, does not write here).
   std::vector<int16_t>* pick_log = nullptr;
-  // RUN-AHEAD (measurement version): when a lossless step is about to wait for a pick's read, the model continues one step
+  // RUN-AHEAD: when a lossless step is about to wait for a pick's read, the model continues one step
   // ahead from an approximate state (this step's output from the experts in memory only: ypart) and returns the next
-  // step's predicted picks (best first, at most maxk); the core issues reads for the absent ones (as early names, below
+  // step's picks it names (best first, at most maxk); the core issues reads for the absent ones (as early names, below
   // the confirmed reads) and counts, when the real pass reaches that step, how many of its reads were already issued.
   // Only reads change: the model must leave its state as it was. Off unless the model sets it.
   std::function<int(int step, const float* ypart, int32_t* picks, int maxk)> run_ahead;
@@ -204,7 +204,7 @@ class Core {
   double rr_ns[2] = {0, 0}, rr_bytes[2] = {0, 0}, rr_calls[2] = {0, 0};
   std::atomic<int64_t> rr_count{0};
   std::string xc_json() const;
-  int ra_k = 8;  // predicted picks named per run-ahead
+  int ra_k = 8;  // picks named per run-ahead
   // MEASUREMENT of deeper run-ahead (no reads issued): after the run-ahead's step + 1, the model continues to step + d
   // (d = 2 .. ra_depth) from its approximate state with that step's MoE left out, and returns its top picks; each is scored
   // when the real pass reaches step + d (top-8 match, the share of its on-demand reads it would have issued)
@@ -252,9 +252,9 @@ class Core {
   double wait_cov_ms = 0, wait_uncov_ms = 0, steps_wait_cov = 0, steps_wait_uncov = 0, steps_no_wait = 0, steps_total = 0;
   std::string ra_json() const;
   struct RunAhead {
-    int step = -1;                 // the step predicted (-1: none pending)
-    std::vector<uint8_t> absent;   // [NE] absent from memory when the prediction was made
-    std::vector<int32_t> pred;     // predicted picks
+    int step = -1;                 // the step named ahead (-1: none pending)
+    std::vector<uint8_t> absent;   // [NE] absent from memory when the run-ahead named it
+    std::vector<int32_t> pred;     // the picks it named
     std::vector<int> pslot;        // their pinned slots (-1: none had)
     clk::time_point t;
     const std::atomic<int>* watch = nullptr;  // the read the step was about to wait for (0: landed)
@@ -365,7 +365,7 @@ class Core {
   // run-ahead from a step about to wait for the read whose pending count is `watch`
   void ra_predict(int step, const MoeView& v, const bool* done, const float* w, const std::atomic<int>* watch);
   void ra_where(int step, double wait_ms);  // where this step's wait sits
-  void ra_score(int step, const int32_t* pk);                                     // the real picks of a predicted step
+  void ra_score(int step, const int32_t* pk);                                     // the real picks of a step named ahead
   void approx(int step, const float* x, float* y, const MoeView& v);
   int take_slot(int L, int e, int step);  // a slot for a miss read now (urgent): pins it
   ExpJob shared_job(const MoeView& v) const;

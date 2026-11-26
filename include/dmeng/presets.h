@@ -61,10 +61,10 @@ struct Preset {
   // the pass width is 1 + N positions
   int draft_max = 0;
   // the batched prefill's exact CPU + GPU split (Metal builds): shares of the attention projections' and the experts'
-  // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for both models, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)
+  // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for every model, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)
   double gpu_frac = 0, gpu_experts = 0;
   // run-ahead while a step waits on reads (exact: names only): the picks it names (0 = off) and its depth in layers
-  // (the mac profile of both models: 8 at depth 1, results/parity/PARITY.md; the phone profiles: off)
+  // (mac: top_k at depth 1, results/parity/PARITY.md; the phone profiles: the same, in exact mode only)
   int run_ahead = 0, run_ahead_depth = 1;
   // its limits (Core::ra_budget / ra_max_tok / ra_sat_skip; built-in: no limit, no skip): speculative ms per token at
   // most budget x the token's compute, at most max_tok run-aheads per token, none while every reader is busy

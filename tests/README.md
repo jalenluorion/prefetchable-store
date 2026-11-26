@@ -11,6 +11,8 @@ build/manifest_dump MODEL_DIR --check --sha          # a downloaded folder again
 TORCH_PY=PY_TORCH MLX_PY=PY_MLX tests/tiny_all.sh   # tiny models of all three families, the same checks on each (below)
 ```
 
+The prompt files are the 35B's (`bench/prompts/<family>/` has `qwen3_5_moe` and `inkling2_loop`; for Flash-Next give
+any token-id file, such as `bench/flash_audit/results/code.ids`; it has no verify pass, so `--verify-check` is refused).
 The scripts print a verdict line and exit 0 only when they pass; `dmeng --verify-check` reports in its JSON line and
 exits 3 on a difference; `dm_gate` writes ids for a comparison. A real model folder is a weight repository downloaded
 from the Hub (the README's quick start).

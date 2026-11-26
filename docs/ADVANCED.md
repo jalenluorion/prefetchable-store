@@ -13,8 +13,8 @@ A flag you give overrides that one default. The early names are treated as one g
 the command line's. `--routers none` / `--xtok none` turn them off in the server.
 
 `--profile none` turns the profile off and gives the engine's own values: no names, a 5 GB cache, single-step prompts
-in `dmeng`, no disk prefix and no hot set in the server. Scripts written before profiles existed, which relied on
-leaving a flag out to mean "off", should add `--profile none`. `--print-defaults` prints what a folder and a profile
+in `dmeng`, no disk prefix and no hot set in the server. A script that relies on leaving a flag out to mean "off"
+should pass `--profile none`. `--print-defaults` prints what a folder and a profile
 resolve to, as JSON, without loading the model.
 
 ## Groups
@@ -24,14 +24,16 @@ resolve to, as JSON, without loading the model.
   `--print-defaults`.
 - **Model and memory**: `--resident F` (another in-memory weights file, such as the 4-bit `resident_q4`),
   `--embeddings F`, `--cache-gb G|auto`, `--reserve-gb G` (memory left to the system by `auto`, default 5.5),
-  `--mem plain|mlock|purgeable|file` and its `--file-*` options, `--res-mem`, `--threads`, `--readers`, `--split`,
-  `--prec`, `--ctx`, `--pool-share`, `--half-life`.
+  `--mem plain|mlock|purgeable|file` and its `--file-*` options, `--spare-mem 0|1` (the OS file cache under the locked
+  slab: the built-in `phone` profile turns it on from 11 GB of physical memory), `--res-mem`, `--threads`, `--readers`,
+  `--split`, `--prec`, `--ctx`, `--pool-share`, `--half-life`.
 - **Early names** (they only schedule reads; in `exact` the tokens do not depend on them): `--prefetch
   none|router|oracle|plan`, `--routers F --m M`, the confidence rule `--rt-tau T --rt-cand C`,
   cross-token names `--xtok F --xtok-tau T` and `--xtok-bg F`, the read planner `--plan-routers ...`, `--router-stats`,
   `--router-ecache`, `--router-heavy`.
 - **Reads and eviction**: `--evict auto|hazard|freq|pred`, `--layer-caps`, `--evict-policy F`, `--rd-prio`,
-  `--rd-excl`, `--spec-max`, `--cancel`.
+  `--rd-excl`, `--spec-max`, `--cancel`, `--name-gate 0|1` (no new named read while urgent reads wait for a reader;
+  default 0).
 - **Prompt path**: `--prefill-chunk N`, `--prefill-gpu-frac F` (dmeng); `--chunk`, `--span`, `--stream`,
   `--gpu-frac`, `--keep-scratch`, the prefix cache (`--ckpt-gb`, `--park-gb`, `--ckpt-every`, `--disk DIR|none`,
   `--disk-gb`, `--disk-every`, `--preload`), idle-time prefill (`--ahead-span`, `--ahead-park`; the front end's
@@ -46,7 +48,6 @@ resolve to, as JSON, without loading the model.
 - **Draft and verify** (greedy and sampled; the tokens are plain decoding's; see Drafting below): `--draft lookup|fixed|head|both`,
   `--draft-max`, `--draft-thr`, `--head-backoff`, `--early`, `--verify-names`, `--skeleton`, `--probe-every`,
   `--copy-free`, `--draft-cost`.
-- **Reads**: `--name-gate 0|1` (no new named read while urgent reads wait for a reader; default 0).
 - **Outputs and checks**: `--json`, `--out-ids`, `--steps-out`, `--record`, `--dump-names`, teacher forcing
   (`--teacher`, `--dump-logits`, `--nll-out`, `--ref-nll`, `--qual-out`, `--ref-qual`, `--taps-out`), `--state-check`,
   `--verify-check`, `--draft-check`, `--skip-reads`, `--force-routing`; the worker's `--check`, `--prefill-bench`,
@@ -78,8 +79,8 @@ resolved setting, one set of counters.
   1..8 tokens, each the token `dm_sample` gives over the caller's history at that place (without drafting it is
   `dm_step` then `dm_sample`); `dm_set_draft_fragments` gives the fragments; `run:draft-cost=FILE|none` (default under
   a profile: the profile's cache folder, as dmserve). `dm_step` stays plain decoding.
-- **Memory.** A verify pass keeps buffers for 8 positions (the 35B and Flash-Next: a second copy of the recurrent state
-  for the rollback, and each position's logits; Inkling less), allocated at the first pass and not shrunk by a smaller
+- **Memory.** A verify pass keeps buffers for 8 positions (the 35B: a second copy of the recurrent state for the
+  rollback, and each position's logits; Inkling less; Flash-Next has no verify pass), allocated at the first pass and not shrunk by a smaller
   `max`; the head adds its weights and state (Inkling: 0.64 GB of weights, results/ink_draft/DRAFT-HEAD.md). With
   drafting off none of it is allocated. On iOS the C API's slab rule gives drafting's memory out of the expert slab
   (a second fixed state and 8 positions' logits, plus the head's file: `policy.slab_rule.draft_reserve_gb`), so the
