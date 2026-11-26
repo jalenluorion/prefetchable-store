@@ -62,6 +62,11 @@ enum UITest {
     private static func run(_ s: String, _ m: ChatModel) async {
         await waitReady(m)
         try? await Task.sleep(nanoseconds: 800_000_000)
+        if s == "keyboard" || s == "hold" {
+            // the Simulator's first keyboard stalls the app for seconds: bring it up once before the measured part
+            focus(); await sleep(4); unfocus(); await sleep(2)
+            rec.mark("keyboard warmed up")
+        }
         switch s {
         case "follow":
             m.thinking = true
@@ -425,6 +430,8 @@ extension UITest {
 final class Recorder: NSObject {
     var rows: [UUID: CGRect] = [:]
     var follow = true, atBottom = true
+    /// The distance to the bottom as the chat view computes it (iOS 18 FollowTracking), to compare with `dist`.
+    var geoDist: CGFloat = .nan
     private var scenario = ""
     private weak var model: ChatModel?
     private weak var scroll: UIScrollView?
@@ -439,6 +446,7 @@ final class Recorder: NSObject {
     private var wasTouching = false
     private var tracked: UUID?
     private var lastWrite: Double = 0
+    private var lastState: [Int] = []
 
     var now: Double { CACurrentMediaTime() - t0 }
 
@@ -524,13 +532,24 @@ final class Recorder: NSObject {
         let topRow = visible.min { $0.value.minY < $1.value.minY }
         let trackedY: Any = tracked.flatMap { rows[$0] }.map { r1($0.minY - top) } ?? NSNull()
         let last = m.conv.messages.last
+        // what changed in the chat this frame, as events
+        let state = [m.conv.visible.count, (last?.content.contains("</think>") ?? false) ? 1 : 0, m.isGenerating ? 1 : 0,
+                     m.toolRunningID != nil ? 1 : 0, last?.content.isEmpty ?? true ? 1 : 0]
+        if state != lastState, !lastState.isEmpty {
+            if state[0] != lastState[0] { mark("rows \(lastState[0]) -> \(state[0])") }
+            if state[1] == 1 && lastState[1] == 0 { mark("answer starts (thinking collapses)") }
+            if state[2] != lastState[2] { mark(state[2] == 1 ? "reply starts" : "reply ends (caption, sources)") }
+            if state[3] != lastState[3] { mark(state[3] == 1 ? "tool runs" : "tool result") }
+            if state[4] == 1 && lastState[4] == 0 && state[0] == lastState[0] { mark("last row emptied (retry)") }
+        }
+        lastState = state
         samples.append([
             round3(t), r1(o), r1(ch), r1(bh), r1(it), r1(ib), r1(ch + ib - bh - o),
             s.isTracking ? 1 : 0, s.isDecelerating ? 1 : 0, r1(s.panGestureRecognizer.translation(in: s).y),
             follow ? 1 : 0, atBottom ? 1 : 0, r1(keyboard), trackedY,
             topRow.map { short($0.key) } ?? NSNull(), topRow.map { r1($0.value.minY - top) } ?? NSNull(),
             m.conv.visible.count, last?.content.count ?? 0, m.isGenerating ? 1 : 0, m.toolRunningID != nil ? 1 : 0,
-            String(m.conv.id.uuidString.prefix(6)),
+            String(m.conv.id.uuidString.prefix(6)), geoDist.isNaN ? NSNull() : r1(geoDist),
         ])
         if t - lastWrite > 2 { write() }
     }
@@ -544,7 +563,7 @@ final class Recorder: NSObject {
             "token_interval_s": UITestFlags.tokenInterval,
             "fields": ["t", "offset", "content_h", "container_h", "inset_top", "inset_bottom", "dist", "tracking",
                        "decelerating", "pan_y", "follow", "at_bottom", "keyboard", "tracked_y", "top_row", "top_row_y",
-                       "rows", "last_len", "generating", "tool_running", "conv"],
+                       "rows", "last_len", "generating", "tool_running", "conv", "geo_dist"],
             "events": events,
             "samples": samples,
         ]

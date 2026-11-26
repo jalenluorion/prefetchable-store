@@ -56,9 +56,19 @@ def follow_check(d, f, s, t_from=0.0, t_to=1e9):
         dev = x[f["dist"]] - base
         if abs(dev) > 1:
             bad.append((abs(dev), t, dev))
-    bad.sort(reverse=True)
-    return {"samples": n, "resting_dist": base, "over_1pt": len(bad), "max_pt": round(bad[0][0], 1) if bad else 0.0,
-            "worst": [{"t": t, "dev": round(dev, 1), "at": near_event(d["events"], t)} for _, t, dev in bad[:6]]}
+    # contiguous episodes off the bottom (gaps under 0.1 s join)
+    eps = []
+    for dev_abs, t, dev in sorted(bad, key=lambda b: b[1]):
+        if eps and t - eps[-1]["end"] < 0.1:
+            e = eps[-1]; e["end"] = t; e["frames"] += 1
+            if dev_abs > abs(e["max_dev"]): e["max_dev"] = round(dev, 1)
+        else:
+            eps.append({"start": t, "end": t, "frames": 1, "max_dev": round(dev, 1), "at": near_event(d["events"], t)})
+    for e in eps:
+        e["seconds"] = round(e["end"] - e["start"] + 0.017, 2)
+    eps.sort(key=lambda e: -abs(e["max_dev"]))
+    return {"samples": n, "resting_dist": base, "over_1pt": len(bad), "max_pt": round(max(b[0] for b in bad), 1) if bad else 0.0,
+            "episodes": len(eps), "worst_episodes": eps[:10]}
 
 
 def finger_check(d, f, s, t_from=0.0, t_to=1e9):
@@ -70,6 +80,8 @@ def finger_check(d, f, s, t_from=0.0, t_to=1e9):
         if t < t_from or t > t_to or not (a[f["tracking"]] and b[f["tracking"]]):
             continue
         if a[f["top_row"]] is None or a[f["top_row"]] != b[f["top_row"]]:
+            continue
+        if a[f["pan_y"]] == 0 or b[f["pan_y"]] == 0:  # the pan's first frames (its translation reads 0, then jumps)
             continue
         n += 1
         mis = (b[f["top_row_y"]] - a[f["top_row_y"]]) - (b[f["pan_y"]] - a[f["pan_y"]])
@@ -135,7 +147,7 @@ def hold_check(d, f, s):
 def open_check(d, f, s):
     out = []
     marks = [(t, e) for t, e in d["events"] if e.split(" ")[0] in ("switch", "push")]
-    ends = [t for t, _ in d["events"]] + [1e9]
+    ends = [t for t, e in d["events"] if e.split(" ")[0] in ("switch", "push", "back", "touch", "script")] + [1e9]
     base = resting_dist(f, s)
     for t0, name in marks:
         t1 = min(t for t in ends if t > t0 + 0.01)
