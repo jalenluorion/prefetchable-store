@@ -1155,7 +1155,33 @@
       },
       {
        "setting": "w 0.15, waiting for reads in flight (this)",
-       "status": "to be added (being measured)"
+       "status": "measured over both texts: modes.fast.calibration.mac_two_texts"
+      }
+     ]
+    },
+    "mac_two_texts": {
+     "measured": "base M4, phone profile, 4.0 GB cache, the same 2,200 teacher-forced positions (1,100 code + 1,100 prose), the declared form with reads in flight waited for",
+     "rows": [
+      {
+       "setting": "w 0.10",
+       "top1_agree": 0.983,
+       "positions_differing": 38,
+       "nll_delta": 0.0058,
+       "mb_per_token": 253
+      },
+      {
+       "setting": "w 0.13",
+       "top1_agree": 0.976,
+       "positions_differing": 52,
+       "nll_delta": 0.0075,
+       "mb_per_token": 234
+      },
+      {
+       "setting": "w 0.15 (this)",
+       "top1_agree": 0.978,
+       "positions_differing": 48,
+       "nll_delta": 0.0072,
+       "mb_per_token": 228
       }
      ]
     },
@@ -1455,7 +1481,7 @@
        }
       }
      ],
-     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value until measured on the iPhone"
+     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value, measured on the iPhone: profiles.phone-small.prefill.calibration"
     }
    },
    "run_ahead": {
@@ -1927,6 +1953,25 @@
     "calibration": {
      "measured": "iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact ids identical either way: 0.65 / 0.65 took 48.7 / 61.1 s (exact / fast) against 40.0 / 50.2 s off from a nominal start, 56.5 / 67.1 against 44.8 / 54.5 s from serious, and left 0.12-0.22 GB more footprint; the projections alone 59.5 / 55.4 s",
      "reason": "off by measurement: 20% slower with the split (the CPU waits on the GPU's NVFP4 expert share); the same as the built-in CPU only, declared to keep the measurement beside it"
+    }
+   },
+   "prefill": {
+    "apart": 1,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), 2026-11-26: a long chat, the prompt kept apart from the decode's cache statistics (apart 1) or not (0)",
+     "rows": [
+      {
+       "setting": "apart 1 (this, the model-level value)",
+       "tok_s": "1.5-1.8",
+       "memory_warning": true
+      },
+      {
+       "setting": "apart 0",
+       "tok_s": "1.5-1.8",
+       "memory_warning": true
+      }
+     ],
+     "reason": "no difference measured on the phone, so the model-level value stays (on the Mac it is off: profiles.mac.prefill.calibration); measured on phone-small, carried to phone"
     }
    },
    "ctx": {

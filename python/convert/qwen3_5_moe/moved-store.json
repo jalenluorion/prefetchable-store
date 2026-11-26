@@ -1470,7 +1470,7 @@
        }
       }
      ],
-     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value until measured on the iPhone"
+     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value, measured on the iPhone: profiles.phone-small.prefill.calibration"
     }
    },
    "run_ahead": {
@@ -2049,7 +2049,7 @@
     }
    ],
    "bytes": 20352447020,
-   "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast (threshold 0.08) 0.891 / 0.881",
+   "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast at the threshold then declared (0.08) 0.891 / 0.881; not measured against this reference at the rule now in force (w 0.15; against exact on the device: modes.fast.calibration.phone)",
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
    "prefill_gpu": {
@@ -2058,6 +2058,29 @@
     "calibration": {
      "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
      "reason": "the GPU split pays on this phone for this model"
+    }
+   },
+   "prefill": {
+    "apart": 1,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), 2026-11-26: decode after a ~460-token prompt, the prompt kept apart from the decode's cache statistics (apart 1) or not (0)",
+     "rows": [
+      {
+       "setting": "apart 1 (this, the model-level value)",
+       "tok_s": 3.91,
+       "mb_per_token": 174,
+       "cache_kept_after_prompt_gb": 1.37,
+       "memory_warnings": 0
+      },
+      {
+       "setting": "apart 0",
+       "tok_s": 3.43,
+       "mb_per_token": 170,
+       "cache_kept_after_prompt_gb": 1.42,
+       "memory_warnings": 0
+      }
+     ],
+     "reason": "kept apart on the phone: 3.91 against 3.43 tok/s for 4 MB more read per token, no memory warning either way (on the Mac it is off: profiles.mac.prefill.calibration); measured on phone-small, carried to phone"
     }
    },
    "ctx": {

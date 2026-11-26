@@ -62,10 +62,14 @@ typedef struct dm_open_opts {
   int qos;                 /* DM_QOS_* of the compute workers and of the caller during dm_sync / dm_step */
   int core_class;          /* DM_CORES_*: DM_CORES_PERF caps threads at the performance cores (sysctl hw.perflevel0) */
   int readers;             /* expert reader threads; 0 = 4 */
-  int64_t cache_bytes;     /* expert cache budget in bytes; 0 = 3.3e9 on macOS; on iOS sized at open from
-                              os_proc_available_memory(): available - resident file - router file - 0.3 GB (state,
-                              scratch) - 0.9 GB (margin), clamped to [0.6, 8.0] GB (P2: at 4.27 GB available a 1.0 GB
-                              slab drew no warning, 1.3 GB did) */
+  int64_t cache_bytes;     /* expert cache budget in bytes; 0 = the profile's: on macOS a profile's automatic cache
+                              (mac: cache auto, and a phone profile's slab) with DM_MEM_MLOCK is sized by the Mac's rule
+                              (profiles.mac.cache_start and the ceiling, as dmeng and dmserve), else 3.3e9; on iOS (not DM_MEM_FILE) a slab
+                              sized once at open by the profile's cache_slab rule (presets.h SlabRule): "available" =
+                              os_proc_available_memory() - resident file - router file - 0.3 GB (state, scratch) - 0.9 GB
+                              (margin) (P2: at 4.27 GB available a 1.0 GB slab drew no warning, 1.3 GB did), or
+                              "footprint_target" = the device class's footprint target - the model's non-cache footprint
+                              (phone-small: 2.96 GB less 1.54 / 1.26 GB for the 35B / Inkling); clamped to [0.6, 8.0] GB */
   int memory_mode;         /* DM_MEM_* of the expert cache; default DM_MEM_MLOCK on both (iOS since P2: the FILE tier
                               read at 0.56 GB/s against 0.74 for a locked slab, and the OS kept 0.85 GB of it) */
   int res_memory_mode;     /* resident weights: DM_MEM_MLOCK, DM_MEM_PLAIN, or DM_MEM_FILE (mapped read-only from the
@@ -133,15 +137,18 @@ typedef struct dm_open_opts {
                               NULL = none (iOS: prefill_release=1, the batched prefill's scratch freed after each prompt) */
   /* Batched prefill split with the GPU (Metal; exact: the GPU's rows are the CPU kernels' bits, so tokens do not
    * change). The GPU computes this share of each matrix's rows while the CPU computes the rest, for prefill sub-chunks
-   * of at least prefill_gpu_min positions. 0 = the profile's share (mac: 0.4 and 0.4 for both models;
-   * every other profile: CPU only), < 0 = CPU only. Builds without Metal refuse > 0 (the profile's is 0 there). */
+   * of at least prefill_gpu_min positions. 0 = the profile's share (profiles.<p>.prefill_gpu: mac 0.4 and 0.4 for the
+   * three models; phone and phone-small 0.65 and 0.65 for the 35B, CPU only for Inkling), < 0 = CPU only. Builds without
+   * Metal refuse > 0 (the profile's is 0 there). */
   double prefill_gpu_frac;    /* attention projections (8- or 4-bit resident) */
   double prefill_gpu_experts; /* experts' products: routed experts in a locked / plain slab, and the shared expert */
-  int prefill_gpu_min;        /* 0 = 256 */
+  int prefill_gpu_min;        /* 0 = the model's declared prefill.gpu_min (64 in every published manifest; 256 built in) */
   int prefill_gpu_int_kernel; /* 0 = the matrix-unit kernel (default), 1 = the integer kernel (the same bits; slower) */
-  int prefill_gpu_min_wave;   /* a wave of landed experts uses the GPU from this many (position, expert) pairs; 0 = 128 */
-  int run_ahead;              /* run-ahead while a step waits on reads: the picks it names; 0 = the profile's (mac: 8;
-                                 phones: off), < 0 = off */
+  int prefill_gpu_min_wave;   /* a wave of landed experts uses the GPU from this many (position, expert) pairs; 0 = the
+                                 model's declared prefill.gpu_min_wave (128 in every published manifest) */
+  int run_ahead;              /* run-ahead while a step waits on reads: the picks it names; 0 = the profile's (the 35B and
+                                 Inkling: 8 on every profile, on phone and phone-small in exact mode only; Flash-Next's
+                                 mac: 10), < 0 = off */
   int run_ahead_depth;        /* its depth in layers; 0 = the profile's (1) */
   double run_ahead_budget;    /* its speculative ms per token at most this x the running-average compute per token;
                                  0 = the profile's (phones, exact: 0.2), < 0 = no limit */

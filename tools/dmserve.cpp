@@ -107,7 +107,8 @@ struct Args {
   double draft_margin = 0.05;
   double gpu_frac = 0;       // prefill: share of each attention projection's rows on the GPU (exact); 0 = CPU only
   double gpu_experts = 0;    // prefill: share of the experts' rows on the GPU (exact); 0 = CPU only
-  int gpu_min = 0;           // prefill: GPU for sub-chunks of at least this many positions; 0 = the model's default (256)
+  int gpu_min = 0;           // prefill: GPU for sub-chunks of at least this many positions; 0 = the model's declared
+                             // prefill.gpu_min (64 in every published manifest; 256 built in)
   std::string gpu_kernel;    // prefill: "integer" or "matrix" (default) GPU kernel (the same bits)
   bool ref_no_gpu = false;   // --check: the reference run with the GPU split off
   int run_ahead = 0, run_ahead_depth = 1;  // run-ahead while a step waits on reads: picks named (0 = off), depth (profile's)
