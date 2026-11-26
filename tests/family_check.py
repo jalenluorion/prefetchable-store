@@ -10,7 +10,9 @@ checked):
   invariance  exact mode: logits and greedy ids identical, bit for bit, with every expert held / few slots (evictions and
               re-reads), 1 / 4 / 5 compute threads, the folder's router naming, run-ahead, and an oracle replaying the
               recorded routing at leads 1 and one token; names + run-ahead with the names' reads held in flight
-              (DMENG_TEST_SPEC_READ_US: a miss finds every free slot still being read)
+              (DMENG_TEST_SPEC_READ_US: a miss finds every free slot still being read); the spare tier on (--spare-mem 1:
+              probation budgets that overflow and that hold every record, 1 thread, names + run-ahead, names in flight,
+              greedy ids), each run checked to have promoted records and served reuses from the file cache
   prefill     the batched prefill equals single steps: dmserve --check (logits, fixed state, KV, greedy continuation; CPU,
               and the GPU's share on a Metal build), and dmeng's ids after a batched and a token-by-token prompt
   checkpoint  dmserve --check-ckpt (a long request, the same again, one diverging at 60%, each equal to a cold computation)
@@ -159,24 +161,46 @@ if wanted("invariance"):
             variants += [("few slots, router names", FEW + RT), ("few slots, router names + run-ahead", FEW + RT + ["--run-ahead", str(K)])]
         variants += [("oracle lead 1", FEW + ["--prefetch", "oracle", "--oracle", rec, "--lead", "1"]),
                      ("oracle lead token", ["--cache-gb", f"{TOK_GB:.6f}", "--prefetch", "oracle", "--oracle", rec, "--lead", "token"])]
-        bad, reads = [], []
+        # the spare tier on (store.h): reads land in probation, reuse promotes into the slab; a probation budget the
+        # reads overflow (the oldest dropped) and one that holds every record the slab does not
+        SPARE_LO = ["--spare-mem", "1", "--spare-gb", f"{0.2 * sum(rb) * meta['experts'] / 1e9:.6f}"]
+        SPARE_HI = ["--spare-mem", "1", "--spare-gb", f"{0.8 * sum(rb) * meta['experts'] / 1e9:.6f}"]
+        spare = [("few slots, spare tier (small budget)", FEW + SPARE_LO), ("few slots, spare tier (every record)", FEW + SPARE_HI),
+                 ("few slots, spare tier, 1 thread", FEW + SPARE_LO + ["--threads", "1"])]
+        if RT:
+            spare += [("few slots, spare tier, router names + run-ahead", FEW + SPARE_LO + RT + ["--run-ahead", str(K)])]
+        variants += spare
+        bad, reads, tier, pageins = [], [], [], []
         for nm, fl in variants:
             g, js = logits("v", 300, *fl)
             reads.append(js.get("reads", 0))
             if g != base:
                 bad.append(nm)
+            if "--spare-mem" in fl:  # the tier must have run: records promoted, reuses served from the file cache
+                sm = js.get("spare_memory") or {}
+                tier.append(sm.get("promotions_per_token", 0))
+                pageins.append(sm.get("pageins", -1))
+                if not (sm.get("promotions_per_token", 0) > 0 and sm.get("reuses_per_token", 0) > 0):
+                    bad.append(f"{nm}: the tier did not run as expected ({json.dumps(sm)[:300]})")
         if RT:  # names' reads held 3 ms in flight (one reader), as on a busy machine: a miss waits for one to land
             b40, _ = logits("base40", 40, "--cache-gb", f"{ALL_GB:.6f}")
             g, _ = logits("v40", 40, *FEW, *RT, "--run-ahead", str(K), "--readers", "1", env={"DMENG_TEST_SPEC_READ_US": "3000"})
             if g != b40:
                 bad.append("few slots, router names + run-ahead, names' reads held in flight (40 positions)")
+            g, _ = logits("v40s", 40, *FEW, *SPARE_LO, *RT, "--run-ahead", str(K), "--readers", "1", env={"DMENG_TEST_SPEC_READ_US": "3000"})
+            if g != b40:
+                bad.append("few slots, spare tier, router names + run-ahead, names' reads held in flight (40 positions)")
         g0, _ = greedy("g0", "--cache-gb", f"{ALL_GB:.6f}")
         g1, _ = greedy("g1", *FEW, *RT, "--threads", "1")
         if g0 != g1:
             bad.append("greedy ids, few slots / names / 1 thread")
+        g2, _ = greedy("g2", *FEW, *SPARE_LO, *RT)
+        if g0 != g2:
+            bad.append("greedy ids, few slots / spare tier / names")
         verdict("invariance", "FAIL" if bad else "PASS",
                 (f"differ: {', '.join(bad)}" if bad else f"{len(variants) + 1} runs identical (300 positions; reads per run {min(reads)}-{max(reads)})"
-                           + ("; names' reads held in flight: identical (40 positions)" if RT else ""))
+                           + ("; names' reads held in flight: identical (40 positions)" if RT else "")
+                           + f"; spare tier on in {len(tier)} (promotions per token {min(tier):.2f}-{max(tier):.2f}, process page-ins {min(pageins)}-{max(pageins)}) and the greedy ids")
                 + ("" if RT else "; the folder has no router file"))
     except Exception as e:
         verdict("invariance", "FAIL", str(e)[-400:])

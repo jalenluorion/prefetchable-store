@@ -30,7 +30,7 @@ generators and references), `MLX_PY` one with mlx and mlx-lm with the Inkling 2 
 | check | what it compares |
 |---|---|
 | reference | exact decode against an independent reference: `tests/<family>/tiny_check.py` (transformers' model for the 35B and Flash-Next, the PR's MLX model for Inkling, each given exactly the engine's weights): the fp32 reference path within 1e-4 of max \|logit\| where the family has one, the speed path's agreement |
-| invariance | exact mode: logits (300 positions) and greedy ids bit-identical with every expert held / few slots, 1 / 4 / 5 threads, router names, run-ahead, oracle replays; names + run-ahead with the names' reads held in flight (`DMENG_TEST_SPEC_READ_US`: a miss whose free slots are all still being read waits for one) |
+| invariance | exact mode: logits (300 positions) and greedy ids bit-identical with every expert held / few slots, 1 / 4 / 5 threads, router names, run-ahead, oracle replays; names + run-ahead with the names' reads held in flight (`DMENG_TEST_SPEC_READ_US`: a miss whose free slots are all still being read waits for one); the same with the spare tier on (`--spare-mem 1`, probation budgets small and whole), each run checked to have promoted and served reuses |
 | prefill | batched prefill == single steps (dmserve --check: logits, fixed state, KV, greedy continuation; CPU, sub-chunks, GPU share, few slots) and dmeng's ids batched == token by token |
 | checkpoint | dmserve --check-ckpt (long / identical / diverging requests, each equal to a cold computation) and dmeng --state-check |
 | server | the server worker's greedy and sampled ids equal dmeng's |
@@ -67,6 +67,7 @@ lines for a comparison made outside them.
 | `prefill_check.sh MODEL_DIR` | a batched prefill leaves byte-identical logits, state and KV to single decode steps, and the same greedy continuation | a real model folder |
 | `c_api/dm_gate.c` (driver, built as `dm_gate`) | ids through the C API only, greedy or sampled with the app's sampler, through `dm_step` or `dm_step_n` (drafting: `--draft`, `--skeleton`, `--repeat`; arms in one process: `--arms`), optional mid-decode budget change and cancel test, to compare with dmeng's | a real model folder |
 | `evict_check/evict_check.cpp` (driver) | the cache's eviction decisions on a recorded routing, one line per eviction, to compare with the offline simulator | a recorded routing |
+| `spare_tier/spare_tier_check.cpp` (built as `spare_tier_check`; `tiny_all.sh` runs it) | the spare tier on a small store of known bytes: a read lands in probation (the mapping's bytes, resident, no page-in when read; the page-in counter's control), a reuse inside a token does not promote and one at a later token does (the slab gets the file's bytes, the file pages go), a pinned record waits, the budget drops the oldest's pages, a reclaimed record is a miss (unpinned) or re-read in place (pinned), a promotion of reclaimed pages is dropped, names land in probation, a pause drains it, two pools, the tier off | nothing (a scratch folder) |
 
 ## Optional: the real models against an independent MLX runner
 

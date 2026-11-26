@@ -26,6 +26,9 @@ PY=(qwen3_5_moe $TP inkling2_loop $MP qwen4_exp $TP)
 fail=0
 # the engine's fallback for keys a folder's manifest leaves out is generated from the published manifests: it must be current
 python3 $R/python/convert/published_defaults.py --check || fail=1
+# the spare tier's mechanics on a small store of known bytes (no model: tests/spare_tier/spare_tier_check.cpp)
+$B/spare_tier_check $O > $O/spare_tier_check.txt 2>&1 || { echo "FAIL spare_tier_check (see $O/spare_tier_check.txt)"; fail=1; }
+tail -1 $O/spare_tier_check.txt
 for f in ${=FAMILIES:-qwen3_5_moe inkling2_loop qwen4_exp}; do
   py=${PY[$f]}
   log=$O/$f.log
