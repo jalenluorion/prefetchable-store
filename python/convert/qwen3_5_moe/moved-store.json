@@ -1892,12 +1892,14 @@
   "eviction": "auto",
   "drafts": false,
   "experts": "aff4_g64: our 4-bit affine, groups of 64 (store/)",
+  "priority_reads": true,
   "notes": {
    "routers": "linear_k2 names experts 2 layers early; its engine file is derived/router.linear_k2.q8...bin",
    "names": "top 8 on mac and phone; phone-small overrides it with the confidence rule (tau 0.5, 16 candidates)",
    "cross_token": "none yet",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
-   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only)"
+   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only)",
+   "priority_reads": "speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out: the same for every family"
   }
  },
  "layout": {

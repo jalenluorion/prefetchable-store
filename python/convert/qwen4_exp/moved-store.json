@@ -1406,7 +1406,8 @@
   "cross_token": null,
   "eviction": "auto",
   "layer_caps": "none",
-  "drafts": false
+  "drafts": false,
+  "priority_reads": true
  },
  "layout": {
   "derived_dir": "derived/",

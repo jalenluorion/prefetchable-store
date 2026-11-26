@@ -1791,11 +1791,13 @@
   "eviction": "auto",
   "drafts": false,
   "experts": "as released: NVFP4 (layers 0-19), MXFP8 (layers 20-23)",
+  "priority_reads": true,
   "notes": {
    "routers": "linear_k2 names experts 2 steps early (one linear layer: about a fifth of the MLP's router bytes per token); its engine file is derived/router.linear_k2.q8...bin; mlp_k2_h512 stays available (--routers or routers_id)",
    "cross_token": "source 47 names the next token's experts for its first six steps (engine targets 0-5), with priority reads",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
-   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only); the release's draft head through the command-line tool only (the mac profile's optional parts)"
+   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only); the release's draft head through the command-line tool only (the mac profile's optional parts)",
+   "priority_reads": "speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out: the same for every family"
   }
  },
  "cross_token_routers": [

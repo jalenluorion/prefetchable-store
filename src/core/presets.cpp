@@ -291,8 +291,11 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
       }
     }
     p.xtok_tau = (*xt)["tau"].f(0.5);
-    p.rd_prio = !p.xtok.empty() && (*xt)["priority_reads"].kind == Json::BOOL && (*xt)["priority_reads"].b;
+    p.rd_prio = !p.xtok.empty() && (*xt)["priority_reads"].kind == Json::BOOL && (*xt)["priority_reads"].b;  // (older manifests)
   }
+  // speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out:
+  // defaults.priority_reads (every family's declaration), else the cross-token entry's (an older manifest)
+  if (const Json* pr = dflt("priority_reads"); pr && pr->kind == Json::BOOL) p.rd_prio = pr->b && (!p.routers.empty() || !p.xtok.empty());
   if (const Json* ev = dflt("eviction")) p.evict = ev->str_or("auto");
   if (const Json* lc = dflt("layer_caps")) p.layer_caps = lc->str_or("");
   if (const Json* dr = dflt("drafts")) p.drafts = dr->kind == Json::BOOL && dr->b;
@@ -476,10 +479,8 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   if (pf && !addr) {
     r.routers = P.routers;
     r.xtok = P.xtok;
-    if (!P.xtok.empty()) {
-      r.xtok_tau = P.xtok_tau;
-      if (P.rd_prio) r.rd_prio = 1;
-    }
+    if (!P.xtok.empty()) r.xtok_tau = P.xtok_tau;
+    if (P.rd_prio) r.rd_prio = 1;
   }
   if (g.xtok_tau) r.xtok_tau = *g.xtok_tau;
   if (g.rd_prio) r.rd_prio = *g.rd_prio ? 1 : 0;

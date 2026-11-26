@@ -18,6 +18,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "rule": "confidence",
     "tau": 0.5
    },
+   "priority_reads": true,
    "routers": [
     "linear_k2",
     "mlp_k2_h512"
@@ -135,6 +136,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "m": 8,
     "rule": "top"
    },
+   "priority_reads": true,
    "routers": [
     "linear_k2"
    ]
@@ -250,6 +252,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "m": 4,
     "rule": "top"
    },
+   "priority_reads": true,
    "routers": [
     "mlp_k4"
    ]
