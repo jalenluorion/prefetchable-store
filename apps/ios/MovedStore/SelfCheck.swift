@@ -174,46 +174,50 @@ enum SelfCheck {
     /// `-selfcheck-remove-35b`: the swap's removal (approved procedure): the 35B's model folder (Documents/dmeng-model) and
     /// its saved states (Application Support/<bundle>/dmeng-prefix) are deleted, every file logged with its size; nothing
     /// else (conversations, Inkling's folder and states, settings) is touched. Then the result is written and the app exits.
-    static func remove35B() -> [String: Any] {
+    static func remove35B() -> [String: Any] { removeModel(.qwen36, states: true, tag: "remove-35b") }
+
+    /// `-selfcheck-remove-inkling`: Inkling's model folder (Documents/dmeng-model-inkling) only, the same way; its saved
+    /// states, the conversations, the 35B's folder and the settings are kept.
+    static func removeModel(_ kind: ModelKind, states: Bool, tag: String) -> [String: Any] {
         let fm = FileManager.default
         var r: [String: Any] = ["free_before": freeGB()]
         var files: [[String: Any]] = []
         var total: Int64 = 0
-        for root in [ModelKind.qwen36.folder, DmengLaunch.prefixDir(.qwen36)] {
+        for root in [kind.folder] + (states ? [DmengLaunch.prefixDir(kind)] : []) {
             if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.fileSizeKey, .isRegularFileKey]) {
                 for case let u as URL in e {
                     guard let v = try? u.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey]), v.isRegularFile == true else { continue }
                     let n = Int64(v.fileSize ?? 0)
                     total += n
                     files.append(["path": u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: ""), "bytes": n])
-                    log("SELFCHECK remove-35b \(u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: "")) (\(n) bytes)")
+                    log("SELFCHECK \(tag) \(u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: "")) (\(n) bytes)")
                 }
             }
-            do { try fm.removeItem(at: root); log("SELFCHECK remove-35b removed \(root.lastPathComponent)/") }
+            do { try fm.removeItem(at: root); log("SELFCHECK \(tag) removed \(root.lastPathComponent)/") }
             catch {
                 // a folder copied onto the phone by cable is not the app's to unlink from: each file is emptied in place
                 // instead (its space freed; the empty name stays, and a later copy overwrites it)
-                log("SELFCHECK remove-35b could not remove \(root.lastPathComponent)/ (\(error.localizedDescription)): emptying its files")
+                log("SELFCHECK \(tag) could not remove \(root.lastPathComponent)/ (\(error.localizedDescription)): emptying its files")
                 var emptied = 0
                 if let e = fm.enumerator(at: root, includingPropertiesForKeys: [.isRegularFileKey]) {
                     for case let u as URL in e {
                         guard (try? u.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
                         if (try? fm.removeItem(at: u)) != nil { emptied += 1; continue }
                         if let h = try? FileHandle(forWritingTo: u) {
-                            do { try h.truncate(atOffset: 0); emptied += 1 } catch { log("SELFCHECK remove-35b could not empty \(u.lastPathComponent): \(error)") }
+                            do { try h.truncate(atOffset: 0); emptied += 1 } catch { log("SELFCHECK \(tag) could not empty \(u.lastPathComponent): \(error)") }
                             try? h.close()
-                        } else { log("SELFCHECK remove-35b could not open \(u.lastPathComponent)") }
+                        } else { log("SELFCHECK \(tag) could not open \(u.lastPathComponent)") }
                     }
                 }
                 r["emptied_\(root.lastPathComponent)"] = emptied
-                log("SELFCHECK remove-35b emptied \(emptied) files in \(root.lastPathComponent)/")
+                log("SELFCHECK \(tag) emptied \(emptied) files in \(root.lastPathComponent)/")
             }
         }
         r["files"] = files
         r["bytes"] = total
         r["free_after"] = freeGB()
         r["conversations"] = ConversationStore.loadAll().count
-        log("SELFCHECK remove-35b: \(files.count) files, \(total) bytes; free \(freeGB())")
+        log("SELFCHECK \(tag): \(files.count) files, \(total) bytes; free \(freeGB())")
         return r
     }
 
@@ -241,6 +245,11 @@ enum SelfCheck {
         optsOverride = arg("-selfcheck-opts")  // model options for every open of this launch (a measurement's setting)
         if let m = arg("-selfcheck-mode") { modeOverride = m; out["mode_override"] = m }  // the launch's mode (exact / fast)
         if let o = optsOverride { out["opts"] = o }
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-inkling") {
+            out["remove_inkling"] = removeModel(.inkling, states: false, tag: "remove-inkling")
+            finish()
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-35b") {
             out["remove_35b"] = remove35B()
             finish()
