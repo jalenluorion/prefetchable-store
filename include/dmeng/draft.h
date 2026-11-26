@@ -149,7 +149,7 @@ class HeadSource : public DraftSource {
   std::vector<float> prob_;  // the last proposal's probabilities
 };
 
-// A light draft head trained outside the engine (the 35B's: jobs/babel/q36_draft_head.py; model-agnostic). From the
+// A light draft head trained outside the engine (the 35B's: the trainer's q36_draft_head.py, outside this repository; model-agnostic). From the
 // post-norm final hidden state h_t of the last committed position and the token just chosen from it:
 //   z_0 = h_t; for draft offset j = 1..ND: u = [rmsnorm(z_{j-1}) * norm_z_j, rmsnorm(e_j) * norm_e_j] (fp32, eps 1e-6),
 //   z_j = z_{j-1} + down_j(silu(up_j(u))), e_1 = the embedding row of the token chosen from h_t, e_j = that of draft j-1;

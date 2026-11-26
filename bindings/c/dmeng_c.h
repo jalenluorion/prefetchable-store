@@ -214,7 +214,7 @@ void dm_cancel_clear(dm_engine* e);
 /* Write the disk copy of the live sequence's prefix [0, pos) if pos is a checkpointed position. */
 int dm_persist(dm_engine* e, int pos);
 
-/* Sampling, in the order of transformers / mlx_run.py: penalties on the raw logits over history[0..n_history) (the
+/* Sampling, in the order of transformers / mlx-lm: penalties on the raw logits over history[0..n_history) (the
  * tokens generated so far in this reply), temperature, top-k, then top-p and min-p on the tempered distribution of the
  * top-k survivors, one draw. The draw uses a generator seeded by (seed, n_history), so a reply is a pure function of its
  * logits, its seed and its tokens. temp <= 0 and no penalties: argmax (lowest index on ties). */

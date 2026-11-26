@@ -389,7 +389,7 @@ struct Cache {
     if (!hzm_ok.empty()) std::fill(hzm_ok.begin(), hzm_ok.end(), 0);
   }
 
-  // learned ranker over hazard's shortlist (the design study's "v3": jobs/babel/eviction_v3.py Ranked, policy files
+  // learned ranker over hazard's shortlist (the design study's "v3": its eviction_v3.py Ranked, policy files
   // q36_d_evict3_policy.json / ink_d_evict3_policy.json): at an eviction the `prefilter` unpinned, landed records with
   // the lowest hazard keep score (of the pool; with caps, of the layer) are scored by a small model on named features of
   // each record, and the lowest score goes (ties: the lower hazard order). Model-independent: the features are taken by
@@ -443,7 +443,7 @@ struct Cache {
   void router_top(long tok, int step, const int32_t* idx, const float* p, int n);
   void step_end(int step);                                        // Core::finish_step: the step's statistics are in
   // eviction trace (dmeng --evict-trace F): per (token, step) the released row and the early router's row, top 32 each,
-  // for replaying this run in the simulator (jobs/babel/eviction_v3.py) with the features the engine saw
+  // for replaying this run in the design study's simulator (eviction_v3.py) with the features the engine saw
   bool tr_on = false;
   long tr_npos = 0;
   std::vector<int16_t> tr_rel_i, tr_rt_i;                  // [npos, steps, 32], -1: none

@@ -105,7 +105,7 @@ struct Approx {
   double read_mass = 2;    // ... and the largest missing picks until the step's missing released weight <= read_mass
   bool bg = true;          // a replaced miss is fetched in the background for the layer's next use
   int cold_floor = -1;     // replacing needs at least this many other landed experts of the layer, else the step runs
-                           // lossless (-1: 2K; 0: never, the old MLX runner's released top-k among whatever is held)
+                           // lossless (-1: 2K; 0: never: the released top-k among whatever is held)
   bool drop = false;       // leave a missing pick out instead of replacing it; the kept picks keep their released weights
                            // (the release's top-K weighting, no re-weighting over the kept set)
   bool prio = true, cancel = true;  // reader settings that go with it: nearest step first, stale reads dropped

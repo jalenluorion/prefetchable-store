@@ -165,8 +165,8 @@ int main(int argc, char** argv) {
       return 1;
     }
     printf("%s:%s (%s) -> %s\n", src.c_str(), m.emb_tensor.c_str(), t->dtype.c_str(), out.c_str());
-    // the header of the Hub staging tool (local/hub_staging/tools/stage.py embeddings()), byte for byte, so a derived
-    // file and the Hub's part have the same sha256: compact JSON, __metadata__ first, padded with spaces to 8 bytes
+    // the header the Hub's embeddings part was written with, byte for byte, so a derived file and the Hub's part have
+    // the same sha256: compact JSON, __metadata__ first, padded with spaces to 8 bytes
     const Part* sp = m.part(m.emb_file);
     std::string hdr = "{\"__metadata__\":{\"format\":\"moved-store-embedding\",\"format_version\":\"1.0\",\"tensor\":\"" +
                       t->name + "\",\"source\":\"" + m.emb_file + "\",\"source_sha256\":\"" + (sp ? sp->sha256 : "") +

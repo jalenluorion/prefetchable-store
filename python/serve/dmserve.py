@@ -52,14 +52,14 @@ ap.add_argument("--allow-force", action="store_true", help=adv("benchmarks only:
 ap.add_argument("--preserve-thinking", type=int, default=None, choices=[0, 1], help=adv("1: every earlier assistant turn keeps its reasoning in the prompt (the chat template's preserve_thinking; a request's chat_template_kwargs still wins), so the history stays the token sequence the model produced and a new user message reuses the live prefix instead of recomputing the last turn; 0: the template's default (Qwen3.6 drops the reasoning of turns before the last user message). Default: 1 where the model's chat template has the switch (Qwen3.6; Flash-Next's template keeps the reasoning already), else the template's own"))
 ap.add_argument("--idle-s", type=float, default=300, help=adv("stop the model worker after this long without a request (frees its locked memory); the next request starts it again and the prefix cache resumes from disk (0: never)"))
 ap.add_argument("--reasoning-effort", default=None, help="thinking effort when a request names none (xhigh, medium, low, none; default: the template's own)")
-ap.add_argument("--canned-title", type=int, default=0, help=adv("1: a request without tools whose model name ends in 'title' (a client's thread-title request) is answered from the last user message's first words, without the model (the old runner's demo)"))
-ap.add_argument("--warm", type=int, default=0, help=adv("1: at start and when the date changes, prefill the last main request's system prompt and first user message (today's date written in) while idle, so a new thread finds its prefix (the old runner's --warm); the request is kept in <model>/.dmeng/last_request.json"))
-ap.add_argument("--retok-reuse", type=int, default=0, help=adv("1: when a main request sends the model's own last turn back re-rendered (the same text, other token boundaries), continue from the state computed on the model's own tokens instead of prefilling the turn again (the old runner's re-tokenized prefix)"))
-ap.add_argument("--demo", action="store_true", help="the old runner's demo settings: --warm 1 --canned-title 1 --retok-reuse 1 --idle-s 0 --reasoning-effort low, and the worker's --ckpt-min 2 --ahead-min 64 (each still overridable)")
+ap.add_argument("--canned-title", type=int, default=0, help=adv("1: a request without tools whose model name ends in 'title' (a client's thread-title request) is answered from the last user message's first words, without the model"))
+ap.add_argument("--warm", type=int, default=0, help=adv("1: at start and when the date changes, prefill the last main request's system prompt and first user message (today's date written in) while idle, so a new thread finds its prefix; the request is kept in <model>/.dmeng/last_request.json"))
+ap.add_argument("--retok-reuse", type=int, default=0, help=adv("1: when a main request sends the model's own last turn back re-rendered (the same text, other token boundaries), continue from the state computed on the model's own tokens instead of prefilling the turn again"))
+ap.add_argument("--demo", action="store_true", help="the agent demo's settings: --warm 1 --canned-title 1 --retok-reuse 1 --idle-s 0 --reasoning-effort low, and the worker's --ckpt-min 2 --ahead-min 64 (each still overridable)")
 argv = sys.argv[1:]
 wargs = argv[argv.index("--") + 1:] if "--" in argv else []
 a = ap.parse_args(argv[: argv.index("--")] if "--" in argv else argv)
-if a.demo:  # the old runner's demo conditions, where the command line does not say otherwise
+if a.demo:  # the agent demo's conditions, where the command line does not say otherwise
     _given = set(x.split("=")[0] for x in (argv[: argv.index("--")] if "--" in argv else argv) if x.startswith("--"))
     for _k, _v in (("--warm", 1), ("--canned-title", 1), ("--idle-s", 0.0), ("--reasoning-effort", "low"), ("--retok-reuse", 1)):
         if _k not in _given:
@@ -344,7 +344,7 @@ LIVE_SEQ = {"ids": None}  # the last main request's prompt + the tokens it gener
 def retok_reuse(ids, marks):
     """ids with the live sequence in place of a re-tokenized copy of it: if ids[:j] spells exactly the live sequence's text
     (the model's own turn sent back through the template, other token boundaries), the live tokens replace ids[:j], so the
-    worker continues from the state it has (the old runner's _retokenized_prefix)"""
+    worker continues from the state it has"""
     L = LIVE_SEQ["ids"]
     if not L or ids[: len(L)] == L:
         return ids, marks
@@ -388,7 +388,7 @@ def sse(rid, created, model, delta, finish=None):
 
 
 def title_of(messages):
-    """a thread title from the last user message's first seven words (the old runner's title_of)"""
+    """a thread title from the last user message's first seven words"""
     text = ""
     for m in reversed(messages):
         if m.get("role") == "user":

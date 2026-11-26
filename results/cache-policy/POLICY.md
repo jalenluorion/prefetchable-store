@@ -177,7 +177,7 @@ per application in `wait_ms_by_step`), with `misses_by_step` and `read_queue.bg_
 
 **The sizing says it does not pay; nothing was built.** From the 6 GB run's recorded routing (hazard, one pool, cache
 only: 5.9 misses per token in applications 42-47) and each lead's names, dumped from the routers in
-`local/inkling/model/routers/ink_r_best` (`--router-stats --dump-names`, the same text, ids identical), by
+the model folder's `routers/ink_r_best` (`--router-stats --dump-names`, the same text, ids identical), by
 `engine/names_size.py` (output `engine/names_size.txt`), per token:
 
 | app | misses | recall@8 k1 / k2 / k4 / k8 / k16 | misses named in the top 8, k1 / k2 / k4 / k8 / k16 | wasted name reads top 8, MB, k2 / k16 |

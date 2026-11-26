@@ -111,8 +111,9 @@ Names and run-ahead only schedule reads. What the model computes is decided by i
   tokens never depend on the cache, the routers or timing.
 - **`fast`.** A chosen expert that is not in memory is waited for only if its routing weight is above a threshold;
   otherwise the layer goes on without it. Faster on small caches and slow drives, with a small measured change in
-  output (see Quality). Qwen3.8-Flash-Next's router picks 10 experts per layer: there the missing picks are read
-  heaviest first until at most 0.13 of the routing weight would be left out, and the rest are left out.
+  output (see Quality). For Inkling 2 Mini and Qwen3.8-Flash-Next (whose router picks 10 experts per layer) the
+  missing picks are read heaviest first until at most 0.13 of the routing weight would be left out, and the rest are
+  left out; the 35B keeps the threshold, measured faster on the iPhone.
 
 Prompts run through a batched prefill that reads each expert once per span and leaves the same state, bit for bit, as
 token-by-token steps; on the Mac the GPU computes a share of it beside the CPU with the same bits. The server keeps a

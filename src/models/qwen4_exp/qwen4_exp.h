@@ -3,7 +3,7 @@
 // products go through kernels that give the same bits for one position or many (weights.h mv / mv_multi, the GPU split),
 // so a prefill leaves the state a run of single steps leaves, bit for bit.
 //
-// The architecture (reference/flash/qwen4_exp/language.py; transformers' modeling_qwen4_exp):
+// The architecture (transformers' modeling_qwen4_exp):
 //   h = 4 copies of the token's embedding row: the hyper-connection streams [HC, H]
 //   per layer L:  (the PLE layer only) h += PLE(h, the token's n-gram rows)
 //                 x, inj = GatedResidual_attn(h);  h_s += inj_s * mixer(x)     mixer: Gated DeltaNet or QSA attention
@@ -104,7 +104,7 @@ struct FState : State {
   }
 };
 
-// the n-gram hash (reference/flash/qwen4_exp/language.py NGramEmbedding, transformers' Qwen4ExpTextNGramEmbedding)
+// the n-gram hash (transformers' Qwen4ExpTextNGramEmbedding)
 struct NGramHash {
   int ngram_size = 3, hpn = 8, heads = 16, eos = 0;
   std::vector<uint64_t> mult;        // [ngram_size]

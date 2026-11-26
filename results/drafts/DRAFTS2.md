@@ -218,7 +218,7 @@ python3 bench/drafts/drafts2.py gates timing server table          # the real-mo
 
 ## 7. The 35B's light draft head in the engine (2026-11-23)
 
-Head: `local/q36/draft/heads_lr_h2048.safetensors` (low rank, hidden 2048, 108 MB in AFF8). One run per cell; counters; others' CPU in the tables. Cells below ran on c54cd7a (back-off, head every draft); the acceptance rows ran the head every step (`--draft-light-backoff 0`). Ids: every exact cell identical to the no-draft run; the coding answer under the release sampler, seeds 1-3, head on = off.
+Head: `heads_lr_h2048.safetensors` (low rank, hidden 2048, 108 MB in AFF8). One run per cell; counters; others' CPU in the tables. Cells below ran on c54cd7a (back-off, head every draft); the acceptance rows ran the head every step (`--draft-light-backoff 0`). Ids: every exact cell identical to the no-draft run; the coding answer under the release sampler, seeds 1-3, head on = off.
 
 | case | mode | cache | tokens / step | passes | tokens / pass | width | compute / wait ms per token (run) | MB (urgent) per token | plain steps: compute / wait / MB per token | passes: compute / wait / MB per token | pass cost ratio | head ms per call (drafts) | others' CPU |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The light draft-head source (include/dmeng/draft.h LightHeadSource) on the tiny Qwen3.6 model with random head weights
-in the trainer's format (jobs/babel/q36_draft_head.py export: bf16 safetensors, mlp.{j}.*, proj / vocab), seconds, no real
+in the trainer's format (its q36_draft_head.py export: bf16 safetensors, mlp.{j}.*, proj / vocab), seconds, no real
 model. Exit 0 only if all hold:
   1. with the head held as bf16 (--draft-light-q8 0) every run's drafts equal a numpy reference of the trainer's convention
      on the same h_t and the same tokens (embedding rows from the release), confidences within 2e-3;

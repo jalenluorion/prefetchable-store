@@ -1,12 +1,14 @@
 #!/bin/zsh
-# The gates the integration tree's campaign does not cover (each through engine/bench/guard.py, sequential):
+# The gates the integration tree's campaign does not cover (each through the memory guard, sequential):
 #   per model, one server-worker tool-call request (the rewrite turn, its tool-call fragments sent) drafting off vs on
 #   (--draft lookup --early 4, routers on): identical ids, skeleton drafts offered; and the 35B's fixed-draft stress
 #   (dmeng --draft fixed: the whole draft every step, rolled back part way) against the server's off run of the same prompt.
-R=${0:A:h}/../..; DM=${R:A}/../../../..; DM=${DM:A}; ENG=$DM/engine; G=$ENG/bench/guard.py; O=$R/results/drafts/runs; P=$R/results/drafts/prompts
-Q=$DM/local/q36/model; I=$DM/local/inkling/model
+#   Q36_MODEL, INK_MODEL   the two model folders; INK_RESIDENT  Inkling's 8-bit resident file; GUARD_PY  a memory guard
+#   (GUARD_PY LOG SECONDS -- CMD...: runs CMD, stops it past the memory limit)
+R=${0:A:h}/../..; R=${R:A}; G=${GUARD_PY:?set GUARD_PY}; O=$R/results/drafts/runs; P=$R/results/drafts/prompts
+Q=${Q36_MODEL:?set Q36_MODEL}; I=${INK_MODEL:?set INK_MODEL}
 QW=(--model $Q --cache-gb 5 --mem mlock --ctx 16384 --routers $Q/routers/q36_router_full_k2_h512.dmr --m 8)
-IW=(--model $I --resident $ENG/build_ink/resident_real_b8.bin --cache-gb 6 --mem mlock --ctx 16384 --routers $I/routers/ink_r_best/ink_router_full_k2_h512_b8.dmr)
+IW=(--model $I --resident ${INK_RESIDENT:?set INK_RESIDENT} --cache-gb 6 --mem mlock --ctx 16384 --routers $I/routers/ink_r_best/ink_router_full_k2_h512_b8.dmr)
 for m in q36 ink; do
   if [ $m = q36 ]; then W=($QW); else W=($IW); fi
   for d in off on; do

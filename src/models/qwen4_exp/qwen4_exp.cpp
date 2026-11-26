@@ -202,7 +202,7 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
       w.pnq = R.f32(s + "pnq");
       w.pnc = R.f32(s + "pnc");
       w.pconv = R.f32(s + "pconv");
-      // the hashing constants the release stores must be the ones the model builds (as the reference runner checks)
+      // the hashing constants the release stores must be the ones the model builds (checked at load)
       ng.build(c.V, c.ng_size, c.hpn, c.ng_base, c.ng_div, 0, (uint64_t)c.ng_seed, c.eos);
       const ResFile::T &tm = R.info(s + "ng_mult"), &ts = R.info(s + "ng_sizes"), &to = R.info(s + "ng_offs");
       bool same = tm.nbytes == ng.mult.size() * 8 && ts.nbytes == ng.sizes.size() * 8 && to.nbytes == ng.offs.size() * 8;

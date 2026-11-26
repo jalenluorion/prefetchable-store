@@ -3,7 +3,7 @@ chat template (tokenizer_config.json's chat_template, else chat_template.jinja),
 and the response format (tokenizer_config.json's response_template: the fields of an assistant turn, their open / close
 markers, repeats and joins, content types and the transform to OpenAI tool calls). Same interface as
 python/serve/qwen3_5_moe/chat_format.py, so python/serve/dmserve.py serves any folder that ships these files; written for
-Inkling 2 Mini (local/inkling/model), whose template renders reasoning, text and tool calls as special-token-delimited
+Inkling 2 Mini, whose template renders reasoning, text and tool calls as special-token-delimited
 segments and has no generation prompt (the model's turn starts with its own <|message_model|>).
 
 Checked against the release's own rendering (transformers' apply_chat_template on the same folder) by

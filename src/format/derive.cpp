@@ -198,7 +198,7 @@ bool resident_inkling2_loop(Ctx& c, const Manifest& m, Rule B, int bits = 8, con
   const std::string P = "model.llm.";
   // bits 4 (memory-limited phones, profile phone-small): the same matrices (head and the six attention projections) as
   // plain affine 4-bit g64 (NAME.q4 / .s / .b); everything the 8-bit file keeps exact stays as it is; with a calibrated
-  // export (jobs/babel/ink_q4c_export.py), its codes / scales / biases instead of today's quantiser
+  // export (the trainer's ink_q4c_export.py), its codes / scales / biases instead of today's quantiser
   const char* qs = bits == 4 ? ".q4" : ".q";
   auto put_q = [&](Ctx& cc, const std::string& name, const std::string& key, Rule rule) {
     return cal ? put_q4_cal(cc, *cal, *used, name, key) : ::ms::put_q(cc, name, key, rule, bits, qs);
@@ -271,8 +271,8 @@ bool resident_inkling2_loop(Ctx& c, const Manifest& m, Rule B, int bits = 8, con
   return true;
 }
 
-// Qwen3.8-Flash-Next (qwen4_exp). The 8-bit rule is the Python runner's (reference/flash/mlx_run.py qpred, the manifest's
-// resident.q8_rule): every linear with >= 64 outputs and inputs % 64 == 0, except the released router (mlp.gate),
+// Qwen3.8-Flash-Next (qwen4_exp). The 8-bit rule (the manifest's resident.q8_rule, the one the model was first published
+// with): every linear with >= 64 outputs and inputs % 64 == 0, except the released router (mlp.gate),
 // quantised from its f16 cast with f16 scales (Rule F16); every other linear kept as released (bf16): the router, the
 // shared expert's scalar gate [1, H], the hyper-connections' injection weights [4, 4H], the Gated DeltaNet's a and b
 // [NVH, H]. Zero-centred norms (hc_norm, q_norm, k_norm, the indexer's q / k layernorms, the PLE's three norms) + 1 in

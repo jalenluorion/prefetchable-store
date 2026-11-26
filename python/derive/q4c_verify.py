@@ -2,7 +2,7 @@
 
 usage: python q4c_verify.py OUT CAL PLAIN
   OUT    the calibrated container (DMENGRES1, resident_bits 4)
-  CAL    the calibrated export (jobs/babel/q36_q4c_export.py: BASE.codes / .scales / .biases / .shape, metadata r2_q4c)
+  CAL    the calibrated export (the trainer's q36_q4c_export.py: BASE.codes / .scales / .biases / .shape, metadata r2_q4c)
   PLAIN  today's resident_q4 container (ms_derive resident DIR --bits 4)
 Checks: (1) the name mapping: the export's matrices[].engine_name, the name derived from its release key, and the
 container's NAME.q4 stems are the same 251 names, shapes [R, C/2] / [R, C/64] equal; (2) every NAME.q4 / .s / .b

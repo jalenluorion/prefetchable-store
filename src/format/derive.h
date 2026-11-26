@@ -21,7 +21,7 @@ struct DeriveStats {
 
 // bits 8: resident_q8 (the default); bits 4 (qwen3_5_moe, P2): resident_q4, the same matrices by the same rule at 4 bits
 // (NAME.q4 / .s / .b), everything the 8-bit file keeps exact kept exactly as there.
-// calibrated (bits 4, qwen3_5_moe or inkling2_loop): a calibrated 4-bit export (jobs/babel/q36_q4c_export.py or ink_q4c_export.py: per matrix BASE.codes u8
+// calibrated (bits 4, qwen3_5_moe or inkling2_loop): a calibrated 4-bit export (the trainer's q36_q4c_export.py or ink_q4c_export.py: per matrix BASE.codes u8
 // [R, C/2] two per byte with element 2j in the low nibble, BASE.scales / BASE.biases f16 [R, C/64], BASE.shape i64 [R, C];
 // BASE = the release key without ".weight"): every 4-bit matrix's codes / scales / biases are copied from it as stored
 // (no re-quantisation); every other tensor is derived exactly as for resident_q4. Every matrix of the export must be used.

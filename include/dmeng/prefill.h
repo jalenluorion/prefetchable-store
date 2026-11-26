@@ -48,7 +48,7 @@ struct PrefillOpts {
   double scratch_mb = 0;
   // fast mode: a prompt of at most drop_upto positions keeps the decode's leave-out rule (approx:drop) in its batched pass
   // (each position's light missing picks left out, as a decode step leaves them; its short-span names are only the picks
-  // the rule would read), as the old runner ran its short prompts through its approximate decode; longer prompts, and
+  // the rule would read), as an approximate decode would run them; longer prompts, and
   // every prompt in exact mode, run lossless. 0: never (every family's default)
   int drop_upto = 0;
   // a prompt apart from the decode's cache (Cache::apart_on; the hazard policy only): its uses do not count in the

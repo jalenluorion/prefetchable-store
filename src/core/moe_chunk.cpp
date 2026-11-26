@@ -655,7 +655,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   // GPU in half precision; a pass it cannot take runs the exact path below
   bool half_done = false;
   if (moe_half && !deferred && !o.ref && v.act == MoeView::SWIGLU) {
-    // in waves as the records land (the old runner's pipelined union: chunks of 24 computed while the next are read): wait
+    // in waves as the records land (a pipelined union: chunks of 24 computed while the next are read): wait
     // until 24 more (or the rest) have landed, give them to the GPU without waiting for it, repeat; the shared expert with
     // the first wave
     const auto th = clk::now();

@@ -31,7 +31,7 @@ answers), `reasoning_effort` is passed to the template's own variable. Streaming
 they grow; tool calls at the end.
 
 Gates (no model run; `bench/serving/chat_format_check.py`, reference = transformers 5.23 `apply_chat_template` on the same
-folder, in `local/inkling/.venv`; output `chat_format_inkling.json`):
+folder, in a Python with transformers; output `chat_format_inkling.json`):
 
 | gate | result |
 |---|---|
@@ -130,8 +130,8 @@ tokenizer and a Jinja subset in C++: not done.
 
 ## Commands (from the repository root; every model command goes through `bench/serving/slot.sh LOG TIMEOUT cmd...`)
 
-Build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4`. Python: `../../.venv/bin/python`
-(local/flash/.venv: `tokenizers`, `jinja2`); the format gate needs transformers (`local/inkling/.venv`).
+Build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4`. Python: one with `tokenizers`
+and `jinja2`; the format gate needs transformers too.
 
 Gates:
 ```

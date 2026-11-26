@@ -5,7 +5,7 @@
   2. parse: every recorded assistant turn (model-format text) parses to reasoning / content / tool calls that the
      template renders back to the same text; OpenCode's recorded tool calls survive render -> parse;
   3. streaming: the incremental split, fed token by token as the server decodes, sends exactly the final parse.
-Run with a Python that has transformers (local/inkling/.venv):
+Run with a Python that has transformers:
   python bench/serving/chat_format_check.py --model-dir MODEL --sessions S1 S2 --turns FILE... > out.json"""
 import argparse, glob, json, os, re, sys
 

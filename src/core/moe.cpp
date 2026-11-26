@@ -60,7 +60,7 @@ bool Approx::preset(const std::string& spec) {
     else if (k == "mass") read_mass = v;
     else if (k == "late") late_ms = v;
     else if (k == "bg") bg = v != 0;
-    else if (k == "floor") cold_floor = (int)v;  // the cold-cache floor (-1: 2K; 0: never, the old runner's substitution)
+    else if (k == "floor") cold_floor = (int)v;  // the cold-cache floor (-1: 2K; 0: never: substitute from whatever is held)
     else return false;
     i = j + 1;
   }

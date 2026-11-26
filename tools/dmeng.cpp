@@ -117,8 +117,8 @@ early address (lossless: names only schedule reads; the released router decides)
   --evict auto|freq|pred|hazard  --rd-prio 0|1  --rd-excl 0|1  --spec-max N  --cancel 0|1
   --bg-ranks D --bg-gate G --bg-split P --bg-queue Q --bg-max N   background reads for the drive's idle time: the routers' ranks
                          m+1..D of the steps already named, while no urgent read and at most G speculative ones are in
-                         flight, in P pieces (N in flight), at most Q records queued (default: the profile's; Flash-Next mac 8, 2, 2, 2, 1;
-                         --bg-ranks 0 = off)
+                         flight, in P pieces (N in flight), at most Q records queued (default: the profile's
+                         "background" entry; no published profile declares one, so off; --bg-ranks 0 = off)
   --name-gate 0|1        1: a name that needs a read is not issued while urgent reads wait for a reader (default 0)
                          auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
                          EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
@@ -194,7 +194,7 @@ outputs
                          ratio to a plain step's, wait for reads, urgent MB, the next step's excess wait): a draft runs when
                          its expected tokens per estimated ms beat a plain step's by --draft-margin (default 0.05)
                          (default 1; 0 = the cost ratio table alone)
-  --draft-light F        with --draft: a light draft head trained outside (draft.h LightHeadSource; jobs/babel/q36_draft_head.py's
+  --draft-light F        with --draft: a light draft head trained outside (draft.h LightHeadSource; the trainer's
                          heads_*.safetensors) as one more source; --draft-light-q8 0|1 (default 1: the engine's 8-bit
                          format), --draft-light-thr P (offer drafts while their confidence >= P, default 0),
                          --draft-light-dump F (every run's input and drafts, for the reference check),

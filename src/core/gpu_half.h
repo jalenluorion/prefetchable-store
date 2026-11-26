@@ -1,6 +1,6 @@
 // Half-precision products on the GPU for the fast prompt path (fast mode only; exact mode never uses it): the weights as
 // stored (8- and 4-bit affine records, groups of 64 along the input) dequantised to half inside the kernel, the inputs
-// rounded to half, the products accumulated in fp32 on the matrix units. This is the old runner's standard (MLX's
+// rounded to half, the products accumulated in fp32 on the matrix units. This is MLX's standard (its
 // quantised matmul in fp16), not the CPU's bits: a prompt computed this way leaves a state close to exact prefill's, and
 // fast mode's decode from it is checked against exact prefill's (tests and bench/prefill/fast_quality.sh).
 //
@@ -48,7 +48,7 @@ struct GpuHalf {
   };
   bool moe(Pool& pool, const float* const* x, int P, int H, int K, int I, const std::vector<Exp>& ex, const float* w,
            const Weight* sh_gate, const Weight* sh_up, const Weight* sh_down, int SI, const float* shw, float* const* y);
-  // the same block in waves (the old runner's pipelined union: compute the records that have landed while the rest are
+  // the same block in waves (a pipelined union: compute the records that have landed while the rest are
   // read): moe_begin stages the inputs; each moe_wave commits its experts (and, with the first, the shared expert) without
   // waiting; moe_end adds the combination, waits for all and writes y. false anywhere: the block is dropped (caller: CPU)
   bool moe_begin(Pool& pool, const float* const* x, int P, int H, int K, int I, const Weight* sh_gate, const Weight* sh_up,

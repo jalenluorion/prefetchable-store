@@ -2,7 +2,7 @@
 -> the engine's router file (DMENGRES1, like q36's .dmr): one per lag, 8-bit (default) or 4-bit affine group 64.
 
   python python/derive/inkling2_loop_routers.py RUN --dir MODEL_DIR/routers [--bits 8|4]
-  -> local/inkling/model/routers/<run>/ink_router_full_k<k>_h<H>_b<bits>.dmr for every ink_router_full_*_fp16.npz there
+  -> MODEL/routers/<run>/ink_router_full_k<k>_h<H>_b<bits>.dmr for every ink_router_full_*_fp16.npz there
      (and ink_router_lin_k<k>_b<bits>.dmr for every ink_router_lin_*_fp16.npz: the linear path only, hidden_mlp 0, no m2)
 
 Router a (one per application, 48) on x = [rmsnorm_w(emb), h_prev@a, h@(a-k)] (emb = the model's embed_tokens output, which in

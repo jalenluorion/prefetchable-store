@@ -3,8 +3,8 @@
   REPO=Qwen/Qwen3.6-35B-A3B OUT=/scratch/... STATE_DIR=<data>/q36/pack_state \
       FINAL_DIR=<data>/q36/store-int4 python convert.py
 
-Derived from local/flash/convert.py (resumable, one shard at a time, two shards prefetched; same int4 record and the
-same store/meta.json fields the Flash runner reads), without the n-gram table and without any Hugging Face upload:
+Derived from Qwen3.8-Flash-Next's converter (python/convert/qwen4_exp/convert.py: resumable, one shard at a time, two
+shards prefetched; the same int4 record and store/meta.json fields), without the n-gram table and without any Hugging Face upload:
 finished files are copied to FINAL_DIR (shared disk) instead. Writes, in OUT (node-local) and then FINAL_DIR:
 
   store/layer_XX.bin   40 files x 256 records. Record (REC bytes, a whole number of 16 KB pages), per matrix in the order
