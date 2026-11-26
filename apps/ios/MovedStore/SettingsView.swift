@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Settings: Model, Generation, Prefix cache, and everything the sheet showed before under Diagnostics.
 struct SettingsView: View {
@@ -357,6 +358,23 @@ struct SystemPromptEditor: View {
 /// Speed, memory, the engine's settings and the device.
 struct DiagnosticsView: View {
     @EnvironmentObject var m: ChatModel
+    @State private var copied = false
+
+    /// Every Engine and Last reply row as plain text, one "label: value" per line (Copy diagnostics).
+    var diagnosticsText: String {
+        var lines = ["MovedStore diagnostics, " + machineName() + ", " + ProcessInfo.processInfo.operatingSystemVersionString
+                     + String(format: ", %.1f GB memory", Double(ProcessInfo.processInfo.physicalMemory) / 1e9)]
+        lines.append("")
+        lines.append("Last reply in detail")
+        let rows = m.engine.lastReplyRows
+        lines += rows.isEmpty ? ["(no reply yet)"] : rows.map { "\($0.0): \($0.1)" }
+        lines.append("")
+        lines.append("Engine")
+        lines.append("State: \(m.engineState.label)")
+        lines.append(m.engine.info.detail)
+        lines += m.engine.settings.map { "\($0.0): \($0.1)" }
+        return lines.joined(separator: "\n")
+    }
 
     var body: some View {
         Form {
@@ -395,6 +413,14 @@ struct DiagnosticsView: View {
                 } footer: {
                     Text("From the engine's own counters for the most recent reply.")
                 }
+            }
+            Section {
+                Button(copied ? "Copied" : "Copy diagnostics") {
+                    UIPasteboard.general.string = diagnosticsText
+                    copied = true
+                }
+            } footer: {
+                Text("Copies the Last reply and Engine rows as text, to paste into a message.")
             }
             Section("Engine") {
                 row("State", m.engineState.label)
