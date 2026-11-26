@@ -102,7 +102,8 @@ enum DmengLaunch {
         return false
         #endif
     }
-    /// The user's choice (Settings: Exact / Fast), else the profile's default: Fast on phone-small, Exact elsewhere.
+    /// The user's choice (Settings: Fast / Exact), else the default: Fast (ModelKind.defaultMode). Passed to dm_open
+    /// explicitly, so a profile's own mode (the manifest's phone profile: exact) never replaces it.
     static var userMode: String {
         get {
             #if SELFCHECK
