@@ -111,7 +111,7 @@ Names and run-ahead only schedule reads. What the model computes is decided by i
   tokens never depend on the cache, the routers or timing.
 - **`fast` (default on the iPhone).** A chosen expert that is not in memory is waited for only if its routing weight
   is above a threshold; otherwise the layer goes on without it. Faster on small caches and slow drives, with a small measured change in
-  output (see Quality). The threshold is 0.1 for the 35B and 0.15 for Inkling 2 Mini, and a pick whose read is already in flight is waited for. For Qwen3.8-Flash-Next (whose
+  output (see Quality). The threshold is 0.15 for the 35B and for Inkling 2 Mini, and a pick whose read is already in flight is waited for. For Qwen3.8-Flash-Next (whose
   router picks 10 experts per layer) the missing picks are read heaviest first until at most 0.13 of the routing weight
   would be left out, and the rest are left out, without waiting for reads in flight.
 
@@ -240,6 +240,11 @@ text with the true previous tokens:
 | Qwen3.6-35B-A3B, Mac (3.3 to 5 GB cache) | 0.96 | 0.98 |
 | Inkling 2 Mini, Mac (6 to 7.8 GB cache) | 0.965-0.973 | 0.966-0.967 |
 | Qwen3.8-Flash-Next, Mac (3.0 GB cache) | 0.964 | 0.992 |
+
+The 35B's rows here and its speeds above were measured at its earlier threshold of 0.1. At 0.15 (since 2026-11-26), on
+the iPhone 15 Plus with its 4-bit in-memory weights, its top choice equals `exact`'s at 581 of 600 positions (591 at
+0.1), and one launch ran 7.4 to 7.9 tokens/s against 5.8 at 0.1 on a 200-token prompt; the Mac rows are being measured
+again.
 
 For Qwen3.8-Flash-Next the two texts are `exact`'s own 600-token answers to an explanation prompt and to a code-review
 agent prompt, fed back; `fast` changes the loss against `exact` by +0.016 and +0.008 nats.

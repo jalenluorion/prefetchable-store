@@ -1046,10 +1046,10 @@
    "engine": "lossless"
   },
   "fast": {
-   "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
-   "engine": "approx:drop:w=0.1",
+   "definition": "The model's own router still picks. A picked expert that is not in memory is read and waited for if its routing weight is over 0.15, and waited for if its read is already in flight; otherwise it is left out (no substitute, no renormalisation). No cap on the weight left out per step. Router names are on.",
+   "engine": "approx:drop:w=0.15",
    "wait_if": {
-    "routing_weight_over": 0.1,
+    "routing_weight_over": 0.15,
     "read_in_flight": true
    },
    "otherwise": "left out",
@@ -1057,10 +1057,43 @@
    "renormalise": false,
    "calibration": {
     "phone": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights); agreement: each arm against exact on the device over the same 600 teacher-forced positions; speed: one launch on a cooled phone (thermal fair at the start, serious from the second arm on), the steady 200-token prompt, arms in the order 0.10, 0.15, 0.20, 0.10, 0.20, 0.15",
+     "rows": [
+      {
+       "setting": "w 0.10, waiting for reads in flight (the rule before)",
+       "top1_agree": "591/600 = 0.985",
+       "tok_s": [
+        5.86,
+        5.83
+       ]
+      },
+      {
+       "setting": "w 0.13",
+       "top1_agree": "585/600 = 0.975"
+      },
+      {
+       "setting": "w 0.15, waiting for reads in flight (this)",
+       "top1_agree": "581/600 = 0.968",
+       "tok_s": [
+        7.39,
+        7.88
+       ]
+      },
+      {
+       "setting": "w 0.20",
+       "top1_agree": "579/600 = 0.965",
+       "tok_s": [
+        10.86,
+        9.95
+       ]
+      }
+     ]
+    },
+    "phone_earlier": {
      "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights), the same launch, 600 teacher-forced positions against exact on the device",
      "rows": [
       {
-       "setting": "weight 0.1, wait for reads in flight (this, approx:drop:w=0.1; approx:drop's default weight, written out)",
+       "setting": "weight 0.1, wait for reads in flight (the rule then)",
        "tok_s": 4.75,
        "mb_per_token": 112,
        "top1_agree": "589/600 = 0.982"
@@ -1072,9 +1105,19 @@
        "top1_agree": "590/600 = 0.983"
       }
      ],
-     "reason": "no profile overrides this rule: on the 4-bit in-memory weights 0.08 read 159 against 112 MB per token and ran 3.95-3.98 against 4.75 tok/s for one more agreeing position in 600"
+     "reason": "no profile overrides this rule: on the 4-bit in-memory weights 0.08 read 159 against 112 MB per token and ran 3.95-3.98 against 4.75 tok/s for one more agreeing position in 600",
+     "note": "the earlier comparison (it removed the phone-small override w 0.08; the rule then was w 0.10)"
     },
     "mac": {
+     "measured": "base M4, 2,200 teacher-forced positions at 2.8 and 6.6 GB caches",
+     "rows": [
+      {
+       "setting": "w 0.10, 0.15 and others",
+       "status": "to be added (being measured)"
+      }
+     ]
+    },
+    "mac_earlier": {
      "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
      "rows": [
       {
@@ -1116,8 +1159,10 @@
        ]
       }
      ],
-     "reason": "the weight threshold kept over the capped leave-out rule: that rule measured worse on the iPhone (phone-small, 3.57 against 4.1 tok/s); on the Mac it ran faster (14.9 against 13.1 tok/s in the clean run; the 6.38 run had 400% other CPU) at agreement 0.980 against 0.982; one leave-out method for this model: a weight threshold with reads in flight waited for"
-    }
+     "reason": "the weight threshold kept over the capped leave-out rule: that rule measured worse on the iPhone (phone-small, 3.57 against 4.1 tok/s); on the Mac it ran faster (14.9 against 13.1 tok/s in the clean run; the 6.38 run had 400% other CPU) at agreement 0.980 against 0.982; one leave-out method for this model: a weight threshold with reads in flight waited for",
+     "note": "the earlier Mac comparison (w 0.10 against the capped rule 0.13), kept as history"
+    },
+    "reason": "the owner's choice (2026-11-26): the same form as Inkling's, a weight threshold of 0.15 with a pick whose read is in flight always waited for and no cap, on every profile; on the iPhone 7.39-7.88 against 5.83-5.86 tok/s at 0.10, top choice agreement 0.968 against 0.985"
    }
   }
  },

@@ -41,7 +41,7 @@ manifest beside the value). The table lists what still differs.
 | names rule | confidence 0.5 / 16 | confidence 0.5 / 16 | top 4 | measured: on the 35B the confidence rule read 10% fewer MB per token than a top 8 at the same speed (its manifest's `defaults.notes.names`); on Flash-Next it read 785-918 MB per token at 2.0 GB, more than the top 4 (below) |
 | cross-token names | none | on | none | the machinery (`Xtok`) is any family's; routers trained for Inkling only |
 | per-layer caps | auto | auto | none | one rule (`auto`) for the two small models; Flash-Next: caps refused its names (below). `:fit` measured worse at a 2.0 GB cache where caps are on (exact, code prompt, alternating pairs): the 35B 9.20 / 5.48 against 10.34 / 6.39 tok/s at the same MB per token (302); Inkling 954 / 961 against 813 / 823 MB per token, 3.02 / 3.40 against 3.13 / 4.00 tok/s; available to all, off |
-| fast mode | weight 0.1, wait for reads in flight | weight 0.15, wait for reads in flight | at most 0.13 of the weight left out, never wait | the 35B: one rule on every profile; Flash-Next's capped leave-out rule measured worse on the iPhone (3.57 against 4.1 tok/s; faster on the Mac), and a threshold of 0.08 on the 4-bit in-memory weights read 159 against 112 MB per token at 3.95-3.98 against 4.75 tok/s on the iPhone (agreement 0.983 against 0.982): `modes.fast.calibration`; Inkling: the owner's choice of 0.15 in the form the iPhone measured (3.15 tok/s, agreement 0.960 against 2.06-2.27 tok/s, 0.987 at 0.10), one rule on the Mac and the phones: `modes.fast.calibration` |
+| fast mode | weight 0.15, wait for reads in flight | weight 0.15, wait for reads in flight | at most 0.13 of the weight left out, never wait | the 35B: the owner's choice of 0.15 (2026-11-26), one rule on every profile, in Inkling's form; on the iPhone 7.39-7.88 against 5.83-5.86 tok/s at 0.10, agreement 0.968 against 0.985 over 600 positions (earlier: Flash-Next's capped leave-out rule measured worse on the iPhone, 3.57 against 4.1 tok/s, and 0.08 read 159 against 112 MB per token at 0.10): `modes.fast.calibration`; Inkling: the owner's choice of 0.15 in the form the iPhone measured (3.15 tok/s, agreement 0.960 against 2.06-2.27 tok/s, 0.987 at 0.10), one rule on the Mac and the phones: `modes.fast.calibration` |
 | automatic cache start | headroom 3 GB | headroom 3 GB | free level 14% | see `cache_start` below and the manifests |
 | phone-small context positions | 16,384 | 4,096 | n/a | `profiles.phone-small.ctx`: Inkling's KV reserve is 0.54 GB at 16,384 positions, 0.135 GB at 4,096 |
 | phone prompt GPU share (both phone profiles) | 0.65 / 0.65 | off | n/a | measured on the iPhone 15 Plus (phone-small) and carried to `phone` (the power budget is iOS's, not the memory class's): the 35B's first token 19.5 against 24.6 s; Inkling 20% slower with the split (`profiles.<phone>.prefill_gpu.calibration`) |
@@ -68,15 +68,15 @@ the declared sub-chunk and span in every front end.
 ```json
 "modes": {
   "exact": {"definition": "Generated tokens never depend on the cache, the routers or timing.", "engine": "lossless"},
-  "fast":  {"definition": "The model's router still picks; a picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight, otherwise it is left out.", "engine": "approx:drop:w=0.1"}
+  "fast":  {"definition": "The model's router still picks; a picked expert that is not in memory is waited for if its routing weight is over 0.15 or its read is already in flight, otherwise it is left out.", "engine": "approx:drop:w=0.15"}
 }
 ```
 
 The engine reads only `engine` (the internal mode string: `lossless` or `approx:drop[:w=W]`). `definition` is for
 people. Fast mode has one leave-out method: `approx:drop:w=W`, a missing pick of released weight at most `W` is left out
 (no substitute; the kept picks keep their released weights), a heavier one is read and waited for, and a pick whose read is
-in flight is waited for; `w` defaults to 0.1. Built-in: `exact` = `lossless`, `fast` = `approx:drop`. Inkling declares
-`approx:drop:w=0.15`; the 35B `approx:drop:w=0.1` (the default weight, written out), measured: `modes.fast.calibration`. Flash-Next alone keeps a capped
+in flight is waited for; `w` defaults to 0.1. Built-in: `exact` = `lossless`, `fast` = `approx:drop`. The 35B and Inkling
+declare `approx:drop:w=0.15` (the owner's choice for both, measured on the iPhone: `modes.fast.calibration`). Flash-Next alone keeps a capped
 form until it is recalibrated, `approx:drop:w=0.13:mass=0.13:late=-1`: then the heaviest missing picks are read until
 those left out weigh at most `mass`, and a light pick in flight is left out (`late=-1`; the default waits for it).
 A profile can declare a mode's `engine` of its own (`profiles.<p>.modes.<mode>`, below), over this one for that profile.
@@ -189,8 +189,8 @@ GPU's share of the prefill 0.4 / 0.4, run-ahead naming 10 at depth 1):
 Measured on the base M4 (16 GB; 120 tokens of the reference prompt, counters from one process each, timing from
 alternating runs) at 2.0 GB (15 records per layer) and 3.1 GB (24):
 
-- Fast mode: with 10 picks the routing weights are about 0.1 each, so the 35B's rule (wait for a pick over 0.1, leave
-  out the rest) left out 0.32 of each step's weight. The rule here reads the heaviest missing picks until the rest
+- Fast mode: with 10 picks the routing weights are about 0.1 each, so a weight rule of 0.1 (wait for a pick over 0.1, leave
+  out the rest; the 35B's then) left out 0.32 of each step's weight. The rule here reads the heaviest missing picks until the rest
   weighs at most 0.13: 0.087 of the weight is left out on average (0.09 at the 90th percentile of tokens), at 465 MB
   read per token at 3.1 GB and 604 MB at 2.0 GB. A cap of 0.10 left out 0.066 at 650 MB (2.0 GB), 0.20 left out 0.15 at
   486 MB, 0.25 left out 0.19 at 419 MB.

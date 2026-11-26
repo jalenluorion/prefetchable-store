@@ -191,7 +191,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "engine": "lossless"
    },
    "fast": {
-    "engine": "approx:drop:w=0.1"
+    "engine": "approx:drop:w=0.15"
    }
   },
   "prefill": {
