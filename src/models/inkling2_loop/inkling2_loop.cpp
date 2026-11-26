@@ -2472,6 +2472,7 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
   }
   const double be0 = T->bytes_exp, br0 = T->bytes_res;
   const long c0 = n_chunks;
+  const std::vector<uint32_t> nr0 = st ? core->cache.n_reads : std::vector<uint32_t>();  // reads per record before
   if (gpu) gpu->set_kernel(po.gpu_kernel);
   const GpuSplitAcct ga0 = gacct;
   const double me_w0 = core->moe_gpu_wait_ms, me_s0 = core->moe_gpu_stage_ms, me_m0 = core->moe_gpu_macs;
@@ -2512,6 +2513,27 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
       << ",\"resident_mb_touched\":" << (T->bytes_res - br0) / MB << ",\"read_mb_per_pos\":" << st->mb_read / np_
       << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / MB / np_
       << ",\"resident_touched_mb_per_pos\":" << (T->bytes_res - br0) / MB / np_ << ",\"wait_ms\":" << st->ms_wait;
+    {  // records read 0 / 1 / 2 / 3 / 4+ times in this prompt, and per physical layer: records read, reads, MB read and
+       // the MB of the records once each (the re-reads' size: reads - records)
+      const Cache& Ca = core->cache;
+      o << ",\"read_hist\":[" << st->read_hist[0] << "," << st->read_hist[1] << "," << st->read_hist[2] << "," << st->read_hist[3] << "," << st->read_hist[4]
+        << "],\"layers\":[";
+      double once = 0, all = 0;
+      for (int L = 0; L < Ca.NL; L++) {
+        long rec = 0, rd = 0;
+        for (int e = 0; e < Ca.NE; e++) {
+          const size_t k = (size_t)L * Ca.NE + e;
+          const uint32_t d = k < nr0.size() && k < Ca.n_reads.size() ? Ca.n_reads[k] - nr0[k] : 0;
+          rec += d > 0;
+          rd += d;
+        }
+        const double rb = (double)Ca.P[Ca.layer_pool[L]].rec;
+        once += rec * rb;
+        all += rd * rb;
+        o << (L ? "," : "") << "[" << rec << "," << rd << "]";
+      }
+      o << "],\"records_once_mb\":" << once / 1e6 << ",\"reads_mb\":" << all / 1e6;
+    }
     if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))  // the GPU shares (the 35B's "gpu" account; experts: the NVFP4 layers)
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac
         << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9
