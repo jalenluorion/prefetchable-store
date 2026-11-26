@@ -675,8 +675,8 @@ if wanted("presets"):
                     bad.append(f"{prof} --mode {mode} with {op}'s own fast {fe}: {got_s} != {(s, src, s)}")
             ncell += 1
         # the names rule per mode: a profile's names may be one rule or {"exact": rule, "fast": rule}, taken for the mode in
-        # force; resolved.names in all three front ends, in the folder (its own declarations: the 35B's phone-small a top 3,
-        # Inkling's mac a rule per mode) and in the temporary manifest above (op's per-mode rule), for --mode exact / fast
+        # force; resolved.names in all three front ends, in the folder (its own declarations: a rule per mode on the 35B's
+        # phone-small and Inkling's mac) and in the temporary manifest above (op's per-mode rule), for --mode exact / fast
         # and an engine string
         m_over = json.loads(json.dumps(man))
         over(m_over)

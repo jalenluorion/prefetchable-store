@@ -1776,11 +1776,18 @@
    "precision": "4-bit",
    "precision_detail": "4-bit affine, groups of 64, calibrated",
    "names": {
-    "rule": "top",
-    "m": 3,
+    "exact": {
+     "rule": "confidence",
+     "tau": 0.5,
+     "candidates": 16
+    },
+    "fast": {
+     "rule": "top",
+     "m": 3
+    },
     "calibration": {
      "measured": "iPhone 15 Plus, phone-small, cooled start, each arm twice in mixed order in one launch. Fast at w 0.15: top 3 8.99 and 8.62 tok/s, 77.6 MB per token (2.7 MB named and unused); the confidence rule 0.5 of 16 7.89 and 6.86 tok/s, 91 MB (5.7 unused); confidence 0.7 of 16 7.25 and 7.18 tok/s, 101.5 MB (5.3 unused). Exact, run-ahead on, 200 tokens per arm, exact ids identical in all six arms: top 3 3.35 and 3.00 tok/s, 234 MB per token; confidence 0.5 of 16 3.14 and 3.28 tok/s, 233 MB; top 5 2.85 and 3.11 tok/s, 234 MB",
-     "reason": "one rule for both modes: top 3 is the fastest in fast mode; in exact every missing pick is read anyway, so the rule only moves bytes between named and read on the spot (a tie), and the simpler single value is taken",
+     "reason": "fast: top 3 is the fastest (above); exact: a tie on decode tok/s (3.17 against 3.21 mean), and top 3 has the lower hit rate (0.70 against 0.74), so exact keeps the published rule",
      "earlier": "iPhone 15 Plus, phone-small, fast at threshold 0.08 with linear_k2, 8 readers, slab 1.485 GB, 200 tokens each, one run per cell, judged by counters (results/ios/p2/P2.md, names at threshold 0.08, 2026-11-23): plain top 3 4.33 tok/s, wait / compute 157 / 74 ms, 153 MB per token; the confidence rule (tau 0.5 over 16) 3.94 tok/s, 183 / 70 ms, 167 MB; plain top 2 4.06 tok/s; no names 3.92 tok/s"
     }
    },
