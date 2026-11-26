@@ -52,6 +52,7 @@
 #include "dmeng/address.h"
 #include "dmeng/draft.h"
 #include "dmeng/model_lm.h"
+#include "dmeng/prefill.h"
 #include "dmeng/presets.h"
 #include "dmeng/sampler.h"
 #include "dmeng/session.h"
@@ -92,7 +93,7 @@ struct Args {
   int kv_plan = 4096;  // positions of per-position state the automatic cache plans for at start (--kv-plan)
   double cache_gb = 5;
   std::string mem = "mlock", res_mem = "mlock";
-  int chunk = 512, span = 8192, stream = 3;
+  int chunk = 0, span = 0, stream = 3;  // 0: the model's declared sub-chunk / span (the manifest's "prefill")
   SessionOptions s;
   std::string check, bench, record;
   int check_gen = 16, bench_rep = 1;
@@ -173,7 +174,7 @@ early names (lossless: names only schedule reads)
   --xtok F|none --xtok-tau T --rd-prio 0|1   cross-token names (Inkling: source 47 with priority reads by default)
   --name-gate 0|1        1: no new named read while urgent reads wait for a reader (default 0)
 prompt path
-  --chunk N (512) --span N (8192) --stream N (3) --gpu-frac F --gpu-experts F (the profile's: mac 0.4 / 0.4)
+  --chunk N --span N (the model's declared: its manifest's prefill.chunk / prefill.span) --stream N (3) --gpu-frac F --gpu-experts F (the profile's: mac 0.4 / 0.4)
   --prefill-gpu off (CPU only) --keep-scratch
   --run-ahead N (picks named while a step waits; 0 = off; the profile's: mac 8) --run-ahead-depth D (1)
   --run-ahead-budget X --run-ahead-max N --run-ahead-sat-skip 0|1   its limits (the profile's; built-in: none)
@@ -465,8 +466,9 @@ int main(int argc, char** argv) {
   // resolver dmeng and the C API use too)
   auto has = [&](const char* f) { return a.given.count(f) > 0; };
   const Given& g = a.g;
-  RunOpts ro;  // dmserve's own values where nothing else sets one: RunOpts', the prompt always chunked (512)
-  ro.prefill_chunk = 512;
+  RunOpts ro;  // dmserve's own values where nothing else sets one: RunOpts', the prompt always batched with the model's
+  // declared sub-chunk (0; the manifest's "prefill", as dmeng under a profile and the C API)
+  ro.prefill_chunk = 0;
   if (!resolve_run(a.model, a.profile, g, "", -1, ro, err)) {
     fprintf(stderr, "profile: %s\n", err.c_str());
     return 1;
@@ -515,6 +517,14 @@ int main(int argc, char** argv) {
   std::string family;
   std::unique_ptr<Model> M;
   if (resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err)) M = make_model(a.family.empty() ? family : a.family, err);
+  if (M && (a.chunk <= 0 || a.span <= 0)) {  // the model's declared sub-chunk and span (resolve_model's lo.prefill)
+    for (auto& kv : lo.prefill) {
+      if (kv.first == "chunk" && a.chunk <= 0) a.chunk = std::stoi(kv.second);
+      if (kv.first == "span" && a.span <= 0) a.span = std::stoi(kv.second);
+    }
+    if (a.chunk <= 0) a.chunk = PrefillOpts().chunk;
+    if (a.span <= 0) a.span = PrefillOpts().span;
+  }
   if (!M || !M->load(lo, err)) {
     fprintf(stderr, "load: %s\n", err.c_str());
     return 1;

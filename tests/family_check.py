@@ -342,7 +342,7 @@ if wanted("presets"):
             return [] if g == e else [f"{k}: {g!r} != {e!r}"]
 
         bad, ncell, cross = [], 0, []
-        FRONT_SPECIFIC = {"prefill_chunk"}  # dmserve's prompt path always chunks (--chunk 512); the C API keeps the model's own
+        FRONT_SPECIFIC = set()  # (the prompt's sub-chunk is the model's declared one in all three: printed as 0)
         for prof in man["profiles"]:
             r = run([DMENG, "--model", M, "--profile", prof, "--print-defaults"])
             P = json.loads(r.stdout)
