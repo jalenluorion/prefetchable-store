@@ -267,7 +267,6 @@ bool Flash::load(const LoadOpts& op, std::string& err) {
   mi.layer_file = c.layer_file;
   mi.has_ref_path = true;
   mi.has_verify = true;     // the multi-position verify pass (prefill.cpp: the span's layer-major pass with rollback)
-  mi.chunk_aff4 = true;     // ... with the packed 4-bit kernels and the GPU's share of the experts
   views.resize(c.NL);
   for (int L = 0; L < c.NL; L++) {
     MoeView& v = views[L];
