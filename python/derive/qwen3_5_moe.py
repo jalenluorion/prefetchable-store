@@ -13,17 +13,17 @@ The resident file (dmeng_resident.bin):
   An 8-bit matrix W [R, C] is three tensors NAME.q (u8 codes [R, C]), NAME.s, NAME.b (f16 scale / bias [R, C/64]):
   w = q * s + b per group of 64 along C (MLX affine 8-bit, group 64).
 
-Which weights, and how (the Python engine's rule, local/q36/mlx_run.py `qpred`, so the codes are the same bytes):
+Which weights, and how (the MLX reference implementation's rule, so the codes are the same bytes):
   * every nn.Linear with >= 64 outputs and inputs % 64 == 0 except the router (mlp.gate) -> 8-bit, quantised with
-    mx.quantize(bf16 -> fp16 weight, group_size=64, bits=8): exactly what nn.quantize does in mlx_run.py's
+    mx.quantize(bf16 -> fp16 weight, group_size=64, bits=8): exactly what nn.quantize does in the MLX reference implementation's
     resident_int8.safetensors (that file stores the same codes as uint32 words, 4 codes per word, little end first).
   * kept exact, as bf16 (the release's bytes): the router mlp.gate [E, H], shared_expert_gate [1, H], the Gated DeltaNet's
-    in_proj_a / in_proj_b [Hv, H]. (mlx_run.py keeps these as fp16 casts of the bf16.)
+    in_proj_a / in_proj_b [Hv, H]. (The MLX reference implementation keeps these as fp16 casts of the bf16.)
   * f32: the norms (zero-centred ones + 1, computed in f32 from the bf16), conv1d [C, K] (kernel tap k of channel c),
     A_log, dt_bias, the Gated DeltaNet's one-centred gated-norm weight.
   * the embedding table is NOT copied: the engine reads one bf16 row per token from resident.safetensors (cfg emb_off).
 
-The router file (.dmr) holds a lag-k router set (mlx_run.py's format: per layer emb_norm, lin, mlp.0, mlp.2) with the
+The router file (.dmr) holds a lag-k router set (the trainer's format: per layer emb_norm, lin, mlp.0, mlp.2) with the
 three matrices 8-bit by the same quantiser, biases and emb_norm f32, and cfg lag / feats / per-layer input widths.
 """
 import json, os, struct, sys
@@ -61,8 +61,8 @@ class Writer:
         self.off = end
 
     def q8(self, name, w):
-        """w: an mx array [R, C] -> NAME.q/.s/.b with MLX's affine 8-bit quantiser on the fp16 cast (bf16 weights as
-        mlx_run.py casts them; fp32 router weights straight to fp16, as mlx_run.py loads them)."""
+        """w: an mx array [R, C] -> NAME.q/.s/.b with MLX's affine 8-bit quantiser on the fp16 cast (bf16 weights cast
+        to fp16; fp32 router weights straight to fp16)."""
         wq, s, b = mx.quantize(w.astype(mx.float16), group_size=64, bits=8)
         mx.eval(wq, s, b)
         R, C = w.shape

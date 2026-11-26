@@ -5,10 +5,6 @@ __pycache__/
 build/
 build-*/
 .build/
-reference/flash/demo/cache/
-reference/flash/demo/server.log
-reference/flash/demo/server.prev.log
-reference/flash/drivebench
 .DS_Store
 results/drafts/runs/
 results/drafts/*.log

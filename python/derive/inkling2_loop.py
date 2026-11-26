@@ -3,11 +3,11 @@
   python python/derive/inkling2_loop.py MODEL_DIR [--bits 8|0] [--out F]   (default F: MODEL_DIR/dmeng_resident.bin)
 
 --bits 8 (default): the six attention projections of every layer (q, k, v, r, o, gate) and the output head as MLX affine
-  8-bit group 64, taken BYTE FOR BYTE from mlx_run.py --resident-bits 8's cache (model/resident_q8.safetensors: nn.quantize
+  8-bit group 64, taken BYTE FOR BYTE from the MLX reference implementation's 8-bit cache (model/resident_q8.safetensors: nn.quantize
   of the bf16 weights, bf16 scales and biases). The scales/biases are written as fp16 (the kernels' format); the
   conversion is checked exact for every value (bf16 -> fp16 loses nothing above 2^-17; the smallest scale is 4.6e-5).
 --bits 0: the same matrices as released (bf16), for the exact reference path (--prec f32) and the tiny-model check.
-Everything else as mlx_run.py holds it: every depth-attention query in float32; the router and the message-gate
+Everything else as the MLX reference implementation holds it: every depth-attention query in float32; the router and the message-gate
 forget/gain projections (float32 in MLX, cast from the release's bf16) as bf16, exact (checked), computed in fp32, the message-gate down projections bf16 (computed in fp32), small tensors (norms, convolutions,
 clip scales, relative-logit projections, sink projections, dynamic-conv weight projections) widened to float32 (exact).
 The embedding is not copied: the engine reads its rows from resident.safetensors (cfg emb_file / emb_off).

@@ -1,6 +1,6 @@
 """P0 item 1: offline cache tiers at phone sizes, from recorded routing (no model run).
 
-Inputs (read-only): the routing records that deep-memory/engine/bench/stage4_sizing.py reads
+Inputs (read-only): the recorded routing files, under ENGINE_DIR
   results/stage2/runs/record_400.bin        Pittsburgh prompt, 400 generated tokens (prompt positions not counted)
   results/stage3/runs/record_code_400.bin   coding prompt, generated (prompt positions not counted)
   results/stage3c/runs/record_tf_agent.bin  agent transcript, teacher-forced (all positions counted, cold start)

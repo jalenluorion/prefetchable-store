@@ -1,7 +1,7 @@
 """The release's chat format for Qwen/Qwen3.6-35B-A3B, without transformers: tokenizer + chat template (Tok), the reasoning
 and tool-call split of a generated turn (parse_turn), the same split done incrementally while streaming (StreamSplitter),
-OpenAI messages -> what the template expects (to_template), and the thinking switches (effort). Imported by mlx_run.py and
-by test_run.py, which checks it against the real release files (release_small/: tokenizer and template, no weights).
+OpenAI messages -> what the template expects (to_template), and the thinking switches (effort). Checked
+by test_run.py against the real release files (release_small/: tokenizer and template, no weights).
 
 What the release's files say (chat_template.jinja and tokenizer_config.json, revision 345d467b, read 2026-11-16):
 - ChatML. The generation prompt is "<|im_start|>assistant\\n<think>\\n" (thinking on, the default), or

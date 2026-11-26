@@ -362,7 +362,7 @@ class Sim:
 
 
 def old_runner(ri, ti, first, slots=24, keep=3, m=10, lag=LAG):
-    """The old MLX runner's slot rule (reference/flash/mlx_run.py, prefetch mode): per layer `slots` slots; the lag router's
+    """The MLX reference implementation's slot rule (prefetch mode): per layer `slots` slots; the lag router's
     top m are named (steps < lag at the token's start, step s + lag at step s); a named expert not held is read into a free
     slot, else over the least recently NAMED one outside the keep window (named < t - keep), else over the least recently
     named one not named this token; at each step the layer's experts not named within `keep` tokens are freed. Picks are

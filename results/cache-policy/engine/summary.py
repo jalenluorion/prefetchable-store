@@ -4,7 +4,7 @@ import glob, json, os, re, subprocess
 
 W = os.path.dirname(os.path.abspath(__file__))
 R = os.path.join(W, "runs")
-DM = os.environ["DEEP_MEMORY"]  # the deep-memory checkout
+DM = os.environ["DEEP_MEMORY"]  # the workspace checkout that holds the engine runs
 PY = os.path.join(DM, "engine/.venv/bin/python")
 ENG = os.path.join(DM, "engine")
 REF = {"q": ENG + "/results/stage4/runs/r_r8_pitt_gb3.3_r1.ids", "i": ENG + "/results/inkling_draft/runs/pitt_one_gb6_r1.ids"}

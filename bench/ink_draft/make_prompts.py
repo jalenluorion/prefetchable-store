@@ -16,7 +16,7 @@ ap.add_argument("--model", default=os.environ.get("MODEL", os.path.normpath(os.p
 a = ap.parse_args()
 
 
-def render_chat(model_dir, messages, **kw):  # as engine/ink/run_ink.py (mlx_run.py's): plain jinja2, no generation prompt
+def render_chat(model_dir, messages, **kw):  # as the MLX reference implementation renders it: plain jinja2, no generation prompt
     class Generation(Extension):
         tags = {"generation"}
 

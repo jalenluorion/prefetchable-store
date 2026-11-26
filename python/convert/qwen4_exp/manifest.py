@@ -1,4 +1,4 @@
-"""moved-store.json for a Qwen3.8-Flash-Next folder in the store layout (reference/flash/convert.py's output), in the schema of
+"""moved-store.json for a Qwen3.8-Flash-Next folder in the store layout (python/convert/qwen4_exp/convert.py's output), in the schema of
 the other two weight repos (docs/MANIFEST-PRESETS.md), with one profile: mac.
 
   python python/convert/qwen4_exp/manifest.py DIR [--out FILE] [--sha256 FILE] [--size PATH=BYTES ...] [--name NAME]
@@ -150,7 +150,7 @@ FAST_CAL = {'measured': "base M4 16 GB, 3.0 GB cache, routers top 4, 4 readers; 
 m = {
     "format": "moved-store", "format_version": "1.0", "family": "qwen4_exp", "name": a.name,
     "source": {"repo": a.repo, "revision": None, "license": "qwen-community-1.0", "license_file": "LICENSE"},
-    "converter": {"code": "reference/flash/convert.py (the store, the n-gram parts and resident.safetensors as published)", "commit": None,
+    "converter": {"code": "python/convert/qwen4_exp/convert.py (the store, the n-gram parts and resident.safetensors as published)", "commit": None,
                   "sha256": known.get("convert.py"), "date": None},
     "complete": True,
     "parts": parts,
@@ -166,7 +166,7 @@ m = {
                                          "code_packing": "two per byte, element 2j in the low nibble of byte j", "scale_dtype": "f16", "bias_dtype": "f16",
                                          "dequant": "w = code * scale + bias per group of 64 along the input"}}},
     "resident": {"file": "resident.safetensors", "precision": "bf16",
-                 "q8_rule": {"matrices": "every 2-D linear with >= 64 outputs and inputs % 64 == 0, except the released router (reference/flash/mlx_run.py qpred)",
+                 "q8_rule": {"matrices": "every 2-D linear with >= 64 outputs and inputs % 64 == 0, except the released router",
                              "quantiser": "mlx_affine", "bits": 8, "group": 64, "input_cast": "f16", "scale_dtype": "f16",
                              "keep_exact": ["mlp.gate", "mlp.shared_expert_gate", "block_inject_weight", "linear_attn.in_proj_a", "linear_attn.in_proj_b"],
                              "embedding": "not copied: one bf16 row per token is read from resident.safetensors (or embeddings.safetensors)"}},

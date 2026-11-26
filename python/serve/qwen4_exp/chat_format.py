@@ -3,7 +3,7 @@ chat_template.jinja and tokenizer_config.json response_template, nothing model-s
 reasoning switches. The template (a Qwen3.6 ChatML template with Qwen3-Coder XML tool calls) takes reasoning_effort
 xhigh (its default), medium or low and states it at the start of the system prompt; enable_thinking=false turns thinking
 off. A request's reasoning_effort (or reasoning.effort, what OpenCode sends for a reasoning variant) maps onto those as
-the reference runner maps it (reference/flash/mlx_run.py template_kwargs): high -> xhigh, minimal -> low, none -> thinking
+the MLX reference implementation mapped it: high -> xhigh, minimal -> low, none -> thinking
 off. Checked against transformers' apply_chat_template on the release's files by tests/qwen4_exp/chat_check.py."""
 import importlib.util
 import os

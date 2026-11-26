@@ -1,0 +1,6 @@
+# For rebuilding the store from the released weights (convert.py, check.py) and for the tiny-model tests
+torch
+safetensors
+huggingface_hub
+numpy
+transformers>=5.22     # tests/qwen4_exp/tiny_check.py compares against transformers' Qwen4ExpForCausalLM

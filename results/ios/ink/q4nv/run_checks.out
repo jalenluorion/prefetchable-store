@@ -1,8 +1,0 @@
-q4 r1 rc 0
-q4 r2 rc 0
-nv r1 rc 0
-nv r2 rc 0
-both rc 0
-q4 deterministic
-nv deterministic
-done

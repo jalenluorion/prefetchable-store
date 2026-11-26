@@ -225,8 +225,8 @@ cells**: pitt, coding, agent x 452 / 720 / 1130 / 1864 slots x one pool / unifor
 ## 6a. In the engine (Mac, 2026-11-22 03:55-04:05)
 
 dmeng built from this branch (`cmake --build build --target dmeng -j3`), lossless, `--temp 0 --ctx 16384 --prec i16
---mem mlock`, model deep-memory/local/q36/model (8-bit resident), 400 tokens, every run through
-deep-memory/engine/bench/guard.py (one model run at a time; it waited for another job's dmeng gates). 1.27 GB is
+--mem mlock`, model MODEL_DIR (the 35B, 8-bit resident), 400 tokens, every run through
+a guard script (one model run at a time; it waited for another job's dmeng gates). 1.27 GB is
 `--cache-gb 1.27402` (exactly the simulator's 720 slots). References: stage4's `r_r8_pitt_gb3.3_r1.ids` and
 `dc_off_code.ids`. `engine/run_gate.sh`, table by `engine/summary.py` (`engine/summary.md`); hit rate and MB/token are
 over the 399 decode steps, as the simulator counts. Policy ms = the new `policy_ms_per_token` (a timer around victim()
