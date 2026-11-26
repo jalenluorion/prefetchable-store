@@ -272,6 +272,14 @@ void Readers::loop() {
       file_resident_skips.fetch_add(1, std::memory_order_relaxed);
       file_bytes_skipped.fetch_add(j.n, std::memory_order_relaxed);
     }
+    // spare memory under the slab: a piece whose pages the file cache holds is copied from it (the buffered pread
+    // below), not read from the drive; counted as served by the file cache, not in `bytes`
+    bool from_cache = false;
+    if (!skip_piece && j.dst && j.view && file_skip_resident && spare_on.load(std::memory_order_relaxed) && all_resident(j.view, j.n)) {
+      from_cache = true;
+      file_resident_skips.fetch_add(1, std::memory_order_relaxed);
+      file_bytes_skipped.fetch_add(j.n, std::memory_order_relaxed);
+    }
     if (!skip_piece) {
       uint8_t* dst = j.dst;
       if (!dst) {
@@ -287,8 +295,10 @@ void Readers::loop() {
         }
         done += (size_t)r;
       }
-      bytes.fetch_add(j.n, std::memory_order_relaxed);
-      bytes_cls[cls].fetch_add(j.n, std::memory_order_relaxed);
+      if (!from_cache) {
+        bytes.fetch_add(j.n, std::memory_order_relaxed);
+        bytes_cls[cls].fetch_add(j.n, std::memory_order_relaxed);
+      }
       if (!j.dst && file_prefault) {  // map the cached pages here (soft faults), not in the compute threads
         const size_t pg = (size_t)getpagesize();
         uint64_t acc = 0;
@@ -388,10 +398,11 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
       err = "cannot open " + p;
       return false;
     }
-    if (mode != Mem::FILE) fcntl(fd, F_NOCACHE, 1);  // FILE: buffered reads, the file cache is the tier
+    const bool under = file_under && mode != Mem::FILE;  // spare memory under the slab: buffered reads, mapped for mincore
+    if (mode != Mem::FILE && !under) fcntl(fd, F_NOCACHE, 1);  // FILE: buffered reads, the file cache is the tier
     fcntl(fd, F_RDAHEAD, 0);
     fds.push_back(fd);
-    if (mode == Mem::FILE) {
+    if (mode == Mem::FILE || under) {
       const off_t sz = lseek(fd, 0, SEEK_END);
       void* m = sz > 0 ? mmap(nullptr, (size_t)sz, PROT_READ, MAP_SHARED, fd, 0) : MAP_FAILED;
       if (m == MAP_FAILED) {
@@ -402,9 +413,17 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
       fmap_bytes.push_back((size_t)sz);
     }
   }
+  if (mode == Mem::FILE) file_under = false;
+  rd.spare_on.store(file_under, std::memory_order_relaxed);
   for (int p = 0; p < npools; p++) pend_[p] = P[p].pending.get();
   rd.start(readers, pend_, skip);
   return true;
+}
+
+void Cache::spare_pause() {
+  if (!file_under || spare_paused.exchange(true)) return;
+  rd.spare_on.store(false, std::memory_order_relaxed);
+  for (int fd : fds) fcntl(fd, F_NOCACHE, 1);  // reads stop leaving pages in the file cache (the pages there stay the OS's)
 }
 
 Cache::~Cache() {
@@ -430,8 +449,11 @@ void Cache::drop(int L, int slot, bool count_pf_unused) {
     if (count_pf_unused && b.pf_unused) st.n_pf_unused_evicted++;
     if (b.bg_unused) st.n_bg_unused_evicted++;
     if (!floor_until.empty()) floor_until[k] = -1;  // (a later read of the record has no floor)
-    if (mem == Mem::FILE && file_evict_hint == 1) madvise(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MADV_DONTNEED);
-    else if (mem == Mem::FILE && file_evict_hint == 2) msync(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MS_INVALIDATE);
+    // (the hints also apply under the slab with spare memory: 2 = the evicted record's pages leave the file cache, so
+    // the tier holds nothing, the case of an OS that keeps no spare pages)
+    const bool fm = mem == Mem::FILE || (file_under && !fmap.empty());
+    if (fm && file_evict_hint == 1) madvise(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MADV_DONTNEED);
+    else if (fm && file_evict_hint == 2) msync(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MS_INVALIDATE);
   }
   b = Slot();
 }
@@ -738,7 +760,7 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
   const int parts = (int)((R + piece - 1) / piece);
   S.pending[slot].store(parts, std::memory_order_release);
   uint8_t* dst = mem == Mem::FILE ? nullptr : S.row(slot);
-  const uint8_t* view = mem == Mem::FILE ? fmap[L] + (size_t)e * R : nullptr;
+  const uint8_t* view = !fmap.empty() ? fmap[L] + (size_t)e * R : nullptr;  // (FILE, or spare memory under the slab: mincore)
   for (int i = 0; i < parts; i++) {
     size_t o = (size_t)i * piece, len = std::min(piece, R - o);
     Readers::Job j{fds[L], (long)((size_t)e * R + o), dst ? dst + o : nullptr, len, layer_pool[L], slot};

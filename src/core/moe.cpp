@@ -139,6 +139,7 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
   std::vector<double> share = o.pool_share.empty() ? mi.pool_share : o.pool_share;
   if (share.empty()) share.assign(rec.size(), 1.0 / rec.size());
   cache.layer_paths = mi.layer_paths;
+  cache.file_under = o.spare_mem && o.mem != Mem::FILE;
   cache.defer_lock = o.cache_start_gb > 0 && o.cache_start_gb < o.cache_gb && o.mem == Mem::MLOCK;
   if (!cache.init(mi.layers, NE, K, mi.step_layer, mi.layer_fmt, rec, share, dir, mi.layer_file, o.cache_gb * 1e9, o.readers,
                   o.split, o.mem, o.skip_reads, err))
