@@ -257,7 +257,7 @@ typedef struct dm_counters_t {
 } dm_counters_t;
 int dm_counters(dm_engine* e, dm_counters_t* out);
 
-/* Spare memory (the OS file cache under the locked slab: the phone profile's rule, physical memory >= 11 GB, or
+/* Spare memory (the OS file cache under the locked slab: a profile's "spare_memory" rule (no built-in one), or
  * model_options "run:spare-mem=0|1"): stop adding expert pages to the file cache for the rest of the session (a memory
  * warning); reads go to the drive as without it. Any thread; idempotent. DM_EINVAL if the tier is not on. */
 int dm_spare_memory_pause(dm_engine* e);
