@@ -688,6 +688,7 @@ void Drafter::reset_stats() {
 void Drafter::end() {
   pend_n_ = 0;  // a pass whose next step is in another generation is not measured
   prev_pass_ = false;
+  for (auto* s : srcs_) s->restart();  // (a backoff until a position of this sequence: not the next one's)
   if (!core) return;
   for (auto& kv : ea_held_)
     for (auto& x : kv.second) core->cache.unpin_pf(x[0], x[1], x[2]);

@@ -65,6 +65,9 @@ class DraftSource {
   // after a step in which this source proposed: l = the draft length the controller chose for it (0: none), gain = its
   // expected gain, chosen = its draft ran, accepted = how many of it were kept, step_ms = the whole step (proposals in)
   virtual void outcome(const DraftCtl& ctl, int l, double gain, bool chosen, int accepted, double step_ms) {}
+  // a generation ended (Drafter::end): state kept in the sequence's positions (a backoff until position P) means nothing
+  // to the next sequence (the server's next request); what was learned about the source's accuracy stays
+  virtual void restart() {}
   bool timed = false;  // its proposal time is left out of the controller's pass costs (a source that runs a model part)
 };
 
@@ -131,6 +134,7 @@ class HeadSource : public DraftSource {
   bool ask(const std::vector<int32_t>& hist, double best_gain) override;
   bool propose(const std::vector<int32_t>& hist, int max, Draft& d) override;
   void outcome(const DraftCtl& ctl, int l, double gain, bool chosen, int accepted, double step_ms) override;
+  void restart() override { backoff = backoff0, backoff_until = 0, h_val = 1.5; }
   std::string stats_json() const;
   long runs = 0, offers = 0, used = 0, acc = 0, lost = 0, skipped_backoff = 0, skipped_lookup = 0;
   double ms_total = 0;
@@ -175,6 +179,7 @@ class LightHeadSource : public DraftSource {
   // or made the step slower per token than a plain step: backoff0 steps, doubling to backoff_max)
   bool ask(const std::vector<int32_t>& hist, double best_gain) override;
   void outcome(const DraftCtl& ctl, int l, double gain, bool chosen, int accepted, double step_ms) override;
+  void restart() override { backoff_ = backoff0, until_ = 0; }
   int backoff0 = 32, backoff_max = 256;
   long lost = 0, skipped_backoff = 0, skipped_earlier = 0;
   bool gate = true;                       // confidence-gated width (more()); false: every draft up to the max
