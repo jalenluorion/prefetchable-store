@@ -94,6 +94,13 @@ enum SelfCheck {
         return abs(s - e) / e <= 0.02
     }
 
+    /// The Diagnostics "Last reply in detail" rows after a reply (the engine's counters), as label: value, each logged.
+    static func lastReply(_ model: ChatModel, _ label: String) -> [String: String] {
+        var r: [String: String] = [:]
+        for (k, v) in model.engine.lastReplyRows { r[k] = v; log("SELFCHECK last reply (\(label)): \(k) = \(v)") }
+        return r
+    }
+
     /// The drive's free space (GB): what the volume reports, and what iOS would make available for important use.
     static func freeGB() -> [String: Double] {
         guard let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]) else { return [:] }
@@ -403,6 +410,10 @@ enum SelfCheck {
         out["engine_default"] = model.engineState.label
         if model.engineState == .ready {
             out["resolved_default"] = resolved((model.engine as? DmengChatEngine)?.selfCheckStats ?? "")
+            out["spare_memory_offered"] = DmengLaunch.spareMemoryOffered
+            out["spare_memory_choice"] = DmengLaunch.spareMemoryChoice ?? NSNull()
+            out["spare_memory_resolved"] = (model.engine as? DmengChatEngine)?.spareMemoryResolved ?? NSNull()
+            log("SELFCHECK spare memory: switch \(DmengLaunch.spareMemoryOffered ? "offered" : "not offered"), choice \(DmengLaunch.spareMemoryChoice.map { "\($0)" } ?? "none"), resolved \((model.engine as? DmengChatEngine)?.spareMemoryResolved.map { "\($0)" } ?? "?")")
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             let statesBefore = chatStates()
             var th = thermal()
@@ -413,6 +424,7 @@ enum SelfCheck {
             let r1 = await model.reply(to: firstPrompt, maxNew: 160)
             let id = model.conversations.first { $0.messages.contains { $0.role == .user && $0.content == firstPrompt } }?.id
             out["chat"] = chatRow(r1, thermal0: th)
+            out["chat_last_reply"] = lastReply(model, "chat")
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             out["chat_peak_gb"] = Double(pk.v) / 1e9
             out["chat_regions_after"] = regions()
@@ -422,6 +434,7 @@ enum SelfCheck {
             th = thermal()
             let r2 = await model.reply(to: followPrompt, maxNew: 160)
             out["chat_followup"] = chatRow(r2, thermal0: th)
+            out["chat_followup_last_reply"] = lastReply(model, "follow-up")
             pk.on = false
             out["chat_peak_all_gb"] = Double(pk.v) / 1e9
             out["chat_regions_end"] = regions()
