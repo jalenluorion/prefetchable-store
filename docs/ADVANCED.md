@@ -38,7 +38,7 @@ resolve to, as JSON, without loading the model.
   `--disk-gb`, `--disk-every`, `--preload`), idle-time prefill (`--ahead-span`, `--ahead-park`; the front end's
   `--ahead 0|1`), the saved hot set (`--hotset F|none`), the memory watcher (`--mem-watch`, `--mem-low-pct`,
   `--mem-high-pct`, `--mem-grow-after-s`, `--mem-retry-s`, `--cache-min-gb`, `--headroom-gb`) (dmserve).
-- **Draft and verify** (greedy and sampled; the tokens are plain decoding's): `--draft lookup|fixed|head|both`,
+- **Draft and verify** (greedy and sampled; the tokens are plain decoding's; see Drafting below): `--draft lookup|fixed|head|both`,
   `--draft-max`, `--draft-thr`, `--head-backoff`, `--early`, `--verify-names`, `--skeleton`, `--probe-every`,
   `--copy-free`, `--draft-cost`, `--verify-old` (the previous verify pass, for A/B measurements).
 - **Reads**: `--name-gate 0|1` (no new named read while urgent reads wait for a reader; default 0).
@@ -49,10 +49,46 @@ resolve to, as JSON, without loading the model.
 - **Server front end**: `--model-id`, `--worker`, `--log`, `--log-ids`, `--log-bodies`, `--max-new-cap`, `--seed`,
   `--side-grace`, `--idle-s`, `--allow-force`, `--format`; everything after `--` goes to the worker.
 
+## Drafting
+
+Draft and verify: a cheap source proposes the next tokens, one batched pass of the model verifies them, and the kept
+tokens are exactly the ones plain decoding produces (greedy: the same ids; sampled: the same tokens for the same seed,
+each token drawn with its own draw). The three front ends share it: one controller (`include/dmeng/draft.h`: the
+sources, the choice of how many drafts a pass carries from measured pass costs, the probes, the statistics), one
+resolved setting, one set of counters.
+
+- **Sources.** `lookup`: copy drafts, the longest earlier match of the sequence's last 2-16 tokens in the prompt, the
+  reply so far and the session's earlier replies, plus given fragments (a request's tool-call format, a file being
+  rewritten). `head`: the model's own draft head (Inkling's `mtp.safetensors`). `both`: the two. `fixed` runs the whole
+  lookup draft every step (a test of the verify pass, not a policy).
+- **Resolved once** for dmeng, dmserve and the C API: an explicit value (`--draft MODE`, `--drafts 0|1`; the C API's
+  model options `run:draft=MODE`, `run:drafts=0|1`) > the profile's declared `drafts` {`lookup`, `head`} > off. The pass
+  width: `--draft-max N` (`run:draft-max=N`) > the profile's `drafts.max` > 7 drafts (8 positions, the verify pass's
+  limit). A family without a multi-position verify pass, or a draft head the folder does not have, fails at open in all
+  three, a declared default too. `resolved.draft` and, while drafting is on, `resolved.draft_max` report it.
+- **dmeng**: `--draft`, `--draft-max`, `--skeleton F` (fragments), `--early`, `--draft-cost`, the head's `--draft-thr`
+  and `--head-backoff`. **dmserve**: the same flags; a request's fragments come with it (the `R` line's `n_skel`
+  lines); pass costs in `DIR/.dmeng/draft_cost.txt` under a profile. **The C API** (`bindings/c/dmeng_c.h`):
+  `dm_step_n(e, id, sampler, history, n_history, stop, n_stop, max_out, out, &n_out, logits)` feeds `id` and returns
+  1..8 tokens, each the token `dm_sample` gives over the caller's history at that place (without drafting it is
+  `dm_step` then `dm_sample`); `dm_set_draft_fragments` gives the fragments; `run:draft-cost=FILE|none` (default under
+  a profile: the profile's cache folder, as dmserve). `dm_step` stays plain decoding.
+- **Memory.** A verify pass keeps buffers for 8 positions (the 35B and Flash-Next: a second copy of the recurrent state
+  for the rollback, and each position's logits; Inkling less), allocated at the first pass and not shrunk by a smaller
+  `max`; the head adds its weights and state (Inkling: 0.64 GB of weights, results/ink_draft/DRAFT-HEAD.md). With
+  drafting off none of it is allocated. On iOS the C API's slab rule gives drafting's memory out of the expert slab
+  (a second fixed state and 8 positions' logits, plus the head's file: `policy.slab_rule.draft_reserve_gb`), so the
+  footprint the rule aims at holds; `draft.memory` in `dm_stats_json` reports the first pass's footprint rise and the
+  head's memory, to check the reserve on the device.
+- **Statistics**: `draft` in dmeng's JSON, in dmserve's `E` line and in `dm_stats_json`: steps, tokens, tokens per
+  step, verifies, drafted, accepted, offered, declined, probes, by source, the cost model's widths; the C API adds
+  `calls` and `tokens_per_call` (dm_step_n) and `memory`.
+
 ## C API
 
 `dm_open_opts` (bindings/c/dmeng_c.h) has the same `profile` and `mode` fields; every option left at zero or NULL
-takes the profile's default. `profile = "none"` gives the engine's own values.
+takes the profile's default. `profile = "none"` gives the engine's own values. Run settings the struct has no field for
+go through `model_options` as `run:FLAG=VALUE` (drafting: `run:draft=lookup`, `run:draft-max=N`; see Drafting above).
 
 ## Checking a download
 

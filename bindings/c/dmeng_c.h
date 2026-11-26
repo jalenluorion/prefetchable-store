@@ -251,7 +251,8 @@ int32_t dm_argmax(const float* logits, int vocab);
  * would choose there:
  *   out[0] = dm_sample(logits after id, s, history, n_history)
  *   out[i] = dm_sample(logits after out[i-1], s, history + out[0 .. i), n_history + i)
- * (history: this reply's tokens so far, id included, as the app passes dm_sample; s NULL = greedy). The state then holds
+ * (history: this reply's tokens so far, id included, as the app passes dm_sample; s NULL = greedy: dm_argmax, as is a
+ * sampler with temp <= 0 and no penalties; with penalties dm_sample applies them before its argmax). The state then holds
  * every position up to out[*n_out - 2]: the next call feeds out[*n_out - 1]. Without drafting it is dm_step followed by
  * dm_sample (*n_out = 1). Stops after a token in stop[0 .. n_stop) (it is the last one written). max_out bounds the
  * tokens of this call (out holds max_out; 8 is the most a call produces): pass 1 for a step whose next token the app

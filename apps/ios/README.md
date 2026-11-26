@@ -130,6 +130,19 @@ app removes everything.
 reading your message while you type. Settings › Diagnostics shows the engine's settings, the last reply's speed and
 the app's memory.
 
+**Drafting** (in the engine's C API, not yet in the app's settings; off in every profile). Opened with
+`model_options` holding `run:draft=lookup` (or `run:draft=head` / `run:draft=both` for Inkling's draft head,
+`run:draft=none` to turn a profile's default off; optional `run:draft-max=N`, 1..7), the engine drafts when the reply
+is decoded with `dm_step_n` instead of `dm_step` + `dm_sample`: pass the token just chosen, the sampler (NULL where
+the loop takes `dm_argmax` today, temperature 0: `dm_sample` would apply the penalties there), the reply's tokens so far (the same `hist` given to `dm_sample` today, that token included), the stop ids and `max_out` (at most
+8; the number of tokens before one the thinking budget will force, 1 when the next token is forced), and handle the
+returned tokens in order as if each had been sampled; the next call feeds the last one. The tokens are the ones the
+current loop produces, only several per step where drafts are kept. Text the reply is likely to copy (a file being
+rewritten, a tool's call format) goes to `dm_set_draft_fragments` before the reply; the prompt and the chat's earlier
+replies are searched without it. With drafting on, the slab is smaller by drafting's memory (`dm_stats_json`
+`policy.slab_rule.draft_reserve_gb`; Inkling's head adds about 0.7 GB), and `dm_stats_json` reports `draft`
+(tokens per step, kept drafts, the first pass's memory).
+
 ## Speed on an iPhone 15 Plus (6 GB)
 
 Measured on the device, profile `phone-small`. On an iPhone 17 Pro (12 GB), a user measured 11 tokens/s for
