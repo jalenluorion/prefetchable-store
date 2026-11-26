@@ -618,14 +618,13 @@ int main(int argc, char** argv) {
       fprintf(stderr, "--mode exact|fast|lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
       return 2;
     }
-    if (C.ns.prio) C.cache.rd.prio = true;
     if (C.ns.cancel) C.cancel_stale = true;
   }
   C.cache.name_gate = a.name_gate != 0;
   C.ra_budget = a.ra_budget;
   C.ra_max_tok = a.ra_max;
   C.ra_sat_skip = a.ra_sat != 0;
-  if (a.rd_prio >= 0) C.cache.rd.prio = a.rd_prio != 0;  // speculative reads by priority instead of first in, first out
+  C.cache.rd.prio = priority_reads_on(a.rd_prio, false, C.ns.on && C.ns.prio);  // (no read planner in the server)
   std::unique_ptr<State> S = M->new_state(a.ctx, err);
   if (!S) {
     fprintf(stderr, "state: %s\n", err.c_str());
@@ -760,6 +759,7 @@ int main(int argc, char** argv) {
            r.draft = a.draft;
            r.drafts = a.draft != "none" ? 1 : 0;
            r.cache = a.cache_auto ? r.cache : "fixed";
+           r.rd_prio = C.cache.rd.prio ? 1 : 0;  // in force
            return r.resolved(a.cache_gb).json();
          }()
       << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << ",\"routers_file_mb\":" << [&] {

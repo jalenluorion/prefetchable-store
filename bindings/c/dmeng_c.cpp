@@ -539,6 +539,11 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     if (e->C->ns.prio) e->C->cache.rd.prio = true;
     if (e->C->ns.cancel) e->C->cancel_stale = true;
   }
+  // priority reads: the C API's own rule (the planner, the cross-token routers with rd_prio 1, fast mode), not dmeng's and
+  // dmserve's priority_reads_on (presets.h); left as it runs until measured, the two differ (a) in exact mode with in-token
+  // routers only and rd_prio 1 (the 35B on every profile, Flash-Next; defaults.priority_reads): off here, on there; (b)
+  // rd_prio 0 given with the planner or in fast mode: on here, off there. resolved.priority_reads reports this value.
+  ro.rd_prio = e->C->cache.rd.prio ? 1 : 0;
   // the prefill's GPU split (exact): 0 = the profile's shares (mac: 0.4 / 0.4), < 0 = off
   const double gpu_frac = ro.gpu_frac, gpu_experts = ro.gpu_experts;
   if (gpu_frac > 0 || gpu_experts > 0 || o.prefill_gpu_min > 0 || o.prefill_gpu_min_wave > 0) {

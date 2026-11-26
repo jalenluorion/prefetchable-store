@@ -555,6 +555,8 @@ std::vector<double> draft_cost_prior(const std::string& dir) {
   return v;
 }
 
+bool priority_reads_on(int rd_prio, bool planner, bool fast) { return rd_prio >= 0 ? rd_prio != 0 : planner || fast; }
+
 Resolved RunOpts::resolved(double cache_gb_in_force) const {
   Resolved x;
   x.profile = profiled ? preset.profile : "none";

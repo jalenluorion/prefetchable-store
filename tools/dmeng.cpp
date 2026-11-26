@@ -676,7 +676,7 @@ int main(int argc, char** argv) {
       return 2;
     }
   }
-  C.cache.rd.prio = a.rd_prio < 0 ? (plan || (C.ns.on && C.ns.prio)) : a.rd_prio != 0;
+  C.cache.rd.prio = priority_reads_on(a.rd_prio, plan, C.ns.on && C.ns.prio);
   C.cache.rd.excl = a.rd_excl != 0;
   C.cache.name_gate = a.name_gate != 0;
   if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;
@@ -975,6 +975,7 @@ int main(int argc, char** argv) {
             if (a.prefetch != "router") r.routers.clear();
             r.bg_ranks = rts.bg_ranks;
             r.cache = a.cache_auto ? r.cache : "fixed";
+            r.rd_prio = C.cache.rd.prio ? 1 : 0;  // in force
             return r.resolved(a.cache_gb).json();
           }() << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")

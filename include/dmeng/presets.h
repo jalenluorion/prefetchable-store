@@ -196,7 +196,8 @@ struct RunOpts {
   bool routers_from_profile = false;
   int m = 8, cand = 16;
   double tau = -1, xtok_tau = 0.5;  // tau as the routers use it (>= 0: the confidence rule)
-  int rd_prio = -1;                 // -1: the front end's rule (on with planner / fast mode), 0 / 1 explicit or the profile's
+  int rd_prio = -1;                 // -1: the front end's rule (on with planner / fast mode), 0 / 1 explicit or the profile's;
+                                    // in the resolved block: the value in force (priority_reads_on, the C API's rule)
   std::string evict = "auto";
   std::string layer_caps;           // "" = the core's rule
   std::string cache = "fixed";      // fixed (cache_gb) | auto (from the machine) | slab (sized at open from what iOS gives)
@@ -227,6 +228,14 @@ struct RunOpts {
 // options `g`; `r` comes in holding the front end's built-in values. derived_dir, avail_bytes: as resolve_preset.
 bool resolve_run(const std::string& dir, const std::string& profile_req, const Given& g, const std::string& derived_dir, int64_t avail_bytes,
                  RunOpts& r, std::string& err);
+
+// Speculative reads (router and cross-token names, run-ahead) by priority, nearest step first, instead of first in, first
+// out: the resolved rd_prio when set (1 from defaults.priority_reads where a names source runs, or 0 / 1 given), else on
+// with the read planner or in fast mode. dmeng and dmserve apply this rule; the C API keeps its own, which differs in two
+// cases left as they run until measured (bindings/c/dmeng_c.cpp). Every front end reports the value in force as
+// resolved.priority_reads (RunOpts::rd_prio set to it before the block is written). It orders reads only: exact mode's
+// tokens never depend on it.
+bool priority_reads_on(int rd_prio, bool planner, bool fast);
 
 // The batched prompt path's values a model folder declares (its manifest's "prefill" key, else the family's published
 // manifest's; family "" = the folder's manifest's), then the profile's own "prefill" block over them key by key (the
