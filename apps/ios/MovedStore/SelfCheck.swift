@@ -198,7 +198,9 @@ enum SelfCheck {
             out["lever_opts"] = arg("-selfcheck-lever-opts") ?? ""
             out["lever_mode"] = mode
             var arms: [String: Any] = [:]
-            for (arm, opts) in [("default", nil), ("lever", arg("-selfcheck-lever-opts"))] as [(String, String?)] {
+            // default, lever, default again: the second default shows the order's own effect (the drive's and the OS's
+            // caches are warmer for a later arm)
+            for (arm, opts) in [("default", nil), ("lever", arg("-selfcheck-lever-opts")), ("default2", nil)] as [(String, String?)] {
                 modeOverride = mode
                 optsOverride = opts
                 await d.unload()
