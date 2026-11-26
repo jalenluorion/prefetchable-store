@@ -66,6 +66,38 @@ enum SelfCheck {
          "thermal_start": thermal0, "thermal_end": thermal()]
     }
 
+    /// The drive's free space (GB): what the volume reports, and what iOS would make available for important use.
+    static func freeGB() -> [String: Double] {
+        guard let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityKey, .volumeAvailableCapacityForImportantUsageKey]) else { return [:] }
+        return ["free_gb": Double(v.volumeAvailableCapacity ?? -1) / 1e9, "free_important_gb": Double(v.volumeAvailableCapacityForImportantUsage ?? -1) / 1e9]
+    }
+    /// `-selfcheck-cleanup`: the app's own leftovers only (old profiling logs and test outputs in Documents, the stale
+    /// temporary download, half-written saved states); never the model folders, the conversations or a finished state.
+    static func cleanup() -> [[String: Any]] {
+        let fm = FileManager.default
+        var removed: [[String: Any]] = []
+        func rm(_ u: URL) {
+            let n = ((try? fm.attributesOfItem(atPath: u.path))?[.size] as? NSNumber)?.int64Value ?? -1
+            do { try fm.removeItem(at: u); removed.append(["path": u.path.replacingOccurrences(of: NSHomeDirectory() + "/", with: ""), "bytes": n])
+                 log("SELFCHECK cleanup removed \(u.lastPathComponent) (\(n) bytes)") } catch { log("SELFCHECK cleanup could not remove \(u.path): \(error)") }
+        }
+        let docs = (try? fm.contentsOfDirectory(at: docsURL, includingPropertiesForKeys: nil)) ?? []
+        for u in docs {
+            let n = u.lastPathComponent
+            if (n.hasPrefix("gpuprof-") && n.hasSuffix(".txt")) || n.hasPrefix("p3out_") || (n.hasPrefix("tf-") && n.hasSuffix(".json"))
+                || n == "ui.json" || n == "probe.json" || (n.hasPrefix("selfcheck") && (n.hasSuffix(".json") || n.hasSuffix(".ids"))) { rm(u) }
+        }
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+        for u in (try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
+            where u.lastPathComponent.hasPrefix("CFNetworkDownload_") && u.lastPathComponent.hasSuffix(".tmp") { rm(u) }
+        let states = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app").appendingPathComponent("dmeng-prefix")
+        for d in (try? fm.contentsOfDirectory(at: states, includingPropertiesForKeys: nil)) ?? [] {
+            for u in (try? fm.contentsOfDirectory(at: d, includingPropertiesForKeys: nil)) ?? [] where u.lastPathComponent.hasSuffix(".tmp") { rm(u) }
+        }
+        return removed
+    }
+
     private static func run(_ model: ChatModel) async {
         let kind = ModelKind.selected
         let tStart = Date()
@@ -79,6 +111,11 @@ enum SelfCheck {
         let convsBefore = ConversationStore.loadAll().count
         out["conversations_before"] = convsBefore
         out["files_before"] = listing(kind)
+        out["free_start"] = freeGB()
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-cleanup") {
+            out["cleanup"] = cleanup()
+            out["free_after_cleanup"] = freeGB()
+        }
         log("SELFCHECK screen \(out["first_screen"]!) model \(kind.rawValue) profile \(DmengLaunch.profile) mode \(DmengLaunch.userMode)")
 
         // 1. the selected model's files against the Hub manifest's profile parts (only with -selfcheck-verify)
@@ -147,6 +184,7 @@ enum SelfCheck {
         out["mem_end"] = mem("selfcheck end")
         out["thermal_end"] = thermal()
         out["files_after"] = listing(kind)
+        out["free_end"] = freeGB()
         out["total_s"] = Date().timeIntervalSince(tStart)
         finish()
     }
