@@ -1,5 +1,6 @@
 // Modes, profiles and per-model defaults (include/dmeng/presets.h, docs/MANIFEST-PRESETS.md).
 #include "dmeng/presets.h"
+#include "dmeng/store.h"  // SPARE_GB_DEFAULT
 
 #include <sys/stat.h>
 #include <sys/sysctl.h>
@@ -40,7 +41,7 @@ static const char* BUILTIN = R"({
   "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
           "run_ahead": {"picks": "top_k", "depth": 1}},
   "phone": {"mode": "fast", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
-            "spare_memory": {"min_physical_gb": 11.0},
+            "spare_memory": {"min_physical_gb": 11.0, "probation_gb": 6.0},
             "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
   "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
                   "readers": 8, "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
@@ -390,12 +391,14 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     }
   }
   if (const Json* rd = prof("readers"); rd && rd->kind == Json::NUM) p.readers = (int)rd->i(0);
-  // the OS file cache under the slab (store.h, Cache::file_under): on where the device has at least min_physical_gb of
-  // physical memory (the phone: 11, the 12 GB class; a 6 or 8 GB phone has no spare pages); undeclared = off
+  // the spare tier (store.h, Cache::file_under): on where the device has at least min_physical_gb of physical memory
+  // (the phone: 11, the 12 GB class; a 6 or 8 GB phone has no spare pages), its probation budget probation_gb;
+  // undeclared = off
   if (const Json* sm = prof("spare_memory"); sm && sm->kind == Json::OBJ && (*sm)["min_physical_gb"].kind == Json::NUM) {
     p.spare_min_gb = (*sm)["min_physical_gb"].f(0);
     const double phys = physical_memory_bytes();
     p.spare_mem = p.spare_min_gb > 0 && phys >= p.spare_min_gb * 1e9;
+    if ((*sm)["probation_gb"].kind == Json::NUM) p.spare_gb = (*sm)["probation_gb"].f(0);
   }
   if (const Json* bg = prof("background"); bg && bg->kind == Json::OBJ) {  // per profile only (the drive decides)
     p.bg_ranks = (int)(*bg)["ranks"].i(0);
@@ -492,7 +495,7 @@ std::string Resolved::json() const {
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   o << ",\"resident\":" << qq(resident) << ",\"resident_bits\":" << resident_bits;
-  if (spare_mem) o << ",\"spare_memory\":true";
+  if (spare_mem) o << ",\"spare_memory\":true,\"spare_probation_gb\":" << spare_gb;
   if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
   if (ctx > 0) o << ",\"ctx\":" << ctx;
   if (draft != "none") o << ",\"draft_max\":" << draft_max;  // (only while drafting: the block is unchanged with it off)
@@ -589,6 +592,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.rd_prio = rd_prio;
   x.prefill_chunk = prefill_chunk;
   x.spare_mem = spare_mem;
+  x.spare_gb = spare_mem ? spare_gb : 0;
   x.drive_gbs = drive_gbs;
   x.ctx = ctx_declared ? ctx : 0;
   return x;
@@ -663,6 +667,7 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   // MB per token than plain decoding at the same tokens per step); --early N still sets it
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
   r.spare_mem = g.spare_mem ? *g.spare_mem : pf ? P.spare_mem : r.spare_mem;
+  r.spare_gb = g.spare_gb && *g.spare_gb > 0 ? *g.spare_gb : pf && P.spare_gb > 0 ? P.spare_gb : r.spare_gb > 0 ? r.spare_gb : SPARE_GB_DEFAULT;
   r.drive_gbs = g.drive_gbs && *g.drive_gbs > 0 ? *g.drive_gbs : 0;  // bench only: never from a profile or a manifest
   // the context positions
   r.ctx_declared = pf && P.ctx > 0;
@@ -723,6 +728,7 @@ const RunFlag RUN_FLAGS[] = {
     {"--draft-max", nullptr, RF_INT(draft_max)},
     {"--early", nullptr, RF_INT(early)},
     {"--spare-mem", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.spare_mem = x != 0), true); }},
+    {"--spare-gb", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x > 0 && ((g.spare_gb = x), true); }},
     {"--drive-gbs", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x >= 0 && ((g.drive_gbs = x), true); }},
 };
 #undef RF_INT

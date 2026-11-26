@@ -78,10 +78,11 @@ struct Preset {
   // on Flash-Next, measured in one process token by token, they raised the drive's effective rate 4-8% and the bytes
   // per token 2-8%, and the tokens did not get faster)
   int bg_ranks = 0, bg_gate = 0;
-  // the OS file cache under the locked slab (store.h, Cache::file_under): a profile's "spare_memory":
-  // {"min_physical_gb": G} turns it on where the device has at least G GB of physical memory (hw.memsize). Built-in:
-  // phone 11 (the 12 GB class); mac and phone-small undeclared (off)
-  double spare_min_gb = 0;
+  // the spare tier, a probation tier in the OS file cache under the slab (store.h, Cache::file_under): a profile's
+  // "spare_memory": {"min_physical_gb": G, "probation_gb": B} turns it on where the device has at least G GB of physical
+  // memory (hw.memsize), with a probation budget of B GB (undeclared: SPARE_GB_DEFAULT). Built-in: phone 11 and 6 (the
+  // 12 GB class); mac and phone-small undeclared (off)
+  double spare_min_gb = 0, spare_gb = 0;
   bool spare_mem = false;
   // the context positions the front end reserves (a profile's "ctx": N or {"positions": N, "calibration": {...}});
   // 0 = undeclared, the front end's own (dmeng and the C API 16384, dmserve 33792)
@@ -121,7 +122,8 @@ struct Resolved {
   std::string layer_caps;  // "" = the core's rule
   double xtok_tau = 0.5;
   int rd_prio = -1, prefill_chunk = 1;
-  bool spare_mem = false;  // written only when on (the block is unchanged with it off)
+  bool spare_mem = false;  // written only when on (the block is unchanged with it off), with its probation budget
+  double spare_gb = 0;
   int ctx = 0;             // the context positions in force, written only when the profile declares a ctx (else 0)
   double drive_gbs = 0;    // bench only (--drive-gbs): written only when set (the block is unchanged without it)
   // the in-memory weights the front end opened (LoadOpts::resident_id: resident_q8 | resident_q4, "" = another file
@@ -164,7 +166,8 @@ struct Given {
   std::optional<int> m, cand;
   std::optional<double> tau, xtok_tau;
   std::optional<bool> rd_prio;
-  std::optional<bool> spare_mem;        // --spare-mem 0|1: the OS file cache under the slab
+  std::optional<bool> spare_mem;        // --spare-mem 0|1: the spare tier (any profile: 1 forces it on)
+  std::optional<double> spare_gb;       // --spare-gb X: its probation budget in GB
   std::optional<double> drive_gbs;      // --drive-gbs X: bench only, the readers' drive rate capped (never from a profile)
   std::optional<int> ctx;               // context positions (dmeng / dmserve --ctx, the C API's ctx > 0)
   std::optional<std::string> evict, layer_caps;
@@ -184,7 +187,7 @@ struct Given {
 // function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
 // --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
 // --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
-// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --draft-max N --early N --spare-mem 0|1 --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --draft-max N --early N --spare-mem 0|1 --spare-gb X --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
 // run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
 // and err on a malformed value).
 std::string run_flag_name(const std::string& flag);
@@ -220,7 +223,8 @@ struct RunOpts {
   std::string draft = "none";
   int draft_max = 7;  // drafts per pass at most: explicit --draft-max, else the profile's drafts.max, else 7 (clamped to 1..7)
   int early = 0;
-  bool spare_mem = false;  // the OS file cache under the slab (CoreOpts::spare_mem): explicit, else the profile's rule
+  bool spare_mem = false;  // the spare tier (CoreOpts::spare_mem): explicit, else the profile's rule
+  double spare_gb = 0;     // its probation budget (CoreOpts::spare_gb): explicit, else the profile's, else SPARE_GB_DEFAULT
   double drive_gbs = 0;    // bench only (CoreOpts::drive_gbs): explicit only, 0 = off
   int ctx = 16384;         // context positions: explicit, else the profile's declared ctx, else the front end's own
   bool ctx_declared = false;  // the profile declares one (resolved.ctx is written)

@@ -456,6 +456,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.reader_qos > 0) co.reader_qos = (int)qos_of(o.reader_qos - 1);
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
   co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;  // model_options "run:spare-mem=1"
+  co.spare_gb = ro.spare_gb;                            // model_options "run:spare-gb=X"
   ro.spare_mem = co.spare_mem;
   co.drive_gbs = ro.drive_gbs;  // model_options "run:drive-gbs=X" (bench only)
   e->C = std::make_unique<Core>();
@@ -949,17 +950,25 @@ int dm_counters(dm_engine* e, dm_counters_t* out) {
   out->held_bytes = (int64_t)e->C->cache.held_bytes();
   out->budget_bytes = e->C->cache.budget_bytes();
   out->decode_steps = e->steps;
-  out->bytes_spare = e->C->cache.rd.file_bytes_skipped.load(std::memory_order_relaxed);
+  out->bytes_spare = e->C->cache.rd.file_bytes_skipped.load(std::memory_order_relaxed) + S.bytes_prob_hit;
   out->read_busy_ns = e->C->cache.rd.busy_wall();
   out->spare_memory = !e->C->cache.file_under ? 0 : e->C->cache.spare_paused.load() ? 2 : 1;
   out->step_ns = e->step_ns;
   out->bytes_named_unused = e->C->cache.st.n_pf_unused_evicted * (uint64_t)e->C->cache.P[0].rec;
+  out->promotions = S.n_promoted;
+  out->probation_reclaimed = S.n_prob_reclaimed;
+  out->pageins = Cache::task_pageins() - e->C->cache.pageins_at_init;
+  out->probation_bytes = (int64_t)e->C->cache.prob_held_bytes();
   return DM_OK;
 }
 
 int dm_spare_memory_pause(dm_engine* e) {
   if (!e || !e->C->cache.file_under) return DM_EINVAL;
   e->C->cache.spare_pause();
+  if (e->busy.try_lock()) {  // idle: the probation pages go now (else at the engine's next step)
+    e->C->cache.tier_drain();
+    e->busy.unlock();
+  }
   return DM_OK;
 }
 
@@ -998,8 +1007,13 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"shrinks\":" << Ca.fa.shrinks << ",\"grows\":" << Ca.fa.grows << ",\"changes\":" << Ca.fa.trace.size() << "},\"core_gb\":" << Ca.core_slab_bytes / 1e9
       << ",\"core_records\":" << Ca.core_held();
   if (Ca.file_under)  // spare memory under the slab: what the file cache served, and how much of the store it holds now
-    s << ",\"spare_memory\":{\"paused\":" << Ca.spare_paused.load() << ",\"gb_served\":" << Ca.rd.file_bytes_skipped.load() / 1e9
-      << ",\"pieces_served\":" << Ca.rd.file_resident_skips.load() << ",\"store_in_file_cache_gb\":" << Ca.file_resident_bytes() / 1e9 << "}";
+    s << ",\"spare_memory\":{\"paused\":" << Ca.spare_paused.load() << ",\"gb_served\":" << (Ca.rd.file_bytes_skipped.load() + Ca.st.bytes_prob_hit) / 1e9
+      << ",\"pieces_served\":" << Ca.rd.file_resident_skips.load() << ",\"store_in_file_cache_gb\":" << Ca.file_resident_bytes() / 1e9
+      << ",\"tier\":\"probation\",\"probation_budget_gb\":" << Ca.prob_bytes / 1e9 << ",\"probation_held_gb\":" << Ca.prob_held_bytes() / 1e9
+      << ",\"gb_reuse_served\":" << Ca.st.bytes_prob_hit / 1e9 << ",\"gb_from_drive\":" << Ca.rd.bytes.load() / 1e9
+      << ",\"promotions\":" << Ca.st.n_promoted << ",\"promotions_refused\":" << Ca.st.n_promote_refused
+      << ",\"reclaimed_before_reuse\":" << Ca.st.n_prob_reclaimed << ",\"budget_drops\":" << Ca.st.n_prob_budget_drops
+      << ",\"promote_ms\":" << Ca.st.promote_ms << ",\"pageins\":" << Cache::task_pageins() - Ca.pageins_at_init << "}";
   s << "}";
   s << ",\"cache_lock\":" << Ca.lock_json();
   s << ",\"policy\":{\"evict\":\"" << e->C->o.evict << "\",\"hazard\":" << Ca.hazard_evict << ",\"layer_caps_opt\":\"" << e->C->o.layer_caps

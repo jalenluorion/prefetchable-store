@@ -145,7 +145,10 @@ outputs
   --drive-gbs X          bench only: the readers' combined drive rate capped at X GB/s (one clock across the reader
                          threads, prompt and decode reads alike; the wait counts as a slow read's), a slower drive's
                          stand-in; off by default and in every profile (C API: model_options "run:drive-gbs=X")
-  --state-check          after the decode, restore the state saved after the prompt (fixed + positional parts) and
+  --spare-mem 0|1 --spare-gb X   the spare tier (include/dmeng/store.h): reads land in a probation tier in the OS file
+                         cache, their reuse moves them into the slab; on by the profile's rule (phone: at least 11 GB
+                         physical) or forced with 1 on any profile; X = its probation budget in GB (the profile's, else 6)
+  --state-check         after the decode, restore the state saved after the prompt (fixed + positional parts) and
                          decode again: the ids must be the same
   --prefill-chunk N      the prompt through the model's batched prefill in chunks of N (1: single steps); exact
                          (default under a profile: the model's declared sub-chunk and span, the manifest's "prefill",
@@ -556,6 +559,7 @@ int main(int argc, char** argv) {
   co.half_life = a.half_life;
   co.mem = mem_of(a.mem);
   co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;
+  co.spare_gb = ro.spare_gb;
   co.drive_gbs = ro.drive_gbs;
   co.skip_reads = a.skip_reads;
   co.loop_hold = a.loop_hold;
@@ -804,7 +808,7 @@ int main(int argc, char** argv) {
   auto& CS = C.cache.st;
   auto& RD = C.cache.rd;
   uint64_t dt0[7] = {0};
-  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0;
+  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0, pgin0 = 0;
   double fe_ms = 0;  // the front end's per-token work outside the model's step (sampling, records): stage "sample"
   auto reset_stats = [&]() {
     fe_ms = 0;
@@ -818,6 +822,7 @@ int main(int argc, char** argv) {
     sau0 = RD.spec_inflight_at_urgent.load();
     fskip0 = RD.file_resident_skips.load();
     fskipb0 = RD.file_bytes_skipped.load();
+    pgin0 = Cache::task_pageins();
     for (int i = 0; i < 3; i++) {
       q0[i] = RD.q_ns[i].load();
       s0[i] = RD.svc_ns[i].load();
@@ -881,10 +886,20 @@ int main(int argc, char** argv) {
       for (size_t i = 0; i < C.cache.fa.trace.size(); i++) js << (i ? "," : "") << "[" << C.cache.fa.trace[i].first << "," << C.cache.fa.trace[i].second / 1e9 << "]";
       js << "]},\"core\":{\"gb\":" << C.cache.core_slab_bytes / 1e9 << ",\"records\":" << C.cache.core_held() << ",\"swapped\":" << C.cache.core_swapped << "}}";
     }
-    if (C.cache.file_under)  // spare memory under the slab: records copied from the OS file cache, not read from the drive
-      js << ",\"spare_memory\":{\"evict_hint\":" << C.cache.file_evict_hint << ",\"pieces_per_token\":" << per(RD.file_resident_skips.load() - fskip0)
-         << ",\"mb_served_per_token\":" << per((RD.file_bytes_skipped.load() - fskipb0) / 1e6)
+    if (C.cache.file_under) {  // the spare tier (store.h): what the file cache served, what the drive read, the moves
+      const double reuse_mb = CS.bytes_prob_hit / 1e6, skip_mb = (RD.file_bytes_skipped.load() - fskipb0) / 1e6;
+      const uint64_t pgin = Cache::task_pageins() - pgin0;
+      js << ",\"spare_memory\":{\"tier\":\"probation\",\"evict_hint\":" << C.cache.file_evict_hint << ",\"paused\":" << C.cache.spare_paused.load()
+         << ",\"probation_budget_gb\":" << C.cache.prob_bytes / 1e9 << ",\"probation_held_gb_at_end\":" << C.cache.prob_held_bytes() / 1e9
+         << ",\"pieces_per_token\":" << per(RD.file_resident_skips.load() - fskip0) << ",\"mb_served_per_token\":" << per(reuse_mb + skip_mb)
+         << ",\"mb_reuse_served_per_token\":" << per(reuse_mb) << ",\"mb_resident_reads_per_token\":" << per(skip_mb)
+         << ",\"mb_from_drive_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6) << ",\"reuses_per_token\":" << per(CS.n_prob_hit)
+         << ",\"promotions_per_token\":" << per(CS.n_promoted) << ",\"promotions_refused_per_token\":" << per(CS.n_promote_refused)
+         << ",\"promote_ms_per_token\":" << per(CS.promote_ms) << ",\"budget_drops_per_token\":" << per(CS.n_prob_budget_drops)
+         << ",\"reclaimed_before_reuse\":" << CS.n_prob_reclaimed << ",\"reclaimed_before_reuse_per_token\":" << per(CS.n_prob_reclaimed)
+         << ",\"pageins\":" << pgin << ",\"pageins_per_token\":" << per(pgin)
          << ",\"store_in_file_cache_gb_at_end\":" << C.cache.file_resident_bytes() / 1e9 << "}";
+    }
     js << ",\"footprint_gb\":" << m1.footprint_gb << ",\"footprint_peak_gb\":" << m1.footprint_peak_gb << ",\"compressed_gb\":" << m1.compressed_gb
        << ",\"resident_gb\":" << m1.resident_gb << ",\"footprint_after_load_gb\":" << m0.footprint_gb;
     {  // wait and on-the-spot misses by step group: before the loop, the looped steps, after it

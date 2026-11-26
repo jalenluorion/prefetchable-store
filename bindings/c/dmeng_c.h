@@ -298,19 +298,26 @@ typedef struct dm_counters_t {
   int64_t held_bytes;                   /* records the policy holds now */
   int64_t budget_bytes;                 /* the budget in force (adaptive in DM_MEM_FILE) */
   int64_t decode_steps;
-  uint64_t bytes_spare;                 /* expert bytes the OS file cache served instead of the drive (spare memory under
-                                           the slab; DM_MEM_FILE: resident records not read) */
+  uint64_t bytes_spare;                 /* expert bytes the OS file cache served instead of the drive (spare memory: uses
+                                           of a probation record after its first, and reads whose pages were resident;
+                                           DM_MEM_FILE: resident records not read) */
   uint64_t read_busy_ns;                /* wall time with at least one expert read in flight (drive rate = bytes_read / it) */
   int spare_memory;                     /* the file cache under the slab: 0 off, 1 on, 2 paused (dm_spare_memory_pause) */
   uint64_t step_ns;                     /* wall time inside dm_step (steady clock), summed: decode_steps / it = the rate */
   uint64_t bytes_named_unused;          /* named records evicted before any use (records x the first pool's record bytes):
                                            reads that served nothing */
+  uint64_t promotions;                  /* spare memory: probation records moved into the slab at their reuse */
+  uint64_t probation_reclaimed;         /* spare memory: probation records the OS reclaimed before their reuse (read again) */
+  uint64_t pageins;                     /* the process's page-ins since dm_open: faults that read the drive (the readers
+                                           never page in, so these are the compute's) */
+  int64_t probation_bytes;              /* spare memory: records held in probation now (in the file cache, not the app's) */
 } dm_counters_t;
 int dm_counters(dm_engine* e, dm_counters_t* out);
 
-/* Spare memory (the OS file cache under the locked slab: the phone profile's rule, physical memory >= 11 GB, or
- * model_options "run:spare-mem=0|1"): stop adding expert pages to the file cache for the rest of the session (a memory
- * warning); reads go to the drive as without it. Any thread; idempotent. DM_EINVAL if the tier is not on. */
+/* Spare memory (a probation tier in the OS file cache under the slab: the phone profile's rule, physical memory >= 11
+ * GB, or model_options "run:spare-mem=0|1", "run:spare-gb=X"): for the rest of the session no read lands in the file
+ * cache and every probation record's pages are dropped (at once when the engine is idle, else at its next step); reads
+ * go to the slab as without it (a memory warning). Any thread; idempotent. DM_EINVAL if the tier is not on. */
 int dm_spare_memory_pause(dm_engine* e);
 
 /* The store's pages the OS file cache holds now (bytes, mincore over the mapped store files): DM_MEM_FILE or spare
