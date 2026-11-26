@@ -513,7 +513,10 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   if (g.drafts) r.drafts = *g.drafts;
   else if (pf) r.drafts = P.drafts ? 1 : 0;
   r.draft = g.draft ? *g.draft : r.drafts > 0 ? "lookup" : r.draft;
-  r.early = g.early ? *g.early : r.drafts > 0 ? 4 : r.early;
+  // no early names under --drafts 1: on the real 35B and Inkling (agent turns, 6.6 / 7.8 GB) naming the lookup source's
+  // picks 4 positions ahead read 40-70 MB per token more than plain decoding and cancelled the passes' gain (early 0: fewer
+  // MB per token than plain decoding at the same tokens per step); --early N still sets it
+  r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
   return true;
 }
 
