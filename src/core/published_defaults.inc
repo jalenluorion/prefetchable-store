@@ -24,20 +24,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    ]
   },
   "drafting": {
-   "cost_prior": {
-    "measured": "base M4, dmeng step costs of passes of 1-8 positions (the drafting controller's prior; a draft_cost.txt measured by the engine replaces it)",
-    "pass_ms_over_step_ms": [
-     0,
-     1.0,
-     1.64,
-     2.07,
-     2.5,
-     2.95,
-     3.41,
-     3.86,
-     4.32
-    ]
-   }
+   "cost_prior": null
   },
   "modes": {
    "exact": {
