@@ -323,12 +323,19 @@ enum SelfCheck {
         // same prompt and E teacher-forced: top-choice agreement with Exact over the N positions after the prompt
         if let ns = arg("-selfcheck-agree"), let n = Int(ns), let d = model.engine as? DmengChatEngine, let prompt = codeRowIds {
             var res: [String: Any] = ["prompt_ids": prompt.count, "n": n]
-            for mode in ["exact", "fast"] {
+            // -selfcheck-agree-fast-opts "A|B|...": one Fast arm per model-options string (e.g. run:mode=approx:drop:w=0.15),
+            // each against the one Exact reference (stored as fast_1_*, fast_2_*, ...); without it one Fast arm (fast_*)
+            let fastOpts = arg("-selfcheck-agree-fast-opts")?.split(separator: "|").map(String.init)
+            let arms: [(String, String, String?)] = [("exact", "exact", nil)]
+                + (fastOpts.map { $0.enumerated().map { ("fast", "fast_\($0.offset + 1)", Optional($0.element)) } } ?? [("fast", "fast", nil)])
+            for (mode, key, opts) in arms {
                 modeOverride = mode
+                optsOverride = opts ?? arg("-selfcheck-opts")
+                if let opts { res["\(key)_opts"] = opts }
                 await d.unload()
                 model.engineState = .idle
                 await model.load()
-                guard model.engineState == .ready else { res["\(mode)_engine"] = model.engineState.label; continue }
+                guard model.engineState == .ready else { res["\(key)_engine"] = model.engineState.label; continue }
                 if mode == "exact" {
                     if let g = try? await d.selfCheckGreedy(prompt, n: n) {
                         res["exact_ids"] = g.ids
@@ -336,17 +343,18 @@ enum SelfCheck {
                         res["exact_prefill"] = json(g.prefillJSON)
                     }
                 } else if let e = res["exact_ids"] as? [Int], let f = try? await d.selfCheckForced(prompt, cont: e) {
-                    res["fast_agree"] = Double(f.agree) / Double(max(1, f.n))
-                    res["fast_first_diff"] = f.firstDiff
-                    res["fast_prefill_s"] = f.prefillSeconds
-                    res["fast_prefill"] = json(f.prefillJSON)
-                    res["fast_top"] = f.top
-                    res["fast_stats"] = json(d.selfCheckStats)
-                    log("SELFCHECK agree fast vs exact \(f.agree)/\(f.n), first diff \(f.firstDiff), fast prompt \(String(format: "%.1f", f.prefillSeconds)) s")
+                    res["\(key)_agree"] = Double(f.agree) / Double(max(1, f.n))
+                    res["\(key)_first_diff"] = f.firstDiff
+                    res["\(key)_prefill_s"] = f.prefillSeconds
+                    res["\(key)_prefill"] = json(f.prefillJSON)
+                    res["\(key)_top"] = f.top
+                    res["\(key)_stats"] = json(d.selfCheckStats)
+                    log("SELFCHECK agree \(key)\(opts.map { " (\($0))" } ?? "") vs exact \(f.agree)/\(f.n), first diff \(f.firstDiff), fast prompt \(String(format: "%.1f", f.prefillSeconds)) s")
                 }
-                res["\(mode)_mem"] = mem("agree \(mode)")
+                res["\(key)_mem"] = mem("agree \(key)")
             }
             modeOverride = nil
+            optsOverride = nil
             out["agree"] = res
             finish()
             return
