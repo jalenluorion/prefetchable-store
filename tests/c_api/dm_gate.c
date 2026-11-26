@@ -6,6 +6,7 @@
  *   dm_gate --model DIR --prompt-ids FILE --n 400 --out OUT.ids [--mem file|mlock|plain] [--cache-gb 3.3]
  *           [--routers-id mlp_k2_h512] [--threads 8] [--readers 4] [--json OUT.json] [--embeddings F]
  *           [--file-adapt 1 --file-min-gb G] [--file-core-gb G] [--model-options S] [--file-hint 0|1|2]
+ *           [--profile P] [--ctx N (0: the profile's ctx, else 16384)]
  *
  * --arms LIST (with --warm-n N): arms of one prompt in ONE process, each its own dm_open .. dm_close, in order, after a
  * warm-up open of N tokens (tier off): "off" (spare memory off: run:spare-mem=0), "on" (run:spare-mem=1), "nothing"
@@ -329,6 +330,7 @@ int main(int argc, char** argv) {
   int router_m = 0, router_cand = 0;          /* --m M, --rt-cand C (0: the profile's) */
   double router_tau = 0;                     /* --rt-tau T (0: the profile's; < 0: a plain top m) */
   int run_ahead = 0;                         /* --run-ahead N (0: the profile's; < 0: off) */
+  int ctx = 0;                               /* --ctx N (0: the profile's, else 16384) */
   double ra_budget = 0;                      /* --run-ahead-budget X --run-ahead-max N --run-ahead-sat-skip 0|1 */
   int ra_max = 0, ra_sat = 0;
   for (int i = 1; i < argc; i++)  /* --gpu-check [SECONDS]: the GPU kernels' self-test (no model), then exit */
@@ -350,6 +352,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--readers")) readers = atoi(v), i++;
     else if (!strcmp(k, "--cache-gb")) gb = !strcmp(v, "auto") ? 0 : atof(v), i++;  /* auto: the profile's rule */
     else if (!strcmp(k, "--profile")) profile = v, i++;
+    else if (!strcmp(k, "--ctx")) ctx = atoi(v), i++;
     else if (!strcmp(k, "--evict")) evict = v, i++;
     else if (!strcmp(k, "--routers")) routers = v, i++;
     else if (!strcmp(k, "--m")) router_m = atoi(v), i++;
@@ -421,7 +424,7 @@ int main(int argc, char** argv) {
   o.file_adapt = adapt;
   o.file_min_bytes = (int64_t)(min_gb * 1e9);
   o.file_core_bytes = (int64_t)(core_gb * 1e9);
-  o.ctx = 16384;
+  o.ctx = ctx;  /* 0: the profile's, else 16384 */
   o.prefill_gpu_frac = gpu_frac;
   o.prefill_gpu_experts = gpu_experts;
   o.prefill_gpu_min = gpu_min;

@@ -526,8 +526,11 @@ int main(int argc, char** argv) {
   Given g = a.g;
   g.other_address = has("--prefetch") || has("--oracle") || has("--plan-routers");
   g.recording = !a.record.empty();
+  if (has("--ctx")) g.ctx = a.ctx;
   RunOpts ro;  // dmeng's own values where nothing else sets one: RunOpts' (single steps for the prompt, a 5 GB cache)
+  ro.ctx = a.ctx;
   if (!resolve_run(a.model, a.profile, g, "", -1, ro, err)) return die("profile", err);
+  a.ctx = ro.ctx;  // explicit, else the profile's declared ctx, else dmeng's 16384
   const Preset& P = ro.preset;
   const bool profiled = ro.profiled;
   for (auto& n : ro.notes) fprintf(stderr, "dmeng: %s\n", n.c_str());

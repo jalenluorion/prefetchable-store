@@ -80,6 +80,9 @@ struct Preset {
   // undeclared in every profile (off)
   double spare_min_gb = 0;
   bool spare_mem = false;
+  // the context positions the front end reserves (a profile's "ctx": N or {"positions": N, "calibration": {...}});
+  // 0 = undeclared, the front end's own (dmeng and the C API 16384, dmserve 33792)
+  int ctx = 0;
   std::vector<std::string> notes;  // defaults that did not resolve, fallbacks taken
   std::string json() const;
 };
@@ -113,6 +116,7 @@ struct Resolved {
   double xtok_tau = 0.5;
   int rd_prio = -1, prefill_chunk = 1;
   bool spare_mem = false;  // written only when on (the block is unchanged with it off)
+  int ctx = 0;             // the context positions in force, written only when the profile declares a ctx (else 0)
   double drive_gbs = 0;    // bench only (--drive-gbs): written only when set (the block is unchanged without it)
   std::string json() const;
 };
@@ -151,6 +155,7 @@ struct Given {
   std::optional<bool> rd_prio;
   std::optional<bool> spare_mem;        // --spare-mem 0|1: the OS file cache under the slab
   std::optional<double> drive_gbs;      // --drive-gbs X: bench only, the readers' drive rate capped (never from a profile)
+  std::optional<int> ctx;               // context positions (dmeng / dmserve --ctx, the C API's ctx > 0)
   std::optional<std::string> evict, layer_caps;
   std::optional<double> cache_gb;       // an explicit size
   bool cache_auto = false;              // the automatic rule asked for explicitly
@@ -204,6 +209,8 @@ struct RunOpts {
   int early = 0;
   bool spare_mem = false;  // the OS file cache under the slab (CoreOpts::spare_mem): explicit, else the profile's rule
   double drive_gbs = 0;    // bench only (CoreOpts::drive_gbs): explicit only, 0 = off
+  int ctx = 16384;         // context positions: explicit, else the profile's declared ctx, else the front end's own
+  bool ctx_declared = false;  // the profile declares one (resolved.ctx is written)
   std::vector<std::string> notes;
   // the "resolved" block of every run's JSON (the cache's size once a front end has computed it)
   Resolved resolved(double cache_gb_in_force) const;

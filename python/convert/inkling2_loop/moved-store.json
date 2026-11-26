@@ -1854,6 +1854,21 @@
     "note": "layers 20-23 re-quantised from the release's MXFP8 to NVFP4 (least-squares block scales); the release's files stay as they are for the other profiles"
    },
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0,
+    "experts": 0,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact ids identical either way: 0.65 / 0.65 took 48.7 / 61.1 s (exact / fast) against 40.0 / 50.2 s off from a nominal start, 56.5 / 67.1 against 44.8 / 54.5 s from serious, and left 0.12-0.22 GB more footprint; the projections alone 59.5 / 55.4 s",
+     "reason": "off by measurement: 20% slower with the split (the CPU waits on the GPU's NVFP4 expert share); the same as the built-in CPU only, declared to keep the measurement beside it"
+    }
+   },
+   "ctx": {
+    "positions": 4096,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, 2026-11-26: the KV reserve is 0.54 GB at 16,384 positions, 0.135 GB at 4,096; the 1.26 GB non-cache footprint (cache_slab) was measured at 4,096",
+     "reason": "16,384 positions would reserve 0.405 GB more than the 4,096 at which the footprint beside the cache was measured; a rule shared with the 35B (KV reserve at most 0.34 GB) would give 8,192 (0.27 GB) and needs a footprint measurement at that size first"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,

@@ -441,6 +441,14 @@ if wanted("presets"):
             # as the published manifests do (a family without what it needs would fail at open: the drafting check)
             exp_default["drafts"] = P["drafts"]
             exp_default["slab"] = slab_exp(prof)  # (the mac profile: not printed, the block unchanged)
+            # the profile's declared context positions (profiles.<p>.ctx: N or {"positions": N}; not printed when undeclared)
+            cx = man["profiles"][prof].get("ctx")
+            ctx_decl = (cx.get("positions") if isinstance(cx, dict) else cx) or None
+            exp_default["ctx"] = ctx_decl
+            # the profile's declared prompt GPU share, from the manifest (a build without Metal: CPU only, with a note)
+            pg = man["profiles"][prof].get("prefill_gpu")
+            if pg and not any("without Metal" in n for n in P["notes"]):
+                exp_default["prefill_gpu"] = {"projections": pg.get("projections", 0), "experts": pg.get("experts", 0)}
             gpu = P["prefill_gpu"]
             cells = [("default", [], exp_default),
                      ("mode fast", ["--mode", "fast"], {"mode": json.loads(run([DMENG, "--model", M, "--profile", prof, "--mode", "fast", "--print-defaults"]).stdout)["engine_mode"]}),
@@ -455,6 +463,7 @@ if wanted("presets"):
                      ("run-ahead limits", ["--run-ahead-budget", "0.5", "--run-ahead-max", "3", "--run-ahead-sat-skip", "1"],
                       {"run_ahead": {"budget": 0.5, "max_tok": 3, "sat_skip": True}}),
                      ("readers 2", ["--readers", "2"], {"readers": 2}),
+                     ("ctx 2048", ["--ctx", "2048"], {"ctx": 2048 if ctx_decl else None}),  # an explicit ctx over the declared one
                      ("drafts 0", ["--drafts", "0"], {"drafts": {"lookup": False, "head": False}, "draft": "none"})]
             if routers:
                 cells.append(("router file", ["--routers", routers[0]], {"routers": routers[0], "names": {"rule": "top", "m": 8}}))

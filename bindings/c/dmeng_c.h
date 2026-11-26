@@ -88,7 +88,7 @@ typedef struct dm_open_opts {
                               for Qwen3.6, 173 MB for Inkling); 0 = 0.25 on macOS; on iOS the pinned system boundary and the newest, whatever their
                               size */
   double park_gb;          /* prefix cache: memory for parked sequences; 0 = 0.9 on macOS, 0.3 on iOS */
-  int ctx;                 /* max positions; 0 = 16384 */
+  int ctx;                 /* max positions; 0 = the profile's declared ctx (profiles.<p>.ctx), else 16384 */
   int file_check;          /* DM_MEM_FILE: a held record is checked on use: 0 never, 1 first + last page (default), 2 all */
   int file_evict_hint;     /* DM_MEM_FILE, on eviction: 0 nothing (default: pages are left to the OS), 1 MADV_DONTNEED,
                               2 msync(MS_INVALIDATE): the record's clean pages leave the file cache at once (iOS) */

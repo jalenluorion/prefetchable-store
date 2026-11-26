@@ -124,6 +124,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "rule": "footprint_target",
      "target_gb": 2.96
     },
+    "ctx": {
+     "positions": 4096
+    },
     "drafts": {
      "head": false,
      "lookup": false
@@ -133,6 +136,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "candidates": 16,
      "rule": "confidence",
      "tau": 0.5
+    },
+    "prefill_gpu": {
+     "experts": 0,
+     "projections": 0
     },
     "readers": 8,
     "resident": "resident_q4",
@@ -263,6 +270,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "rule": "footprint_target",
      "target_gb": 2.96
     },
+    "ctx": {
+     "positions": 16384
+    },
     "drafts": {
      "head": false,
      "lookup": false
@@ -283,6 +293,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
       "m": 3,
       "rule": "top"
      }
+    },
+    "prefill_gpu": {
+     "experts": 0.65,
+     "projections": 0.65
     },
     "readers": 8,
     "resident": "resident_q4",

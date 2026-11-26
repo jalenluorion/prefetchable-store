@@ -165,7 +165,7 @@ void dm_default_opts(dm_open_opts* o) {
   o->res_memory_mode = DM_MEM_MLOCK;
 #endif
   o->disk_gb = 4.0;
-  o->ctx = 16384;
+  o->ctx = 0;  // the profile's declared ctx, else 16384
   o->file_check = 1;
 }
 
@@ -231,6 +231,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.run_ahead_max != 0) F("--run-ahead-max", std::to_string(std::max(0, o.run_ahead_max)));
   if (o.run_ahead_sat_skip != 0) F("--run-ahead-sat-skip", o.run_ahead_sat_skip > 0 ? "1" : "0");
   if (o.readers > 0) F("--readers", std::to_string(o.readers));
+  if (o.ctx > 0) g.ctx = o.ctx;
   // model_options entries "run:FLAG=VALUE" (or run:--FLAG=VALUE): any dmeng run flag (presets.h run_flag), read after the fields above (so a
   // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode fast-eps, --rd-prio)
   std::string model_opts;
@@ -257,6 +258,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   }
   RunOpts ro;  // the C API's own values where nothing else sets one
   ro.cache_gb = 3.3;
+  ro.ctx = 16384;
   ro.readers = CoreOpts().readers;
   ro.evict = CoreOpts().evict;
   if (!resolve_run(model_dir, prof, g, derived, e->avail_open > 0 ? e->avail_open : -1, ro, err)) {
@@ -343,14 +345,14 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       g_err = "cache: " + err;
       return nullptr;
     }
-    mr.kv_positions = o.ctx > 0 ? o.ctx : 16384;
+    mr.kv_positions = ro.ctx;
     {
       struct stat rs;  // the router file is loaded after the cache is sized (as in dmeng and dmserve)
       if (!e->routers_path.empty() && stat(e->routers_path.c_str(), &rs) == 0) mr.later_gb = rs.st_size / 1e9;
     }
     const double ceil = auto_cache_gb(mr, e->M->pos_bytes(), std::max(o.ckpt_gb > 0 ? o.ckpt_gb : 0.25, SessionOptions().ckpt_min * [&] {  // the checkpoints' memory (a fresh
       std::string e2;                                                                // state's fixed part, only reserved)
-      auto tmp = e->M->new_state(o.ctx > 0 ? o.ctx : 16384, e2);
+      auto tmp = e->M->new_state(ro.ctx, e2);
       return tmp ? (double)e->M->fixed_bytes(*tmp) / 1e9 : 0.0;
     }()), store_bytes_gb(model_dir, mi0.layer_file, mi0.layers), start, why);
     co.cache_gb = std::min(ceil, start);
@@ -514,7 +516,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       i = j + 1;
     }
   }
-  const int ctx = o.ctx > 0 ? o.ctx : 16384;
+  const int ctx = ro.ctx;  // explicit (ctx > 0), else the profile's declared ctx, else 16384
   e->S = e->M->new_state(ctx, err);
   if (!e->S) {
     g_err = "state: " + err;

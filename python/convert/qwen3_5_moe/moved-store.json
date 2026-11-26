@@ -1992,6 +1992,21 @@
    "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast (threshold 0.08) 0.891 / 0.881",
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0.65,
+    "experts": 0.65,
+    "calibration": {
+     "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
+     "reason": "the GPU split pays on this phone for this model; the phone profile is not measured and stays CPU only"
+    }
+   },
+   "ctx": {
+    "positions": 16384,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, 2026-11-26: the state's KV reserve at 16,384 positions is 0.336 GB, inside the 1.54 GB non-cache footprint (cache_slab)",
+     "reason": "the positions every front end reserves on this profile: the value the app set"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,

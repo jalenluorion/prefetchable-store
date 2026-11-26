@@ -394,6 +394,12 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.bg_ranks = (int)(*bg)["ranks"].i(0);
     p.bg_gate = (int)(*bg)["gate"].i(0);
   }
+  // the context positions (per profile only: the KV reserve the device class holds, measured per model)
+  if (const Json* cx = prof("ctx")) {
+    const Json* n = cx->kind == Json::OBJ ? member(cx, "positions") : cx;
+    if (!n || n->kind != Json::NUM || n->i(0) <= 0) return (err = "profile " + p.profile + ": ctx must be N or {\"positions\": N} with N > 0"), false;
+    p.ctx = (int)n->i(0);
+  }
   return true;
 }
 
@@ -443,7 +449,9 @@ std::string Preset::json() const {
     << "},\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
-    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"notes\":[";
+    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "}";
+  if (ctx > 0) o << ",\"ctx\":" << ctx;  // (declared only)
+  o << ",\"notes\":[";
   for (size_t i = 0; i < notes.size(); i++) o << (i ? "," : "") << q(notes[i]);
   o << "]}";
   return o.str();
@@ -477,6 +485,7 @@ std::string Resolved::json() const {
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   if (spare_mem) o << ",\"spare_memory\":true";
   if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
+  if (ctx > 0) o << ",\"ctx\":" << ctx;
   o << "}";
   return o.str();
 }
@@ -568,6 +577,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.prefill_chunk = prefill_chunk;
   x.spare_mem = spare_mem;
   x.drive_gbs = drive_gbs;
+  x.ctx = ctx_declared ? ctx : 0;
   return x;
 }
 
@@ -638,6 +648,10 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
   r.spare_mem = g.spare_mem ? *g.spare_mem : pf ? P.spare_mem : r.spare_mem;
   r.drive_gbs = g.drive_gbs && *g.drive_gbs > 0 ? *g.drive_gbs : 0;  // bench only: never from a profile or a manifest
+  // the context positions
+  r.ctx_declared = pf && P.ctx > 0;
+  if (g.ctx && *g.ctx > 0) r.ctx = *g.ctx;
+  else if (r.ctx_declared) r.ctx = P.ctx;
   return true;
 }
 
