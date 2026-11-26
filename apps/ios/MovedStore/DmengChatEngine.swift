@@ -465,10 +465,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.mode = DmengLaunch.engineMode ?? "exact"
         o.residentBits = bitsNow
         o.prefillThreads = 0
-        // the batched prefill split with the GPU (exact: the GPU's rows are the CPU kernels' bits). The 35B on the phone:
-        // 0.65 / 0.65 (a 472-token input: first token in 19.5 s against 24.6 s without the split)
+        // the batched prefill split with the GPU (exact: the GPU's rows are the CPU kernels' bits): on iOS the profile's
+        // (phone and phone-small declare the 35B 0.65 / 0.65, Inkling 0 / 0, with their iPhone measurements); off on the Mac
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        let gpu = kind.iosPrefillGpu
+        let gpu = (projections: 0.0, experts: 0.0)
         #else
         let gpu = (projections: -1.0, experts: -1.0)
         #endif
