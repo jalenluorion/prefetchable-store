@@ -5,9 +5,24 @@
  *
  *   dm_gate --model DIR --prompt-ids FILE --n 400 --out OUT.ids [--mem file|mlock|plain] [--cache-gb 3.3]
  *           [--routers-id mlp_k2_h512] [--threads 8] [--readers 4] [--json OUT.json] [--embeddings F]
- *           [--file-adapt 1 --file-min-gb G] [--file-core-gb G]
+ *           [--file-adapt 1 --file-min-gb G] [--file-core-gb G] [--model-options S] [--file-hint 0|1|2]
+ *
+ * --arms LIST (with --warm-n N): arms of one prompt in ONE process, each its own dm_open .. dm_close, in order, after a
+ * warm-up open of N tokens (tier off): "off" (spare memory off: run:spare-mem=0), "on" (run:spare-mem=1), "nothing"
+ * (spare memory on, but each record's pages leave the file cache when the slab evicts it: file_evict_hint 2, the OS
+ * keeping no spare pages). An arm name followed by "+warm" (on+warm) keeps the file cache the previous arm left; every
+ * other arm starts with the store's pages dropped from the file cache (msync MS_INVALIDATE over each store file: no
+ * sudo; the resident fraction before and after is printed). Per arm: tok/s, MB per token read by the readers, MB per
+ * token served by the file cache, the process's drive bytes per token (proc_pid_rusage diskio, decode only), wait ms
+ * per token; the ids are compared across arms (lossless: identical).
  */
+#include <dirent.h>
+#include <fcntl.h>
+#include <libproc.h>
 #include <pthread.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -59,6 +74,110 @@ static void* cancel_later(void* p) {
   return NULL;
 }
 
+/* the store's pages in the file cache (GB, mincore), dropping them first when `drop` (msync MS_INVALIDATE) */
+static double store_cache_gb(const char* model, int drop) {
+  char dir[4096];
+  snprintf(dir, sizeof dir, "%s/store", model);
+  DIR* d = opendir(dir);
+  if (!d) return -1;
+  const size_t pg = (size_t)getpagesize();
+  double res = 0;
+  struct dirent* de;
+  while ((de = readdir(d))) {
+    if (de->d_name[0] == '.') continue;
+    char p[8192];
+    snprintf(p, sizeof p, "%s/%s", dir, de->d_name);
+    int fd = open(p, O_RDONLY);
+    if (fd < 0) continue;
+    struct stat st;
+    if (fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_size > 0) {
+      void* m = mmap(NULL, (size_t)st.st_size, PROT_READ, MAP_SHARED, fd, 0);
+      if (m != MAP_FAILED) {
+        if (drop) msync(m, (size_t)st.st_size, MS_INVALIDATE);
+        const size_t np = ((size_t)st.st_size + pg - 1) / pg;
+        char* v = malloc(np);
+        if (mincore(m, (size_t)st.st_size, v) == 0)
+          for (size_t i = 0; i < np; i++) res += (v[i] & MINCORE_INCORE) ? pg : 0;
+        free(v);
+        munmap(m, (size_t)st.st_size);
+      }
+    }
+    close(fd);
+  }
+  closedir(d);
+  return res / 1e9;
+}
+
+static uint64_t disk_read_bytes(void) {
+  struct rusage_info_v4 ri;
+  if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, (rusage_info_t*)&ri) != 0) return 0;
+  return ri.ri_diskio_bytesread;
+}
+
+/* one arm: open, prompt, n greedy tokens, close; a JSON line on stdout; the ids into gen (n) */
+static int run_arm(const char* model, dm_open_opts o, const char* arm, const int32_t* ids, int np, int n, int32_t* gen, FILE* jf) {
+  char mo[512];
+  const int nothing = !strncmp(arm, "nothing", 7), on = nothing || !strncmp(arm, "on", 2);
+  const int warm = strstr(arm, "+warm") != NULL;
+  snprintf(mo, sizeof mo, "%s%srun:spare-mem=%d", o.model_options ? o.model_options : "", o.model_options && *o.model_options ? ";" : "", on);
+  o.model_options = mo;
+  if (nothing) o.file_evict_hint = 2;
+  const double before = store_cache_gb(model, 0), after = warm ? before : store_cache_gb(model, 1);
+  double t0 = now_ms();
+  dm_engine* e = dm_open(model, &o);
+  if (!e) {
+    fprintf(stderr, "dm_open (%s): %s\n", arm, dm_last_error(NULL));
+    return -1;
+  }
+  const double load_s = (now_ms() - t0) / 1e3;
+  dm_info_t inf;
+  dm_info(e, &inf);
+  float* lg = malloc(sizeof(float) * inf.vocab);
+  dm_sync_result sr;
+  double tp = now_ms();
+  if (dm_sync(e, ids, np, NULL, 0, lg, NULL, NULL, &sr) != DM_OK) return -1;
+  const double prefill_s = (now_ms() - tp) / 1e3;
+  gen[0] = dm_argmax(lg, inf.vocab);
+  dm_counters_t c0, c1;
+  dm_stats_json(e);
+  dm_counters(e, &c0);
+  const uint64_t d0 = disk_read_bytes();
+  double td = now_ms();
+  int k = 1;
+  for (; k < n; k++) {
+    if (dm_step(e, gen[k - 1], lg) != DM_OK) break;
+    gen[k] = dm_argmax(lg, inf.vocab);
+  }
+  const double dec_ms = now_ms() - td;
+  const uint64_t d1 = disk_read_bytes();
+  dm_counters(e, &c1);
+  const char* st = dm_stats_json(e);
+  const char* rs = strstr(st, "\"resolved\":");  /* the resolved block: up to ,"capabilities" */
+  const char* re = rs ? strstr(rs, ",\"capabilities\"") : NULL;
+  if (rs) rs += strlen("\"resolved\":");
+  const int rlen = rs && re ? (int)(re - rs) : 4;
+  if (!rs || !re) rs = "null";
+  const int steps = k - 1;
+  const uint64_t picks = c1.picks - c0.picks;
+  char line[8192];
+  snprintf(line, sizeof line,
+           "{\"arm\":\"%s\",\"spare_memory\":%d,\"evict_hint\":%d,\"store_cache_gb_before\":%.2f,\"store_cache_gb_at_start\":%.2f,"
+           "\"store_cache_gb_at_end\":%.2f,\"cache_gb\":%.2f,\"load_s\":%.2f,\"prefill_s\":%.2f,\"prefill_mb\":%.0f,\"tokens\":%d,\"tok_s\":%.3f,"
+           "\"ms_per_token\":%.2f,\"wait_ms_per_token\":%.2f,\"hit_rate\":%.4f,\"mb_drive_counter_per_token\":%.2f,"
+           "\"mb_spare_per_token\":%.2f,\"mb_disk_rusage_per_token\":%.2f,\"read_gb_s_busy\":%.3f,\"resolved\":%.*s}",
+           arm, c1.spare_memory, o.file_evict_hint, before, after, store_cache_gb(model, 0), inf.cache_bytes / 1e9, load_s, prefill_s, sr.mb_read, k,
+           steps / (dec_ms / 1e3), dec_ms / steps, (c1.wait_ms - c0.wait_ms) / steps, picks ? (double)(c1.hits - c0.hits) / picks : 0,
+           (c1.bytes_read - c0.bytes_read) / 1e6 / steps, (c1.bytes_spare - c0.bytes_spare) / 1e6 / steps, (d1 - d0) / 1e6 / steps,
+           (c1.bytes_read - c0.bytes_read) / 1e9 / ((c1.read_busy_ns - c0.read_busy_ns) / 1e9 + 1e-12),
+           rlen, rs);
+  printf("%s\n", line);
+  fflush(stdout);
+  if (jf) fprintf(jf, "%s\n", line), fflush(jf);
+  free(lg);
+  dm_close(e);
+  return k;
+}
+
 int main(int argc, char** argv) {
   const char *model = NULL, *prompt = NULL, *out = NULL, *json = NULL, *mem = "mlock", *rid = NULL, *emb = NULL;
   int adapt = 0;
@@ -66,6 +185,8 @@ int main(int argc, char** argv) {
   int n = 400, threads = 0, readers = 0, resize_at = -1, cancel_test = 0;
   double gb = 3.3, resize_gb = 0;
   const char* policy_probe = NULL;
+  const char *arms = NULL, *model_opts = NULL;  /* --arms off,on,nothing (one process), --model-options S */
+  int warm_n = 50, file_hint = 0;
   const char *resident = NULL, *mode = NULL;  /* --resident FILE (e.g. the 4-bit resident_q4), --mode approx:drop */
   const char* model_options = NULL;           /* --model-options "k=v;run:FLAG=VALUE" (dm_open_opts.model_options) */
   double gpu_frac = 0, gpu_experts = 0;      /* --gpu-frac F --gpu-experts F: the prefill's exact GPU split */
@@ -123,6 +244,10 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--gpu-int-kernel")) gpu_int = 1;
     else if (!strcmp(k, "--gpu-min-wave")) gpu_wave = atoi(v), i++;
     else if (!strcmp(k, "--prefill-threads")) prefill_threads = atoi(v), i++;
+    else if (!strcmp(k, "--arms")) arms = v, i++;
+    else if (!strcmp(k, "--warm-n")) warm_n = atoi(v), i++;
+    else if (!strcmp(k, "--model-options")) model_opts = v, i++;
+    else if (!strcmp(k, "--file-hint")) file_hint = atoi(v), i++;
     else {
       fprintf(stderr, "unknown flag %s\n", k);
       return 2;
@@ -169,6 +294,44 @@ int main(int argc, char** argv) {
   o.prefill_gpu_int_kernel = gpu_int;
   o.prefill_gpu_min_wave = gpu_wave;
   o.prefill_threads = prefill_threads;
+  o.model_options = model_opts;
+  o.file_evict_hint = file_hint;
+  if (arms) {  /* the arms in one process (header comment) */
+    FILE* jf = json ? fopen(json, "w") : NULL;
+    int32_t* ref = malloc(sizeof(int32_t) * (n + 1));
+    int32_t* gen = malloc(sizeof(int32_t) * (n + 1));
+    int nref = -1, same_all = 1;
+    if (warm_n > 0) {
+      fprintf(stderr, "warm-up (off, %d tokens)\n", warm_n);
+      if (run_arm(model, o, "warmup-off", ids, np, warm_n, gen, jf) < 0) return 1;
+    }
+    char buf[512];
+    strncpy(buf, arms, sizeof buf - 1);
+    buf[sizeof buf - 1] = 0;
+    for (char* t = strtok(buf, ","); t; t = strtok(NULL, ",")) {
+      char arm[64];
+      strncpy(arm, t, sizeof arm - 1);
+      arm[sizeof arm - 1] = 0;
+      fprintf(stderr, "arm %s\n", arm);
+      const int k = run_arm(model, o, arm, ids, np, n, gen, jf);
+      if (k < 0) return 1;
+      if (nref < 0) nref = k, memcpy(ref, gen, sizeof(int32_t) * k);
+      const int same = k == nref && !memcmp(ref, gen, sizeof(int32_t) * k);
+      same_all &= same;
+      fprintf(stderr, "arm %s: %d ids, %s the first arm's\n", arm, k, same ? "identical to" : "DIFFERENT from");
+      if (out) {
+        char p[4096];
+        snprintf(p, sizeof p, "%s.%s", out, arm);
+        FILE* f = fopen(p, "w");
+        for (int i = 0; i < k; i++) fprintf(f, "%s%d", i ? "," : "", gen[i]);
+        fprintf(f, "\n");
+        fclose(f);
+      }
+    }
+    printf("{\"ids_identical_across_arms\":%s}\n", same_all ? "true" : "false");
+    if (jf) fprintf(jf, "{\"ids_identical_across_arms\":%s}\n", same_all ? "true" : "false"), fclose(jf);
+    return same_all ? 0 : 4;
+  }
   double t0 = now_ms();
   dm_engine* e = dm_open(model, &o);
   if (!e) {
