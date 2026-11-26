@@ -667,6 +667,9 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
   if (st) {
     st->chunks = (int)P->k.chunks;
     st->json = P->k.json();
+    // the prompt's bytes read (prefill_spans set st->mb_read), reported as main's prompt path did
+    if (!st->json.empty() && st->json.back() == '}')
+      st->json.insert(st->json.size() - 1, ",\"mb_read\":" + std::to_string(st->mb_read));
   }
   if (po.release) {  // the scratch back to the system (re-created by the next prefill)
     P.reset();
