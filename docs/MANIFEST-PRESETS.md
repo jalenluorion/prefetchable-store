@@ -20,31 +20,46 @@ it states where it comes from, `measured` or `estimated`; else the engine's neut
 n steps; either is replaced by the pass costs the engine has measured itself, `DIR/.dmeng/draft_cost.txt`).
 `prefill` declares the batched prompt path's values (`include/dmeng/prefill.h`, the `prefill_<key>` options): `chunk`,
 `span`, `whole_from`, `gpu_min`, `short_names` (`router` or `none`), `join`, `waves`, `gpu_min_wave`, `pack_min`,
-`dn_rows`.
+`dn_rows`, `scratch_mb` (the prompt's scratch bound: `prompt_plan`, every family's rule: the sub-chunk at most a quarter,
+the fast path's MoE block at most a quarter, the span the rest, a short rest joined while the bound allows, equal spans;
+0 = no bound), `lend` (with the server's or the C API's `prefill_release`, the cache lends the prompt's scratch
+estimate for the prompt), `apart` (the prompt kept apart from the decode's cache statistics, hazard policy), `fast` (the
+half-precision GPU prompt path in fast mode), `drop_upto` (fast mode: a prompt of at most this many positions keeps the
+decode's leave-out rule). dmeng (under a profile), dmserve and the C API all take the declared `chunk` and `span`
+(`prefill_chunk` resolves to 0, "the model's"); an explicit `--chunk` / `--span` / `--prefill-chunk` wins.
 
 ## Optimizations by family: what is not the same, and why
 
-One engine runs all three models (expert store, cache, MoE steps, prompt path, server, drafting, counters); the table
-lists what still differs and the reason. "Not measured" means a single rule exists or is built but switching a model to
-it changes its published behaviour, so it waits for a measurement on that model.
+One engine runs all three models (expert store, cache, MoE steps, prompt path, server, drafting, counters). The rule:
+every model gets the same behaviour by default; a difference stays only where the model's architecture or released
+files require it, or where a measurement shows the shared behaviour is worse for that model (the numbers are in the
+manifest beside the value). The table lists what still differs.
 
 | | 35B | Inkling | Flash-Next | reason |
 |---|---|---|---|---|
-| trained routers | linear, 2 early | linear, 2 early | MLP, 4 early | what was trained per model (Flash-Next's linear routers: training pending) |
-| names rule | top 8 | confidence 0.5 / 16 | top 4 | not measured on one rule; the byte-budget rule (audit 3) is not built |
-| cross-token names | none | on | none | the machinery (`Xtok`, over steps) is any family's; routers trained for Inkling only |
-| per-layer caps | auto | auto | none | Flash-Next's manifest: caps refused its names (measured); `:fit` is available to all |
-| packed affine kernels in verify passes | off (`chunk_aff4=1` available) | n/a (NVFP4, packed from 6) | on (from 6) | the 35B's verify was measured with the multi-vector kernels |
-| GPU share of the experts | on (with the shared expert) | NVFP4 layers only | on | MXFP8 has no exact GPU kernel |
-| prompt: waves, router names for short spans, every expert packed, 64-row down jobs | on | off | off | the 35B's prefill was measured with them; not measured on the other two (`prefill` in the manifest) |
-| fast mode's prompt | batched, lossless | single steps | batched, lossless | changing Inkling's moves its fast-mode outputs: not measured |
+| trained routers | linear, 2 early | linear, 2 early (the MLP `mlp_k2_h512` is the fallback when the linear file is missing) | MLP, 4 early | what was trained per model (Flash-Next's linear routers: training pending) |
+| names rule | confidence 0.5 / 16 | confidence 0.5 / 16 | top 4 | measured: on the 35B the confidence rule read 10% fewer MB per token than a top 8 at the same speed (its manifest's `defaults.notes.names`); on Flash-Next it read 785-918 MB per token at 2.0 GB, more than the top 4 (below) |
+| cross-token names | none | on | none | the machinery (`Xtok`) is any family's; routers trained for Inkling only |
+| per-layer caps | auto | auto | none | one rule (`auto`) for the two small models; Flash-Next: caps refused its names (below). `:fit` measured worse at a 2.0 GB cache where caps are on (exact, code prompt, alternating pairs): the 35B 9.20 / 5.48 against 10.34 / 6.39 tok/s at the same MB per token (302); Inkling 954 / 961 against 813 / 823 MB per token, 3.02 / 3.40 against 3.13 / 4.00 tok/s; available to all, off |
+| fast mode | weight 0.1, wait for reads in flight | at most 0.13 of the weight left out, never wait | the same as Inkling | the 35B: the one rule (`--mode fast-eps`) measured worse on the iPhone (3.57 against 4.1 tok/s; faster on the Mac): `modes.fast.calibration` |
+| automatic cache start | headroom 3 GB | headroom 3 GB | free level 14% | see `cache_start` below and the manifests |
+| loop hold, two record pools | n/a | on | n/a | only Inkling loops its layers and ships two record formats |
+| GPU share of the experts in prompts | on (the shared expert too) | NVFP4 layers only | on (the shared expert too) | Inkling's MXFP8 records have no packed or GPU kernel |
+| half-precision GPU prompt path (fast mode) | off (`prefill_fast=1` available) | not built | on | Inkling: NVFP4 / MXFP8 records and its capped activation are not in `gpu_half.mm`, and its prompt pass does not call it |
 | model's own draft head | n/a | dmeng and dmserve | n/a | the 35B's MTP layer was dropped at packing; Flash-Next's is not in the store |
-| trained light draft head | available | available | n/i | Flash-Next's `final_hidden` is not written yet |
+| trained light draft head | dmeng (`--draft-light`) | dmeng | dmeng | the hooks exist for every family; a trained head exists only for the 35B and Inkling (training) |
 | fp32 reference path | none | on | on | the 35B's attention and projections have no fp32 branches (not cheap: every phase) |
-| fast mode | weight 0.1, wait for reads in flight | same | at most 0.13 of the weight left out, never wait | one rule available to the 35B and Inkling as `--mode fast-eps`; not measured on them |
-| automatic cache start | headroom 3 GB | headroom 3 GB | free level 14% | measured on Flash-Next only (`profiles.mac.cache_start`) |
+| sparse attention's fused output projection and split-K | n/a (full attention: yes) | yes | no | Flash-Next's QSA head would sum in another order: its exact bits (decode = prefill = verify) would move |
 | phone profiles | yes | yes | mac only | no phone-size store of Flash-Next |
-| loop hold | n/a | on | n/a | only Inkling loops its layers |
+
+The same for all three now (each declared in its manifest's `prefill` or `defaults`): router names for spans of one
+sub-chunk (`short_names: router`), the GPU's share from sub-chunks of 64 (`gpu_min`), the prompt's scratch bound of
+768 MB with equal spans and the scratch lent by the cache (`scratch_mb`, `lend`), the prompt kept apart from the decode's
+cache (`apart`), waves / packed kernels from one user / 64-row down jobs (`waves`, `pack_min`, `dn_rows`), fast mode's
+leave-out rule kept for prompts of at most 64 positions (`drop_upto`), the batched lossless prompt in fast mode, priority
+reads for speculative reads (`defaults.priority_reads`), packed affine kernels in verify passes (the core's default),
+the declared sub-chunk and span in every front end. The iOS app sets some values of its own (the 35B's prompt GPU share
+0.65 / 0.65, its fast threshold 0.08 and a top 3 in fast mode): those are the app's, not the engine's profiles.
 
 ## `modes`
 
@@ -56,7 +71,8 @@ it changes its published behaviour, so it waits for a measurement on that model.
 ```
 
 The engine reads only `engine` (the internal mode string: `lossless` or `approx:PRESET[:k=v...]`). `definition` is for
-people. Built-in: `exact` = `lossless`, `fast` = `approx:drop` (Flash-Next: `approx:drop:w=0.13:mass=0.13:late=-1`).
+people. Built-in: `exact` = `lossless`, `fast` = `approx:drop` (Inkling and Flash-Next declare `approx:drop:w=0.13:mass=0.13:late=-1`;
+the 35B keeps `approx:drop`, measured: `modes.fast.calibration`).
 The optional `:k=v` pairs set the preset's rule: `w` (a missing pick heavier than this is read), `mass` (then the
 heaviest missing picks are read until those left weigh at most this; left out per step <= `mass`), `late` (ms a light
 pick in flight is waited for; < 0 never, >= 1000 always) and `bg` (0 | 1: background fetch of left-out picks).
@@ -97,11 +113,11 @@ Read by the engine, per profile:
 | `resident` | derived id | the in-memory weights: `resident_q8` or `resident_q4` | `resident_q8`; phone-small on the 35B: `resident_q4` when that file is present, else `resident_q8` |
 | `cache` | `"auto"` or `"slab"` | expert cache sizing: `auto` = from free memory at start, then follow memory pressure (Mac); `slab` = one locked slab sized at open from the memory the app has (iOS) | mac `auto`, phones `slab` |
 | `cache_start` | object | the automatic cache's start rule: `{"rule": "headroom", "headroom_gb": G}` leaves G GB of what is free once the model's memory still to come is in (the 35B's and Inkling's published sizes; the memory watcher shrinks below a 20% free level), or `{"rule": "free_level", "floor_pct": P}` keeps the kernel's free level at P% (measured on Flash-Next only; the watcher shrinks below P - 2). Either is capped by the ceiling (physical memory - 5.5 GB - the process's other memory) and by what the system will lock (`vm.global_user_wire_limit` - wired now - 0.5 GB); a lock the OS still refuses stops the budget there. dmeng, dmserve and the C API compute it the same way, each from the positions and checkpoints it plans for | headroom 3 GB; Flash-Next's mac: free_level 14 |
-| `prefill_gpu` | `{"projections": F, "experts": F}` | the batched prefill's exact CPU + GPU split (Metal builds): the shares of the attention projections' and the experts' rows computed on the GPU, the same bits as the CPU (results/ios/p3-gpu/GPU-PREFILL.md); `dmeng --prefill-gpu off` / `dmserve --prefill-gpu off` / a negative C API share turn it off | the 35B on `mac`: 0.4 / 0.4 (the recorded 7,572-token OpenCode prompt 80.0 -> 67.4 s); Inkling on `mac`: projections 0.4, experts 0.4 (its NVFP4 experts on the GPU, layers 0-19; the MXFP8 layers stay on the CPU; the recorded 8,365-token OpenCode request, applications alternated in one process: 21.5 s per 1,000 positions off, 20.5 projections only, 17.5 with the experts' share); every other profile: CPU only |
+| `prefill_gpu` | `{"projections": F, "experts": F}` | the batched prefill's exact CPU + GPU split (Metal builds): the shares of the attention projections' and the experts' rows computed on the GPU, the same bits as the CPU (results/ios/p3-gpu/GPU-PREFILL.md); `dmeng --prefill-gpu off` / `dmserve --prefill-gpu off` / a negative C API share turn it off | the 35B on `mac`: 0.4 / 0.4 (the recorded 7,572-token OpenCode prompt 80.0 -> 67.4 s); Inkling on `mac`: projections 0.4, experts 0.4 (its NVFP4 experts on the GPU, layers 0-19; the MXFP8 layers stay on the CPU; the recorded 8,365-token OpenCode request, applications alternated in one process: 21.5 s per 1,000 positions off, 20.5 projections only, 17.5 with the experts' share); every other profile: CPU only (the iOS app sets its own share for the 35B: 0.65 / 0.65) |
 | `run_ahead` | `{"picks": N, "depth": D, "budget": X, "max_tok": M, "sat_skip": B}` | while a step waits on reads, run ahead `D` layers and name the `N` experts that layer would pick; limits: its speculative ms per token at most `X` x the token's compute, at most `M` run-aheads per token, none while every reader is busy (`B`; built-in: no limits, no skip); an optional `"modes": ["exact"]` keeps it on only in those modes (exact: names only, tokens unchanged; results/parity/PARITY.md); `--run-ahead 0` / a negative C API `run_ahead` turn it off | `mac`, both models: 8 at depth 1 (one process, alternating arms: 35B prose +11.6%, code +2.5%; Inkling prose +6.4%, code -0.3%); `phone` and `phone-small`, both models: 8 at depth 1, budget 0.2, sat_skip on, in exact mode only (off in fast; same-load device measurements) |
 | `readers` | number | reader threads | `phone` and `phone-small`: 8; `mac`: the front end's default (4) |
 | `min_available_gb` | number, on `phone` only | the automatic choice on iOS: `phone` at or above it, `phone-small` below | 5.0 |
-| any key of `defaults` | as below | overrides that default for this profile only | the 35B on `phone-small`: `names` = the confidence rule (tau 0.5, 16 candidates) |
+| any key of `defaults` | as below | overrides that default for this profile only | none in the published manifests (the iOS app's own settings, not a profile: the 35B in fast mode names a top 3, threshold 0.08) |
 
 Not read by the engine (for the download tool and people): `when`, `precision`, `parts` (each part: `path`,
 `bytes`, `sha256`), `bytes` (the total to download), `note`, `files`. Profiles other than these three (for example
@@ -113,8 +129,9 @@ keys above.
 ```json
 "defaults": {
   "routers": ["linear_k2"],
-  "names": {"rule": "top", "m": 8},
+  "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
   "cross_token": null,
+  "priority_reads": true,
   "eviction": "auto",
   "drafts": false
 }
@@ -124,9 +141,10 @@ Inkling 2 Mini:
 
 ```json
 "defaults": {
-  "routers": ["linear_k2"],
+  "routers": ["linear_k2", "mlp_k2_h512"],
   "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
   "cross_token": {"routers": ["xtok_s47_h512"], "source": 47, "tau": 0.5, "priority_reads": true},
+  "priority_reads": true,
   "eviction": "auto",
   "drafts": false
 }
@@ -137,14 +155,15 @@ Inkling 2 Mini:
 | `routers` | list of ids from the manifest's `routers` | the early routers that name experts; the first id that resolves to a file is used; `[]` = none (cache only) |
 | `names` | object | how many experts the routers name per step: `{"rule": "top", "m": 8}` (a fixed top m) or `{"rule": "confidence", "tau": 0.5, "candidates": 16}` (the top candidates whose calibrated probability is at least tau) |
 | `cross_token` | object or `null` | routers that name the next token's first steps from a late step of this one: `routers` (ids from `cross_token_routers`), `source` (the step they read, informational; the file carries it), `tau` (threshold), `priority_reads` (speculative reads by priority instead of first in, first out) |
+| `priority_reads` | bool | speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out (true for all three; an older manifest's `cross_token.priority_reads` still counts) |
 | `eviction` | string | `auto`, `hazard` or `freq` |
 | `layer_caps` | string | per-layer slot caps: `auto` (the engine's rule), `uniform` or `none` (one pool), optionally with `:fit` (in a layer at its cap a name leaves min(2K + the loop holds, cap - names per step - the layer's own holds) slots free instead of 2K + the holds, so a layer whose cap holds its names admits them; the same wherever the cap is at least 2K + holds + names + the layer's holds); absent = `auto` |
 | `drafts` | bool | draft and verify on by default (`false` in v1; `--drafts 1` turns it on) |
 
 Inkling's `linear_k2` (one linear layer, lag 2; engine file 49 MB, source `routers/linear_k2.safetensors`) replaced the
 MLP `mlp_k2_h512` as the default: in one process with alternating segments it was 2-4% faster beside run-ahead and
-reads about a fifth of the router bytes per token (44 against 222 MB). The MLP stays available by explicit option
-(`--routers FILE`, `routers_id = "mlp_k2_h512"`).
+reads about a fifth of the router bytes per token (44 against 222 MB). The MLP is the fallback when the linear file is
+missing (the list's second id), and by explicit option (`--routers FILE`, `routers_id = "mlp_k2_h512"`).
 
 Qwen3.8-Flash-Next (`qwen4_exp`; one profile, `mac`: exact, 8-bit in-memory weights, cache auto, names a top 4, the
 GPU's share of the prefill 0.4 / 0.4, run-ahead naming 10 at depth 1):
@@ -180,8 +199,7 @@ the npz in place and derives its 8-bit file from it (step 4 below), the same byt
 
 The built-in `defaults`, used for any key the manifest leaves out, are the same for every model: no routers, a top 8,
 no cross-token routers, eviction `auto`, no drafting. The names rule is a per-profile value each manifest declares:
-the 35B names a top 8 on `mac` and `phone` and uses the confidence rule on `phone-small`; Inkling uses the confidence
-rule on every profile.
+the 35B and Inkling use the confidence rule on every profile, Flash-Next a top 4 (measured, above).
 
 ## How an id becomes a file
 
