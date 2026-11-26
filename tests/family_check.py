@@ -538,9 +538,12 @@ if wanted("presets"):
         OVER = "approx:drop:w=0.15:mass=0.15:late=-1"
         op = "phone" if "phone" in man["profiles"] else next(iter(man["profiles"]))
 
+        PER_MODE = {"exact": {"rule": "top", "m": 5}, "fast": {"rule": "confidence", "tau": 0.25, "candidates": 12}, "calibration": {"measured": "(a test value)"}}
+
         def over(m2):
             m2["profiles"][op]["modes"] = {"fast": {"definition": "the fast mode with this profile's own leave-out threshold", "engine": OVER,
                                                     "read_if": {"missing_routing_weight_over": 0.15}, "calibration": {"measured": "(a test value)"}}}
+            m2["profiles"][op]["names"] = PER_MODE  # a names rule per mode (profiles.<p>.names: {"exact": rule, "fast": rule})
 
         FO = declared("pm", edit=over)
         model_fast = man["modes"]["fast"]["engine"]
@@ -570,6 +573,45 @@ if wanted("presets"):
                     got_s = g if not isinstance(g, tuple) else (g[0].get("engine_mode"), g[0].get("engine_mode_from"), g[1].get("mode"))
                     bad.append(f"{prof} --mode {mode} with {op}'s own fast {fe}: {got_s} != {(s, src, s)}")
             ncell += 1
+        # the names rule per mode: a profile's names may be one rule or {"exact": rule, "fast": rule}, taken for the mode in
+        # force; resolved.names in all three front ends, in the folder (its own declarations: the 35B's phone-small) and
+        # in the temporary manifest above (op's per-mode rule), for --mode exact / fast and an engine string
+        m_over = json.loads(json.dumps(man))
+        over(m_over)
+
+        def names_exp(mm, prof, mode):
+            for nb in (mm["profiles"][prof].get("names"), mm.get("defaults", {}).get("names")):
+                if isinstance(nb, dict):
+                    r = nb if "rule" in nb else nb.get(mode)
+                    if r:
+                        return {"rule": "confidence", "tau": r.get("tau", 0.5), "candidates": r.get("candidates", 16)} if r["rule"] == "confidence" \
+                            else {"rule": "top", "m": r.get("m", 8)}
+            return {"rule": "top", "m": 8}
+
+        for fold, mm in ((M, man), (FO, m_over)):
+            for prof in man["profiles"]:
+                for mode, nmode in (("exact", "exact"), ("fast", "fast"), ("approx:drop:w=0.2", "fast")):
+                    want_n = names_exp(mm, prof, nmode)
+                    for fe in ("dmeng", "capi", "dmserve"):
+                        if os.path.exists(j):
+                            os.remove(j)
+                        if fe == "dmeng":
+                            r = run([DMENG, "--model", fold, "--profile", prof, "--mode", mode, "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
+                            g = json.load(open(j))["resolved"] if r.returncode == 0 else None
+                        elif fe == "capi":
+                            r = run([DMGATE, "--model", fold, "--profile", prof, "--mode", mode, "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j])
+                            g = json.load(open(j))["stats"]["resolved"] if r.returncode == 0 else None
+                        else:
+                            r = run([DMSERVE, "--model", fold, "--profile", prof, "--mode", mode, "--threads", "2"], inp="", timeout=120)
+                            ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+                            g = json.loads(ready[0][6:])["resolved"] if ready else None
+                        if g is None:
+                            bad.append(f"{prof} names --mode {mode} {fe}: {r.stderr[-200:]}")
+                            continue
+                        e = sub(want_n if g.get("routers") else None, g.get("names"))
+                        if e:
+                            bad.append(f"{prof} names --mode {mode} {fe}{' (per-mode test manifest)' if fold == FO else ''}: {'; '.join(e)}")
+                    ncell += 1
         detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])})"
         verdict("presets", "FAIL" if bad or cross else "PASS", detail + ("" if not bad else " | precedence: " + " || ".join(bad[:6]))
                 + ("" if not cross else " | front ends differ: " + " || ".join(cross[:6])))

@@ -314,7 +314,18 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
       }
     }
   }
-  if (const Json* nm = dflt("names")) {
+  // the names rule: one rule, or one per mode ({"exact": rule, "fast": rule}) taken for the mode in force (an engine
+  // string given as the mode: exact when lossless, else fast); a per-mode block without this mode falls through to the
+  // next source (the published profile, the built-in one, the defaults)
+  const std::string nmode = p.mode == "exact" || p.mode == "fast" ? p.mode : p.engine_mode == "lossless" ? "exact" : "fast";
+  auto rule_of = [&](const Json* nm) -> const Json* {
+    if (!nm || nm->kind != Json::OBJ) return nullptr;
+    return (*nm)["rule"].kind == Json::STR ? nm : member(nm, nmode);
+  };
+  const Json* nm = nullptr;
+  for (const Json* o : {mp, fp, bp, md, fd, bd})
+    if (!nm) nm = rule_of(member(o, "names"));
+  if (nm) {
     if ((*nm)["rule"].s() == "confidence") {
       p.tau = (*nm)["tau"].f(0.5);
       p.cand = (int)(*nm)["candidates"].i(16);

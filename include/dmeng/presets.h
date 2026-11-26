@@ -44,7 +44,9 @@ struct Preset {
   std::string cache_start = "headroom:3";
   SlabRule slab;                   // the slab's sizing rule (cache "slab")
   std::string router_id, routers;  // early routers (names); routers = "" when none resolved
-  int m = 8;                       // names rule: a fixed top m ...
+  // names rule (a profile's or the defaults' "names": one rule, or one per mode {"exact": rule, "fast": rule}, taken
+  // for the mode in force; an engine string given as the mode counts as exact when lossless, else fast):
+  int m = 8;                       // a fixed top m ...
   double tau = -1;                 // ... or the confidence rule (tau > 0) over `cand` candidates
   int cand = 16;
   std::string xtok_id, xtok;       // cross-token routers ("" = none)

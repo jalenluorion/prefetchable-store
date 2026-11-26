@@ -269,9 +269,15 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     },
     "mode": "fast",
     "names": {
-     "candidates": 16,
-     "rule": "confidence",
-     "tau": 0.5
+     "exact": {
+      "candidates": 16,
+      "rule": "confidence",
+      "tau": 0.5
+     },
+     "fast": {
+      "m": 3,
+      "rule": "top"
+     }
     },
     "readers": 8,
     "resident": "resident_q4",
