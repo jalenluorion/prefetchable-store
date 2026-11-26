@@ -1054,10 +1054,54 @@
    },
    "otherwise": "left out",
    "substitute": false,
-   "renormalise": false
+   "renormalise": false,
+   "calibration": {
+    "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
+    "rows": [
+     {
+      "setting": "weight 0.1, wait for reads in flight (this)",
+      "tok_s": [
+       13.06,
+       6.38
+      ],
+      "mb_per_token": [
+       92.0,
+       91.8
+      ],
+      "top1_agree": [
+       0.982,
+       0.983
+      ],
+      "nll_delta": [
+       0.0021,
+       0.0012
+      ]
+     },
+     {
+      "setting": "leave-out rule 0.13 (fast-eps)",
+      "tok_s": [
+       14.61,
+       15.11
+      ],
+      "mb_per_token": [
+       92.7,
+       92.8
+      ],
+      "top1_agree": [
+       0.982,
+       0.978
+      ],
+      "nll_delta": [
+       0.0021,
+       0.0034
+      ]
+     }
+    ],
+    "reason": "kept: the one leave-out rule (fast-eps) measured worse on the iPhone (phone-small, where fast mode is the default: 3.57 against 4.1 tok/s); on the Mac it ran faster (14.9 against 13.1 tok/s in the clean run; the 6.38 run had 400% other CPU) at agreement 0.980 against 0.982"
+   }
   },
   "fast-eps": {
-   "definition": "Fast mode under one leave-out rule (Flash-Next's fast mode): the picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation); a light pick whose read is in flight is not waited for. Built and selectable (--mode fast-eps); not a default: not measured on this model (its calibration of eps against agreement with exact mode is still to do).",
+   "definition": "Fast mode under the one leave-out rule (Flash-Next's and Inkling's fast mode): the picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation); a light pick whose read is in flight is not waited for. Selectable (--mode fast-eps), not this model's fast mode: measured worse on the iPhone (3.57 against 4.1 tok/s); on the Mac faster (see fast.calibration).",
    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
   }
  },
@@ -1069,8 +1113,9 @@
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
    "names": {
-    "rule": "top",
-    "m": 8
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
    },
    "cache": "auto",
    "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
@@ -1339,8 +1384,9 @@
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
    "names": {
-    "rule": "top",
-    "m": 8
+    "rule": "confidence",
+    "tau": 0.5,
+    "candidates": 16
    },
    "cache": "slab",
    "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
@@ -1885,19 +1931,22 @@
    "linear_k2"
   ],
   "names": {
-   "rule": "top",
-   "m": 8
+   "rule": "confidence",
+   "tau": 0.5,
+   "candidates": 16
   },
   "cross_token": null,
   "eviction": "auto",
   "drafts": false,
   "experts": "aff4_g64: our 4-bit affine, groups of 64 (store/)",
+  "priority_reads": true,
   "notes": {
    "routers": "linear_k2 names experts 2 layers early; its engine file is derived/router.linear_k2.q8...bin",
-   "names": "top 8 on mac and phone; phone-small overrides it with the confidence rule (tau 0.5, 16 candidates)",
+   "names": "the confidence rule (tau 0.5 of 16 candidates) on every profile, as Inkling: measured on the base M4 (5.0 GB cache, exact, the code prompt and 200 tokens, two alternating pairs, AC, other processes 200-400% CPU): 128.5 / 128.7 MB per token, 8.14 / 13.23 tok/s, wait 11.9 / 13.8 ms against a top 8 143.4 / 143.5 MB, 9.13 / 11.16 tok/s, 14.7 / 13.9 ms: 10% fewer bytes, speed within the runs' spread",
    "cross_token": "none yet",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
-   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only)"
+   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only)",
+   "priority_reads": "speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out: the same for every family"
   }
  },
  "layout": {
@@ -1912,12 +1961,16 @@
   "whole_from": 1000,
   "short_names": "router",
   "join": 0,
-  "gpu_min": 256,
+  "gpu_min": 64,
   "waves": true,
   "gpu_min_wave": 128,
   "pack_min": 1,
   "dn_rows": 64,
-  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunk, span, names of the next layer (whole from 1000 positions, else its released router's picks), the last span joined under 64 positions, the GPU's share from sub-chunks of 256, the experts in waves as they land (a wave on the GPU from 128 rows), every expert and the shared expert through the packed kernels, down projections in 64-row jobs: the values this model's prefill was written and measured with (results/ios/p3-gpu/GPU-PREFILL.md)"
+  "scratch_mb": 768,
+  "lend": 1,
+  "apart": 1,
+  "drop_upto": 64,
+  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunk, span, names of the next layer (whole from 1000 positions, else its released router's picks), the last span joined under 64 positions, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256), the experts in waves as they land (a wave on the GPU from 128 rows), every expert and the shared expert through the packed kernels, down projections in 64-row jobs: the values this model's prefill was written and measured with (results/ios/p3-gpu/GPU-PREFILL.md); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next; the prompt kept apart from the decode's cache statistics (apart, the hazard policy only: placement), as Flash-Next; fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (drop_upto 64, the value Flash-Next declares, the old runner's threshold), longer prompts lossless"
  },
  "drafting": {
   "cost_prior": {

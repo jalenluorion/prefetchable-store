@@ -115,9 +115,9 @@ struct NGramHash {
   void rows(const int32_t* ctx, int32_t cur, int64_t* out) const;
 };
 
-// the prompt path's bound of this model (the shared options: dmeng/prefill.h PrefillOpts, its values from the manifest)
+// the prompt path's state of this model (the shared options, the scratch bound among them: dmeng/prefill.h PrefillOpts,
+// their values from the manifest)
 struct PrefillExtra {
-  double scratch_mb = 320;  // the prefill's scratch bound when the manifest declares none (prefill.cpp: streams first)
   bool fast = false;        // the prefill running now takes the fast path (PrefillOpts::fast, fast mode)
   int moe_block = 0;        // its MoE blocks (positions)
   double gdn_ms = 0, qsa_ms = 0;  // the attention cores of the prefill running now: Gated DeltaNet, QSA
@@ -200,8 +200,13 @@ struct Flash : Model {
   std::string stats_json(int ntok) const override;
   void reset_stats() override;
   ModelMem mem(const State& s) const override;
-  const float* final_hidden(int i) const override { return nullptr; }
+  // light draft heads (draft.h LightHeadSource), as the other families: the output head's input of the last step (i < 0)
+  // or of position i of the last verify, and the full head's argmax with its top-1 probability
+  const float* final_hidden(int i) const override;
   bool embed_row(int32_t tok, float* out) const override;
+  int head_argmax(const float* hn, float* conf) override;
+  std::vector<float> head_in, dh_lg;  // the last step's head input [H] (head_step); head_argmax's logits
+  XBuf dh_x;
 
   // ---- per-position pieces, shared by decode and prefill
   // the n-gram rows of token cur after the context: ids into out[heads]

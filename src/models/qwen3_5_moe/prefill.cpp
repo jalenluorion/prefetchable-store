@@ -20,6 +20,7 @@
 #include <string>
 #include "../common/gated_attn.h"
 #include "../../core/gpu_half.h"
+#include "dmeng/pagevec.h"
 
 namespace dm {
 namespace qwen35 {
@@ -117,17 +118,32 @@ struct Prefill {
   const std::atomic<bool>* cancel = nullptr;
   const PrefillProgress* progress = nullptr;  // (positions done incl. this span's layers so far, total, -)
   int prog_base = 0, prog_total = 0;
-  std::vector<uint8_t> snap;                  // the fixed state at the span's start (for a cancel inside the span)
+  PageVec<uint8_t> snap;                      // the fixed state at the span's start (for a cancel inside the span)
   std::vector<int> capture;  // positions relative to the span start, in (0, n], whose DeltaNet states go to sink
   LM::StateSink sink;
   // scratch (sized for the sub-chunk)
   int cap = 0;
-  std::vector<float> X, Hn, Y, A, B, Cv, O, Z, BB, AA, Part, Qn, Cs, Sn;
-  std::vector<int32_t> Pk;
+  // (PageVec: given back to the system when freed, prefill_release)
+  PageVec<float> X, Hn, Y, A, B, Cv, O, Z, BB, AA, Part, Qn, Cs, Sn;
+  PageVec<int32_t> Pk;
   std::vector<int16_t> Rec;
   XQB qa, qo;
   void reserve(int n);
+  static double sub_bytes_per_pos(const QCfg& c);  // reserve()'s buffers per position (the span's X aside)
+  double held() const {  // the scratch's bytes now
+    double b = 0;
+    auto add = [&](const auto& v) { b += (double)v.capacity() * sizeof(v[0]); };
+    add(X); add(Hn); add(Y); add(A); add(B); add(Cv); add(O); add(Z); add(BB); add(AA); add(Part); add(Qn); add(Cs); add(Sn); add(Pk);
+    add(snap);
+    return b + qa.cap + qo.cap;
+  }
 };
+
+double Prefill::sub_bytes_per_pos(const QCfg& c) {
+  const double H = c.H, C = c.conv_dim(), ZD = c.NVH * c.DV, QD = c.NQ * c.HD;
+  const double floats = 2 * H + std::max(C, 2 * QD) + 2.0 * c.NKV * c.HD + C + std::max(ZD, QD) + ZD + 2.0 * c.NVH + c.K + QD + 1024;
+  return 4 * floats + xq_bytes(c.H) + xq_bytes((int)std::max(ZD, QD));
+}
 
 namespace {
 std::string PrefillCounters::json(double mb_read) const {
@@ -251,6 +267,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     k.union_batches += Co.n_union_batches - ub0;
   };
   for (int L = 0; L < NL; L++) {
+   Co.cache.lend_hold();  // (a prompt's loan: what the GPU's first use of the slab faulted back in goes back again)
    if (L > 0) {
      if (progress && *progress) (*progress)(prog_base + (int)((long)n_all * L / NL), prog_total, 0.0);
      if (cancel && cancel->load()) {  // stop within one layer: names for this layer released, the fixed state restored
@@ -672,8 +689,26 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
     explicit FastOn(GpuHalf* h) { g_fast = h; }
     ~FastOn() { g_fast = nullptr; }
   } fast_on(po.fast && core->ns.on && !tbt ? gpu.half() : nullptr);
+  // the prompt's memory (prompt_plan, every family's rule): the sub-chunk's buffers, the span's residual stream (4 H per
+  // position), the cancel snapshot (taken at every span's start here)
+  PromptPlan plan;
+  if (!tbt) {
+    PromptBytes pb;
+    pb.sub = Prefill::sub_bytes_per_pos(c);
+    pb.span = 4.0 * c.H;
+    pb.snap = cancel ? (double)fixed_bytes(*S) : 0.0;
+    pb.held = P->held();
+    plan = prompt_plan(po, n, pb);
+  }
+  const int chunk_keep = po.chunk;
+  if (!tbt) po.chunk = plan.chunk;  // (forward_chunk's sub-chunks)
   PrefillOpts o = po;
-  if (tbt) o.span = 1;  // batched_always with the decode path's conditions: the batched code one position per pass
+  o.span = tbt ? 1 : plan.span;  // tbt: batched_always with the decode path's conditions, the batched code one position per pass
+  if (plan.lend) {  // the GPU's first use of its wrapped buffers before the loan (gpu_gemm.h touch)
+    if (gpu) gpu->touch();
+    if (gpu.half()) gpu.half()->touch();
+  }
+  PromptLoan loan(*core, plan.lend);
   const bool ok = prefill_spans(*core, n, caps, cancel, o, [&](int done, int m, bool last, const std::vector<int>& cap_rel) {
     P->capture = cap_rel;
     P->sink = sink;
@@ -686,9 +721,14 @@ bool Qwen35::prefill(State& s0, const int32_t* ids, int n, bool want_logits, con
     P->sink = nullptr;
     return whole;
   }, st, nullptr);
+  po.chunk = chunk_keep;
   if (st) {
     st->chunks = (int)P->k.chunks;
-    st->json = P->k.json(st->mb_read);
+    std::string js = P->k.json(st->mb_read);
+    js.pop_back();
+    char b[160];
+    snprintf(b, sizeof b, ",\"chunk\":%d,\"chunk_asked\":%d,\"span\":%d,\"lent_mb\":%.1f}", tbt ? 1 : plan.chunk, chunk_keep, o.span, plan.lend / 1e6);
+    st->json = js + b;
   }
   if (po.release) {  // the scratch back to the system (re-created by the next prefill)
     P.reset();

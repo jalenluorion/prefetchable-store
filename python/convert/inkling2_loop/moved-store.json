@@ -1091,18 +1091,62 @@
    "engine": "lossless"
   },
   "fast": {
-   "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
-   "engine": "approx:drop",
-   "wait_if": {
-    "routing_weight_over": 0.1,
-    "read_in_flight": true
+   "definition": "The model's own router still picks. The picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation). A light pick whose read is in flight is not waited for. Router names are on (the one leave-out rule, as Flash-Next).",
+   "engine": "approx:drop:w=0.13:mass=0.13:late=-1",
+   "read_if": {
+    "missing_routing_weight_over": 0.13,
+    "order": "heaviest missing pick first"
    },
    "otherwise": "left out",
    "substitute": false,
-   "renormalise": false
+   "renormalise": false,
+   "calibration": {
+    "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
+    "rows": [
+     {
+      "setting": "leave-out rule 0.13 (this)",
+      "tok_s": [
+       8.08,
+       6.8
+      ],
+      "mb_per_token": [
+       225.7,
+       223.4
+      ],
+      "top1_agree": [
+       0.985,
+       0.983
+      ],
+      "nll_delta": [
+       0.0045,
+       0.0039
+      ]
+     },
+     {
+      "setting": "weight 0.1, wait for reads in flight (before)",
+      "tok_s": [
+       6.47,
+       7.24
+      ],
+      "mb_per_token": [
+       221.3,
+       219.7
+      ],
+      "top1_agree": [
+       0.985,
+       0.975
+      ],
+      "nll_delta": [
+       0.0045,
+       0.0063
+      ]
+     }
+    ],
+    "reason": "at least as good as the rule before on the Mac (tok/s 7.44 against 6.86 mean, agreement 0.984 against 0.980); not yet measured on a phone"
+   }
   },
   "fast-eps": {
-   "definition": "Fast mode under one leave-out rule (Flash-Next's fast mode): the picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation); a light pick whose read is in flight is not waited for. Built and selectable (--mode fast-eps); not a default: not measured on this model (its calibration of eps against agreement with exact mode is still to do).",
+   "definition": "The same as fast (kept as a name: fast mode is this rule now).",
    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
   }
  },
@@ -1791,11 +1835,13 @@
   "eviction": "auto",
   "drafts": false,
   "experts": "as released: NVFP4 (layers 0-19), MXFP8 (layers 20-23)",
+  "priority_reads": true,
   "notes": {
    "routers": "linear_k2 names experts 2 steps early (one linear layer: about a fifth of the MLP's router bytes per token); its engine file is derived/router.linear_k2.q8...bin; mlp_k2_h512 stays available (--routers or routers_id)",
    "cross_token": "source 47 names the next token's experts for its first six steps (engine targets 0-5), with priority reads",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
-   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only); the release's draft head through the command-line tool only (the mac profile's optional parts)"
+   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only); the release's draft head through the command-line tool only (the mac profile's optional parts)",
+   "priority_reads": "speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out: the same for every family"
   }
  },
  "cross_token_routers": [
@@ -1892,8 +1938,17 @@
   "span": 8192,
   "whole_from": 0,
   "join": 0.25,
-  "gpu_min": 256,
-  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, the last span joined under a quarter span, the GPU's share from sub-chunks of 256; the experts all at once once landed (no waves)"
+  "gpu_min": 64,
+  "short_names": "router",
+  "scratch_mb": 768,
+  "lend": 1,
+  "waves": true,
+  "gpu_min_wave": 128,
+  "pack_min": 1,
+  "dn_rows": 64,
+  "apart": 1,
+  "drop_upto": 64,
+  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, else (a span of one sub-chunk) its released router's picks on this application's MoE inputs (short_names, as the 35B and Flash-Next), the last span joined under a quarter span, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next; the experts in waves as they land (a wave on the GPU from 128 rows), packed kernels from one user where the format has them (NVFP4 keeps its own threshold; MXFP8 has none), down projections in 64-row jobs, as the 35B; the prompt kept apart from the decode's cache statistics (apart, the hazard policy only: placement), as Flash-Next; fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (drop_upto 64, the value Flash-Next declares, the old runner's threshold), longer prompts lossless (iPhone 15 Plus, phone-small, fast, against the lossless pass: a new chat's first token 15.9 -> 11.8 s, a follow-up 17.9 -> 6.8 s, 10.8 / 9.3 -> 6.0 / 4.8 GB read for 24 / 21 positions)"
  },
  "drafting": {
   "cost_prior": {

@@ -45,10 +45,11 @@ struct ModelInfo {
   std::string caps_json() const {
     return std::string("{\"verify\":") + (has_verify ? "true" : "false") + ",\"ref_path\":" + (has_ref_path ? "true" : "false") + "}";
   }
-  // Core::moe_chunk computes this model's affine records (4-bit experts, the 8-bit shared expert) with the packed batched
-  // kernels (gemm_aff4_i16 / gemm_aff8_i16, inputs a multiple of 64) from PACK_MIN users and gives the GPU its share of
-  // them (moe_gpu): the same bits as the multi-vector path. Off: the multi-vector path
-  bool chunk_aff4 = false;
+  // Core::moe_chunk computes affine records (4-bit experts, the 8-bit shared expert) with the packed batched kernels
+  // (gemm_aff4_i16 / gemm_aff8_i16, inputs a multiple of 64) from PACK_MIN users and gives the GPU its share of them
+  // (moe_gpu): the same bits as the multi-vector path. On for every family (a model without affine records has nothing
+  // it changes); off (Core::set_option chunk_aff4 0): the multi-vector path
+  bool chunk_aff4 = true;
 };
 
 // Read-only description of one MoE application, so the core can run the block itself.

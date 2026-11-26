@@ -18,6 +18,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "rule": "confidence",
     "tau": 0.5
    },
+   "priority_reads": true,
    "routers": [
     "linear_k2",
     "mlp_k2_h512"
@@ -44,17 +45,26 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "engine": "lossless"
    },
    "fast": {
-    "engine": "approx:drop"
+    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
    },
    "fast-eps": {
     "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
    }
   },
   "prefill": {
+   "apart": 1,
    "chunk": 256,
-   "gpu_min": 256,
+   "dn_rows": 64,
+   "drop_upto": 64,
+   "gpu_min": 64,
+   "gpu_min_wave": 128,
    "join": 0.25,
+   "lend": 1,
+   "pack_min": 1,
+   "scratch_mb": 768,
+   "short_names": "router",
    "span": 8192,
+   "waves": true,
    "whole_from": 0
   },
   "profiles": {
@@ -125,9 +135,11 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "drafts": false,
    "eviction": "auto",
    "names": {
-    "m": 8,
-    "rule": "top"
+    "candidates": 16,
+    "rule": "confidence",
+    "tau": 0.5
    },
+   "priority_reads": true,
    "routers": [
     "linear_k2"
    ]
@@ -160,12 +172,16 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    }
   },
   "prefill": {
+   "apart": 1,
    "chunk": 512,
    "dn_rows": 64,
-   "gpu_min": 256,
+   "drop_upto": 64,
+   "gpu_min": 64,
    "gpu_min_wave": 128,
    "join": 0,
+   "lend": 1,
    "pack_min": 1,
+   "scratch_mb": 768,
    "short_names": "router",
    "span": 8192,
    "waves": true,
@@ -176,8 +192,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "cache": "auto",
     "mode": "exact",
     "names": {
-     "m": 8,
-     "rule": "top"
+     "candidates": 16,
+     "rule": "confidence",
+     "tau": 0.5
     },
     "prefill_gpu": {
      "experts": 0.4,
@@ -194,8 +211,9 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "min_available_gb": 5.0,
     "mode": "exact",
     "names": {
-     "m": 8,
-     "rule": "top"
+     "candidates": 16,
+     "rule": "confidence",
+     "tau": 0.5
     },
     "readers": 8,
     "resident": "resident_q8",
@@ -241,6 +259,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "m": 4,
     "rule": "top"
    },
+   "priority_reads": true,
    "routers": [
     "mlp_k4"
    ]
@@ -259,14 +278,18 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   "prefill": {
    "apart": 1,
    "chunk": 256,
+   "dn_rows": 64,
    "drop_upto": 64,
    "fast": 1,
    "gpu_min": 64,
+   "gpu_min_wave": 128,
    "join": 0.25,
    "lend": 1,
+   "pack_min": 1,
    "scratch_mb": 768,
    "short_names": "router",
    "span": 32768,
+   "waves": true,
    "whole_from": 2048
   },
   "profiles": {

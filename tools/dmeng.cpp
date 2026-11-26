@@ -147,7 +147,8 @@ outputs
   --state-check          after the decode, restore the state saved after the prompt (fixed + positional parts) and
                          decode again: the ids must be the same
   --prefill-chunk N      the prompt through the model's batched prefill in chunks of N (1: single steps); exact
-                         (default 512 under a profile unless --record is given, else 1)
+                         (default under a profile: the model's declared sub-chunk and span, the manifest's "prefill",
+                         printed as 0; 1 with --record or --profile none)
   --prefill-gpu-frac F   with --prefill-chunk: that share of each attention projection's rows on the GPU beside
                          the CPU (builds with DM_METAL; the same bits); 0 = CPU only (default: the profile's; the
                          mac profile 0.4 for both models, else 0)
@@ -686,9 +687,12 @@ int main(int argc, char** argv) {
   C.cache.rd.excl = a.rd_excl != 0;
   C.cache.name_gate = a.name_gate != 0;
   if (a.spec_max > 0) C.cache.rd.max_spec = a.spec_max;
-  // the in-token routers in the chain (alone, or wrapped by the cross-token routers: Inkling's profiles)
+  // background reads: the routers' next ranks for the drive's idle time, given to the in-token routers in the chain (alone,
+  // or wrapped by the cross-token routers: Inkling's profiles; under the confidence names rule, the ranks it left unnamed);
+  // said, never silently off, where they cannot run
   const bool rts_on = C.hook == &rts || (C.hook == &xt && xt.inner == &rts) || (C.hook == &xb && (xb.inner == &rts || (xb.inner == &xt && xt.inner == &rts)));
-  if (a.bg_ranks > 0 && rts_on) {  // background reads: the routers' next ranks for the drive's idle time
+  if (a.bg_ranks > 0 && !rts_on) fprintf(stderr, "dmeng: --bg-ranks %d: off (no routers naming)\n", a.bg_ranks);
+  if (a.bg_ranks > 0 && rts_on) {
     rts.bg_ranks = a.bg_ranks;
     rts.bg_queue = std::max(1, a.bg_queue);
     rts.bg_margin = a.bg_margin;
@@ -1041,15 +1045,15 @@ int main(int argc, char** argv) {
     const int tpf = std::min<int>(a.teacher_prefill, (int)ids.size());
     if (tpf > 0) {
       std::string e2;
-      if (a.prefill_chunk > 1) {
-        if (!M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
+      if (a.prefill_chunk != 1) {  // (0: the model's declared sub-chunk)
+        if (a.prefill_chunk > 1 && !M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
         if (a.prefill_gpu_frac > 0 && !M->set_option("prefill_gpu_frac", std::to_string(a.prefill_gpu_frac), e2)) return die("prefill", e2);
         if (a.prefill_gpu_experts > 0 && !M->set_option("prefill_gpu_experts", std::to_string(a.prefill_gpu_experts), e2)) return die("prefill", e2);
       }
       std::vector<int32_t> pid(ids.begin(), ids.begin() + tpf);
       PrefillStats pst;
       auto tq = clk::now();
-      if (a.prefill_chunk > 1) M->prefill(*S, pid.data(), tpf, true, {}, nullptr, &pst, nullptr);
+      if (a.prefill_chunk != 1) M->prefill(*S, pid.data(), tpf, true, {}, nullptr, &pst, nullptr);
       else
         for (int i = 0; i < tpf; i++) M->step(*S, pid[i], i + 1 == tpf ? Want::LAST : Want::NONE);
       fprintf(stderr, "teacher prefill: %d positions in %.1f s %s\n", tpf, ms_since(tq) / 1000, pst.json.c_str());
@@ -1199,9 +1203,9 @@ int main(int argc, char** argv) {
     const bool fast = a.fast_head > 0 && fh_greedy_ok;
     const Want want = fast ? Want::GREEDY : head_topk ? Want::TOPK : Want::LAST;
     auto tp = clk::now();
-    if (a.prefill_chunk > 1) {  // the batched prefill (records not kept)
+    if (a.prefill_chunk != 1) {  // the batched prefill (records not kept; 0: the model's declared sub-chunk and span)
       std::string e2;
-      if (!M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
+      if (a.prefill_chunk > 1 && !M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
       if (a.prefill_gpu_frac > 0 && !M->set_option("prefill_gpu_frac", std::to_string(a.prefill_gpu_frac), e2)) return die("prefill", e2);
       if (a.prefill_gpu_experts > 0 && !M->set_option("prefill_gpu_experts", std::to_string(a.prefill_gpu_experts), e2)) return die("prefill", e2);
       std::vector<int32_t> pid(prompt.begin(), prompt.end());
@@ -1454,8 +1458,8 @@ int main(int argc, char** argv) {
         }
       js << "]";
     }
-    if (a.prefill_chunk > 1) js << ",\"prefill_chunk\":" << a.prefill_chunk;
-    if (a.prefill_chunk > 1 && (a.prefill_gpu_frac > 0 || a.prefill_gpu_experts > 0))
+    if (a.prefill_chunk != 1) js << ",\"prefill_chunk\":" << a.prefill_chunk;
+    if (a.prefill_chunk != 1 && (a.prefill_gpu_frac > 0 || a.prefill_gpu_experts > 0))
       js << ",\"prefill_gpu_frac\":" << a.prefill_gpu_frac << ",\"prefill_gpu_experts\":" << a.prefill_gpu_experts;
     if (a.state_check) js << ",\"state_check\":{\"fixed_mb\":" << fixed_saved.size() / 1e6 << ",\"pos_mb\":" << pos_saved.size() / 1e6 << ",\"same_ids\":" << (state_same ? "true" : "false") << "}";
     emit_stats(steps, dec_s, step_ms);
