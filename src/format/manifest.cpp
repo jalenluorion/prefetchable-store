@@ -3,10 +3,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <set>
+#include <vector>
 
 #include "files.h"
 
@@ -574,10 +576,14 @@ bool Manifest::check_derived(const Derived& d, const std::string& path, std::str
   }
   if (d.sha256.empty()) return true;
   const long long mt = (long long)st.st_mtimespec.tv_sec * 1000000000LL + st.st_mtimespec.tv_nsec;
-  const std::string base = path.substr(path.rfind('/') + 1), stamps = cache_dir() + "/checked", stamp = stamps + "/" + base + ".sha256";
+  const std::string base = path.substr(path.rfind('/') + 1);
+  // where the record of a check is kept: the cache folder's checked/, else (a folder the process may not write into,
+  // e.g. one copied onto a phone by cable) $HOME/Library/Caches/dmeng/checked/
+  std::vector<std::string> stamps = {cache_dir() + "/checked"};
+  if (const char* home = getenv("HOME")) stamps.push_back(std::string(home) + "/Library/Caches/dmeng/checked");
   char want[256];
   snprintf(want, sizeof want, "%lld %lld %s", (long long)st.st_size, mt, d.sha256.c_str());
-  // checked before in this process (the stamp below could not be written, e.g. on a full drive): not hashed again
+  // checked before in this process: not hashed again
   static std::mutex memo_mu;
   static std::set<std::string> memo;
   const std::string memo_key = path + "|" + want;
@@ -585,31 +591,43 @@ bool Manifest::check_derived(const Derived& d, const std::string& path, std::str
     std::lock_guard<std::mutex> lk(memo_mu);
     if (memo.count(memo_key)) return true;
   }
-  if (FILE* f = fopen(stamp.c_str(), "r")) {  // checked before, and the file has not changed since
-    char got[256] = {0};
-    const bool same = fgets(got, sizeof got, f) && std::string(got).rfind(want, 0) == 0;
-    fclose(f);
-    if (same) return true;
-  }
+  for (auto& sd : stamps)
+    if (FILE* f = fopen((sd + "/" + base + ".sha256").c_str(), "r")) {  // checked before, and the file has not changed since
+      char got[256] = {0};
+      const bool same = fgets(got, sizeof got, f) && std::string(got).rfind(want, 0) == 0;
+      fclose(f);
+      if (same) return true;
+    }
   std::string e2;
   const std::string h = sha256_file(path, e2, false);
   if (h != d.sha256) {
     err = path + ": sha256 " + (h.empty() ? e2 : h) + " is not the manifest's " + d.id + " (" + d.sha256 + "): derive it again or fetch it again";
     return false;
   }
-  mkdir(cache_dir().c_str(), 0755);
-  mkdir(stamps.c_str(), 0755);
   {
     std::lock_guard<std::mutex> lk(memo_mu);
     memo.insert(memo_key);
   }
-  bool stamped = false;
-  if (FILE* f = fopen(stamp.c_str(), "w")) {  // (a read-only folder or a full drive: checked again at the next launch)
-    stamped = fprintf(f, "%s\n", want) > 0;
-    stamped = fclose(f) == 0 && stamped;
-    if (!stamped) unlink(stamp.c_str());  // no half-written stamp left behind
+  std::string why;
+  for (size_t i = 0; i < stamps.size(); i++) {
+    if (i == 0) mkdir(cache_dir().c_str(), 0755);
+    else {  // $HOME/Library/Caches exists in an app's container; dmeng/ under it may not
+      mkdir((stamps[i].substr(0, stamps[i].rfind('/'))).c_str(), 0755);
+    }
+    mkdir(stamps[i].c_str(), 0755);
+    const std::string stamp = stamps[i] + "/" + base + ".sha256";
+    FILE* f = fopen(stamp.c_str(), "w");
+    if (!f) {
+      why += stamp + ": " + strerror(errno) + "; ";
+      continue;
+    }
+    bool ok = fprintf(f, "%s\n", want) > 0;
+    ok = fclose(f) == 0 && ok;
+    if (ok) return true;
+    unlink(stamp.c_str());  // no half-written record left behind
+    why += stamp + ": write failed; ";
   }
-  if (!stamped) fprintf(stderr, "dmeng: %s checked (sha256), but its record %s could not be written: hashed again at the next launch\n", base.c_str(), stamp.c_str());
+  fprintf(stderr, "dmeng: %s checked (sha256), but no record of it could be written (%s): hashed again at the next launch\n", base.c_str(), why.c_str());
   return true;
 }
 
