@@ -29,7 +29,9 @@ struct Preset {
   bool rd_prio = false;            // speculative reads by priority (defaults.priority_reads; with names)
   std::string evict = "auto";
   std::string layer_caps;          // per-layer slot caps (CoreOpts::layer_caps): "" = the core's rule (auto)
-  bool drafts = false;
+  // drafting by default (a profile's "drafts": {"lookup": B, "head": B}; an older manifest's bool: the lookup drafts):
+  // the lookup and tool-call drafts, the model's own draft head; off in every built-in profile
+  bool draft_lookup = false, draft_head = false;
   // the batched prefill's exact CPU + GPU split (Metal builds): shares of the attention projections' and the experts'
   // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for both models, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)
   double gpu_frac = 0, gpu_experts = 0;
@@ -63,7 +65,8 @@ void names_rule(const Preset& p, bool profiled, bool m_given, int m, bool tau_gi
 // dmserve's READY line, dm_stats_json), so an option silently replaced by a default shows.
 struct Resolved {
   std::string profile, mode, routers, xtok, evict;  // mode: the engine's mode string; routers / xtok: "" = none
-  int m = 0, cand = 0, drafts = 0;
+  int m = 0, cand = 0;
+  std::string draft = "none";  // the drafting in force: none | lookup | fixed | head | both (JSON: "drafts": {"lookup", "head"})
   double tau = -1, cache_gb = 0, gpu_frac = 0, gpu_experts = 0;  // tau as the routers use it: >= 0 the confidence rule
   int run_ahead = 0, run_ahead_depth = 1;                         // picks named by the run-ahead (0 = off), its depth
   double ra_budget = 0;                                           // its limits (0 / 0 / false: none)
@@ -151,8 +154,8 @@ struct RunOpts {
   double ra_budget = 0;
   bool ra_sat_skip = false;
   int readers = 4, bg_ranks = 0, bg_gate = 0, prefill_chunk = 1, drafts = 0;
-  // drafting: --drafts 1 expands here, once for every front end, to the lookup and tool-call drafts with early names 4
-  // positions ahead (a model's draft head is asked for explicitly: --draft head|both)
+  // drafting, once for every front end: an explicit --draft MODE; else --drafts 0|1 (1: the lookup and tool-call drafts);
+  // else the profile's declared drafts (Preset::draft_lookup / draft_head: lookup, head or both); drafts = draft != none
   std::string draft = "none";
   int early = 0;
   std::vector<std::string> notes;

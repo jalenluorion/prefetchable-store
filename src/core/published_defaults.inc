@@ -11,7 +11,6 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "source": 47,
     "tau": 0.5
    },
-   "drafts": false,
    "eviction": "auto",
    "names": {
     "candidates": 16,
@@ -70,6 +69,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   "profiles": {
    "mac": {
     "cache": "auto",
+    "drafts": {
+     "head": false,
+     "lookup": false
+    },
     "mode": "exact",
     "names": {
      "candidates": 16,
@@ -88,6 +91,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone": {
     "cache": "slab",
+    "drafts": {
+     "head": false,
+     "lookup": false
+    },
     "min_available_gb": 5.0,
     "mode": "fast",
     "names": {
@@ -109,6 +116,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone-small": {
     "cache": "slab",
+    "drafts": {
+     "head": false,
+     "lookup": false
+    },
     "mode": "fast",
     "names": {
      "candidates": 16,
@@ -132,7 +143,6 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
  "qwen3_5_moe": {
   "defaults": {
    "cross_token": null,
-   "drafts": false,
    "eviction": "auto",
    "names": {
     "candidates": 16,
@@ -190,6 +200,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   "profiles": {
    "mac": {
     "cache": "auto",
+    "drafts": {
+     "head": false,
+     "lookup": false
+    },
     "mode": "exact",
     "names": {
      "candidates": 16,
@@ -208,6 +222,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone": {
     "cache": "slab",
+    "drafts": {
+     "head": false,
+     "lookup": false
+    },
     "min_available_gb": 5.0,
     "mode": "fast",
     "names": {
@@ -229,6 +247,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone-small": {
     "cache": "slab",
+    "drafts": {
+     "head": false,
+     "lookup": false
+    },
     "mode": "fast",
     "names": {
      "candidates": 16,
@@ -252,7 +274,6 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
  "qwen4_exp": {
   "defaults": {
    "cross_token": null,
-   "drafts": false,
    "eviction": "auto",
    "layer_caps": "none",
    "names": {
@@ -299,6 +320,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "floor_pct": 14,
      "measured": "base M4 16 GB, this model only: from a 42-44% free level at start, a 3.5 GB cache (9.8 GB in all) ran with no swap growth; 4.5 GB (10.8 GB) let the level fall to ~9% and compute slowed 13-55%; 5.75 GB could not be locked. The built-in headroom rule (what the 35B and Inkling use) is not measured on this model",
      "rule": "free_level"
+    },
+    "drafts": {
+     "head": false,
+     "lookup": false
     },
     "mode": "exact",
     "names": {

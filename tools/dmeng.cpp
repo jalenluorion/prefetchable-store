@@ -48,7 +48,7 @@ static const char* HELP_SHORT = R"(usage: dmeng --model DIR (--prompt TEXT | --p
   --temp T --top-p P --top-k K --seed S   sampling (default: greedy)
   --cache-gb G|auto      expert cache size in GB (default auto: from the memory free at start)
   --drafts 0|1           draft and verify, greedy or sampled (the ids are plain decoding's for the seed), in exact and fast
-                         mode (default 0)
+                         mode (default: the profile's drafts, off in every published profile)
   --json F               write the statistics line to F as well
   --help-advanced        every other option, grouped
 )";
@@ -63,7 +63,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          --plan-routers makes the early address entirely the command line's
   --mode exact|fast|lossless|approx[:PRESET]   exact = lossless, fast = approx:drop (default: the profile's)
   --drafts 0|1           1 = --draft lookup (no early names), as in dmserve (a model's draft head: --draft head|both); default:
-                         the profile's (off)
+                         the profile's drafts {lookup, head} (off in every published profile)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)

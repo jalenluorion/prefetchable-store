@@ -148,7 +148,7 @@ static const char* HELP_SHORT = R"(usage: dmserve --model DIR [options]   (the m
                          fast: a picked expert that is not in memory and has a small routing weight is left out
   --profile mac|phone|phone-small   default: chosen from the device (macOS: mac)
   --cache-gb G|auto      expert cache size in GB (default auto: from free memory, follows memory pressure)
-  --drafts 0|1           draft and verify, greedy and sampled requests, exact and fast mode (default 0)
+  --drafts 0|1           draft and verify, greedy and sampled requests, exact and fast mode (default: the profile's, off)
   --fast-head 0|1        1 (default): the screened head for greedy and top-k <= 64 requests (exact: the same ids and
                          top-k logits as the full head); 0: the full head for every request
   --help-advanced        every other option, grouped
@@ -161,7 +161,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          built-in values). A default fills only what the command line leaves unset; --routers or --xtok
                          makes the early address entirely the command line's (--routers none: no names)
   --mode exact|fast|lossless|approx[:PRESET]   default: the profile's
-  --drafts 0|1           1 = --draft lookup (no early names) (as in dmeng); default: the profile's (off)
+  --drafts 0|1           1 = --draft lookup (no early names) (as in dmeng); default: the profile's drafts {lookup, head} (off)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)
 model and memory
@@ -749,6 +749,7 @@ int main(int argc, char** argv) {
       << ",\"resolved\":" << [&] {
            RunOpts r = ro;  // as applied
            r.routers = a.routers;
+           r.draft = a.draft;
            r.drafts = a.draft != "none" ? 1 : 0;
            r.cache = a.cache_auto ? r.cache : "fixed";
            return r.resolved(a.cache_gb).json();

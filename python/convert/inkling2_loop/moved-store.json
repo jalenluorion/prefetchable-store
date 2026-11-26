@@ -1154,6 +1154,10 @@
   "mac": {
    "when": "macOS",
    "mode": "exact",
+   "drafts": {
+    "lookup": false,
+    "head": false
+   },
    "resident": "resident_q8",
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
@@ -1374,6 +1378,10 @@
   "phone": {
    "when": "iOS with at least 5.0 GB available at open",
    "mode": "fast",
+   "drafts": {
+    "lookup": false,
+    "head": false
+   },
    "resident": "resident_q8",
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
@@ -1578,6 +1586,10 @@
   "phone-small": {
    "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
    "mode": "fast",
+   "drafts": {
+    "lookup": false,
+    "head": false
+   },
    "resident": "resident_q4",
    "precision": "4-bit",
    "precision_detail": "4-bit affine, groups of 64, calibrated (resident_q4); experts' layers 20-23 as NVFP4",
@@ -1833,14 +1845,12 @@
    "priority_reads": true
   },
   "eviction": "auto",
-  "drafts": false,
   "experts": "as released: NVFP4 (layers 0-19), MXFP8 (layers 20-23)",
   "priority_reads": true,
   "notes": {
    "routers": "linear_k2 names experts 2 steps early (one linear layer: about a fifth of the MLP's router bytes per token); its engine file is derived/router.linear_k2.q8...bin; mlp_k2_h512 stays available (--routers or routers_id)",
    "cross_token": "source 47 names the next token's experts for its first six steps (engine targets 0-5), with priority reads",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
-   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only); the release's draft head through the command-line tool only (the mac profile's optional parts)",
    "priority_reads": "speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out: the same for every family"
   }
  },
@@ -1964,6 +1974,7 @@
     4.32
    ],
    "measured": "base M4, dmeng step costs of passes of 1-8 positions (the drafting controller's prior; a draft_cost.txt measured by the engine replaces it)"
-  }
+  },
+  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: the release's draft head (mtp.safetensors, the mac profile's optional part, with resident.safetensors)), resolved once for dmeng, dmserve and the C API (which has no drafting: a declared default stays off there, an explicit request is refused); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile until measured on the real model"
  }
 }

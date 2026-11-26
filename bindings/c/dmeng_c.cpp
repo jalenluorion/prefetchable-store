@@ -263,8 +263,15 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   const Preset& P = ro.preset;
   const bool profiled = ro.profiled;
   if (profiled) e->preset_json = P.json();
-  if (ro.drafts > 0) {  // (no drafting in the C API: a manifest default cannot turn on what this front end does not do)
-    ro.notes.push_back("drafts: the C API has no drafting, off");
+  // no drafting in the C API: asked for explicitly it is refused; a profile's declared drafts are left off here (said in
+  // the notes, and the "resolved" block reports none; the "preset" block keeps what the profile declares)
+  if (ro.draft != "none" && ((g.draft && *g.draft != "none") || (g.drafts && *g.drafts > 0))) {
+    g_err = "drafts: the C API has no drafting (draft " + ro.draft + " asked for)";
+    return nullptr;
+  }
+  if (ro.draft != "none") {
+    ro.notes.push_back("drafts: the profile declares draft " + ro.draft + "; the C API has no drafting, off");
+    ro.draft = "none";
     ro.drafts = 0;
   }
   // the prompt's sub-chunk is the model's own here (the C API does not set it; dmeng and dmserve use 512): printed as 0

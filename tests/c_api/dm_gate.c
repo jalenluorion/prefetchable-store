@@ -67,6 +67,7 @@ int main(int argc, char** argv) {
   double gb = 3.3, resize_gb = 0;
   const char* policy_probe = NULL;
   const char *resident = NULL, *mode = NULL;  /* --resident FILE (e.g. the 4-bit resident_q4), --mode approx:drop */
+  const char* model_options = NULL;           /* --model-options "k=v;run:FLAG=VALUE" (dm_open_opts.model_options) */
   double gpu_frac = 0, gpu_experts = 0;      /* --gpu-frac F --gpu-experts F: the prefill's exact GPU split */
   int gpu_min = 0, prefill_threads = 0;      /* --gpu-min N (sub-chunks of at least N positions), --prefill-threads N */
   int gpu_int = 0;                           /* --gpu-int-kernel: the integer GPU kernel instead of the matrix-unit one */
@@ -114,6 +115,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--embeddings")) emb = v, i++;
     else if (!strcmp(k, "--policy-probe")) policy_probe = v, i++;
     else if (!strcmp(k, "--resident")) resident = v, i++;
+    else if (!strcmp(k, "--model-options")) model_options = v, i++;
     else if (!strcmp(k, "--mode")) mode = v, i++;
     else if (!strcmp(k, "--gpu-frac")) gpu_frac = atof(v), i++;
     else if (!strcmp(k, "--gpu-experts")) gpu_experts = atof(v), i++;
@@ -155,6 +157,7 @@ int main(int argc, char** argv) {
   o.run_ahead_sat_skip = ra_sat;
   o.embeddings = emb;
   o.resident = resident;
+  if (model_options) o.model_options = model_options;
   o.mode = mode;
   o.file_adapt = adapt;
   o.file_min_bytes = (int64_t)(min_gb * 1e9);
