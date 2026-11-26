@@ -104,6 +104,17 @@ enum SelfCheck {
             if (n.hasPrefix("gpuprof-") && n.hasSuffix(".txt")) || n.hasPrefix("p3out_") || (n.hasPrefix("tf-") && n.hasSuffix(".json"))
                 || n == "ui.json" || n == "probe.json" || (n.hasPrefix("selfcheck") && (n.hasSuffix(".json") || n.hasSuffix(".ids"))) { rm(u) }
         }
+        // conversations a self-check made and could not delete (a run that was stopped): only the self-check's own two
+        // prompts in them, nothing else
+        let mine: Set<String> = [chatPrompt, followPrompt]
+        for c in ConversationStore.loadAll() {
+            let users = c.messages.filter { $0.role == .user }.map(\.content)
+            if !users.isEmpty && users.allSatisfy({ mine.contains($0) }) {
+                ConversationStore.delete(c.id)
+                removed.append(["conversation": c.id.uuidString, "messages": c.messages.count])
+                log("SELFCHECK cleanup removed the self-check's conversation \(c.id.uuidString) (\(c.messages.count) messages)")
+            }
+        }
         let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
         for u in (try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil)) ?? []
             where u.lastPathComponent.hasPrefix("CFNetworkDownload_") && u.lastPathComponent.hasSuffix(".tmp") { rm(u) }
