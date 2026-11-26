@@ -444,6 +444,11 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let floorBytes: Int64 = 900_000_000  // the engine clamps to its own floor (a prefill layer's union + names)
         observers.append(nc.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil) { [weak self] _ in
             guard let self else { return }
+            // spare memory on: stop adding to the system's file cache for the rest of the session (reads go to storage
+            // as without it); the pages already there are the system's to drop
+            if let m = self.lock.withLock({ self.model }), m.counters.spare_memory == 1, m.pauseSpareMemory() {
+                log("DMENG memory warning: spare memory paused for the rest of the session")
+            }
             // iOS sends warnings during a prefill's 3.3 GB peak with 0.9-1.8 GB still available, and halving the
             // slab then halved the chat's decode speed. Shrink only when the available memory is below the floor, and
             // only by the shortfall (plus one record of slack per layer).
