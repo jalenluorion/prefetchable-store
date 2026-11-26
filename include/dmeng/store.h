@@ -502,6 +502,7 @@ struct Cache {
   // `value`. Read only if a free slot exists or the policy's victim has a keep-score below `value` (hazard: P(used at the
   // next token)); then the record keeps max(its keep-score, value) as its keep-score until step `until` has run (or its
   // first use), and is not pinned. Reads go to the readers' background class in bg_split pieces. Returns true if issued.
+  // With per-layer caps, a layer at its cap gives the slot from its own records (as a name does), else the pool.
   // Names only schedule reads: the outputs cannot change.
   bool read_bg_value(int L, int e, double value, long until);
   int bg_split = 2;  // pieces of a background read (one in flight: an urgent read shares the drive with at most half a record)

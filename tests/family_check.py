@@ -445,6 +445,31 @@ if wanted("caps"):
         except Exception as e:
             verdict("caps", "FAIL", str(e)[-400:])
 
+# ---------------------------------------------------------------------------------------------- background
+if wanted("background"):
+    if not routers:
+        verdict("background", "not supported for this family", "no router file: nothing names experts")
+    else:
+        try:
+            # background reads (the routers' next ranks in the drive's idle time) at 2K + 4 slots per layer, with and
+            # without per-layer caps: exact ids identical to no background reads, and the reads issued under caps too
+            cap_gb = (2 * K + 4) * sum(rb) / 1e9
+            got, bad = {}, []
+            for caps in ("none", "uniform", "uniform:fit"):
+                for bg in ("0", str(min(16, 2 * K + 2))):
+                    out, js = greedy(f"bg_{caps.replace(':', '_')}_{bg}", "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K),
+                                     "--layer-caps", caps, "--bg-ranks", bg, n=64)
+                    b = js.get("drive", {}).get("background", {})
+                    got[(caps, bg)] = (out, b.get("issued_per_token", 0.0), b.get("used_per_token", 0.0))
+            if len({v[0] for v in got.values()}) != 1:
+                bad.append("ids differ with background reads")
+            # (how many are issued depends on the drive's idle time and the policy's values, so it is reported, not required;
+            # the fixed reserve, 2K + holds unpinned, refuses a background read as it refuses a name at 2K + 4 slots)
+            verdict("background", "FAIL" if bad else "PASS", ("; ".join(bad) + " | " if bad else "") + "issued / used per token: " +
+                    ", ".join(f"{c} {v[1]:.2f} / {v[2]:.2f}" for (c, bg), v in got.items() if bg != "0") + "; ids identical")
+        except Exception as e:
+            verdict("background", "FAIL", str(e)[-400:])
+
 # ---------------------------------------------------------------------------------------------- lock
 if wanted("lock"):
     try:
