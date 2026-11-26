@@ -948,7 +948,12 @@ void Cache::hz_enter(int L, int slot, int e) {
 }
 
 Cache::~Cache() {
-  rd.stop();
+  rd.stop();  // (the readers joined, the drop thread's queue done)
+  // spare memory ends with the engine (a close, or a reopen in a mode without it): the records held in probation leave
+  // the file cache now, so nothing this engine put there outlives it
+  for (int p = 0; p < npools && !fmap.empty() && prob_slots_ > 0; p++)
+    for (int i = P[p].n; i < P[p].n + P[p].np; i++)
+      if (const Slot& x = P[p].s[i]; x.layer >= 0) msync(fmap[x.layer] + (size_t)x.e * P[p].rec, P[p].rec, MS_INVALIDATE);
   free_region(core_slab, core_slab_bytes);
   for (size_t i = 0; i < fmap.size(); i++) munmap(fmap[i], fmap_bytes[i]);
   for (int fd : fds) close(fd);

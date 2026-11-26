@@ -181,6 +181,7 @@ prompt path
   --prefill-gpu off (CPU only) --keep-scratch
   --run-ahead N (picks named while a step waits; 0 = off; the profile's: mac 8) --run-ahead-depth D (1)
   --run-ahead-budget X --run-ahead-max N --run-ahead-sat-skip 0|1   its limits (the profile's; built-in: none)
+  --spare-mem 0|1 --spare-gb X   spare memory, as dmeng (the profile's rule: phone, at least 11 GB, exact mode; 0|1 forces it)
   prefix cache: --ckpt-gb G --ckpt-min N (4) --park-gb G --ckpt-every N --disk DIR|none (default DIR/.dmeng/prefix) --disk-gb G
                 --disk-every N (Inkling: 1024) --preload | --no-preload
   --ahead-span N (512) --ahead-park 0|1 --ahead-min N (0)   idle-time prefill (the front end sends the predicted prefix;
@@ -581,6 +582,12 @@ int main(int argc, char** argv) {
   co.evict = a.evict;
   if (!a.layer_caps.empty()) co.layer_caps = a.layer_caps;
   co.cache_start_gb = cache_start;  // auto: slots for the ceiling reserved, the start size locked
+  co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;  // spare memory, resolved as in dmeng and the C API
+  co.spare_gb = ro.spare_gb;
+  co.spare_uses = ro.spare_uses;
+  co.spare_margin = ro.spare_margin;
+  co.spare_copy_mb = ro.spare_copy_mb;
+  ro.spare_mem = co.spare_mem;
   Core C;
   if (!C.init(M->info(), co, a.model, err) || !M->bind(C, err)) {
     fprintf(stderr, "load: %s\n", err.c_str());

@@ -314,10 +314,15 @@ typedef struct dm_counters_t {
 } dm_counters_t;
 int dm_counters(dm_engine* e, dm_counters_t* out);
 
-/* Spare memory (a probation tier in the OS file cache under the slab: the phone profile's rule, physical memory >= 11
- * GB, or model_options "run:spare-mem=0|1", "run:spare-gb=X"): for the rest of the session no read lands in the file
- * cache and every probation record's pages are dropped (at once when the engine is idle, else at its next step); reads
- * go to the slab as without it (a memory warning). Any thread; idempotent. DM_EINVAL if the tier is not on. */
+/* Spare memory (the model's files that the system keeps in memory the app does not own are used before reading the
+ * drive: records the slab has no room for are held in the OS file cache): on by default on the phone profile with at
+ * least 11 GB of physical memory in exact mode, off in fast mode (the profile's spare_memory rule, resolved at dm_open
+ * for the mode of that open; resolved.spare_memory / spare_memory_from / spare_memory_rule in dm_stats_json);
+ * model_options "run:spare-mem=0|1" (the app's switch) forces it off or on in either mode, "run:spare-gb=X" its budget.
+ * The mode is fixed per engine: a mode change is a new dm_open, and dm_close drops the file-cache pages the engine held.
+ * dm_spare_memory_pause: for the rest of the session no read lands in the file cache and the records held there are
+ * dropped (at once when the engine is idle, else at its next step); reads go to the slab as without it (a memory
+ * warning). Any thread; idempotent. DM_EINVAL if spare memory is not on. */
 int dm_spare_memory_pause(dm_engine* e);
 
 /* The store's pages the OS file cache holds now (bytes, mincore over the mapped store files): DM_MEM_FILE or spare

@@ -78,12 +78,19 @@ struct Preset {
   // on Flash-Next, measured in one process token by token, they raised the drive's effective rate 4-8% and the bytes
   // per token 2-8%, and the tokens did not get faster)
   int bg_ranks = 0, bg_gate = 0;
-  // the spare tier, a probation tier in the OS file cache under the slab (store.h, Cache::file_under): a profile's
-  // "spare_memory": {"min_physical_gb": G, "probation_gb": B} turns it on where the device has at least G GB of physical
-  // memory (hw.memsize), with a probation budget of B GB (undeclared: SPARE_GB_DEFAULT). Built-in: phone 11 and 6 (the
-  // 12 GB class); mac and phone-small undeclared (off)
+  // spare memory, a probation tier in the OS file cache under the slab (store.h, Cache::file_under): a profile's
+  // "spare_memory": {"min_physical_gb": G, "modes": [...], "probation_gb": B} turns it on where the device has at least G
+  // GB of physical memory (hw.memsize) and the mode in force is listed (as run_ahead's "modes": "exact" or "fast", by
+  // the engine mode's class; no "modes": every mode), with a probation budget of B GB (undeclared: SPARE_GB_DEFAULT).
+  // Built-in: phone 11, ["exact"], 6 (the 12 GB class; measured: on in exact, off in fast); mac and phone-small undeclared
+  // (off)
   double spare_min_gb = 0, spare_gb = 0;
   bool spare_mem = false;
+  bool spare_declared = false;          // the profile declares the rule
+  bool spare_device = false;            // the device meets min_physical_gb
+  bool spare_mode = true;               // the mode in force is listed (no "modes": true)
+  std::vector<std::string> spare_modes;  // the modes listed ("" none: every mode)
+  std::string spare_rule_json() const;  // {"min_physical_gb", "modes", "device", "mode"}: the rule and its two decisions
   // its promotion rule ("promote": {"uses": N, "margin": M}; store.h, Cache::prom_uses / prom_margin): 0 / NaN = undeclared
   int spare_uses = 0;
   double spare_margin = __builtin_nan(""), spare_copy_mb = -1;  // ("promote": {..., "copy_mb": X}; -1 undeclared)
@@ -125,8 +132,13 @@ struct Resolved {
   std::string layer_caps;  // "" = the core's rule
   double xtok_tau = 0.5;
   int rd_prio = -1, prefill_chunk = 1;
-  bool spare_mem = false;  // written only when on (the block is unchanged with it off), with its probation budget
-  double spare_gb = 0;     // and its promotion rule
+  // spare memory in force: written when on or when the profile declares the rule (the block is unchanged elsewhere),
+  // with where the decision came from ("explicit": --spare-mem / run:spare-mem; "rule": the profile's) and the rule with
+  // its device and mode decisions (Preset::spare_rule_json; "" when undeclared); when on, its probation budget and its
+  // promotion rule
+  bool spare_mem = false;
+  std::string spare_from, spare_rule;
+  double spare_gb = 0;
   int spare_uses = 3;
   double spare_margin = 0.1, spare_copy_mb = 32;
   int ctx = 0;             // the context positions in force, written only when the profile declares a ctx (else 0)
@@ -171,7 +183,7 @@ struct Given {
   std::optional<int> m, cand;
   std::optional<double> tau, xtok_tau;
   std::optional<bool> rd_prio;
-  std::optional<bool> spare_mem;        // --spare-mem 0|1: the spare tier (any profile: 1 forces it on)
+  std::optional<bool> spare_mem;        // --spare-mem 0|1: spare memory forced on or off (any profile, any mode)
   std::optional<double> spare_gb;       // --spare-gb X: its probation budget in GB
   std::optional<int> spare_uses;        // --spare-uses N: its promotion rule's distinct tokens of use (at least 2)
   std::optional<double> spare_margin;   // --spare-margin M: its promotion rule's keep-score margin
@@ -231,7 +243,8 @@ struct RunOpts {
   std::string draft = "none";
   int draft_max = 7;  // drafts per pass at most: explicit --draft-max, else the profile's drafts.max, else 7 (clamped to 1..7)
   int early = 0;
-  bool spare_mem = false;  // the spare tier (CoreOpts::spare_mem): explicit, else the profile's rule
+  bool spare_mem = false;  // spare memory (CoreOpts::spare_mem): explicit, else the profile's rule (by device and mode)
+  std::string spare_from;  // "explicit" | "rule" (the profile declares it) | "" (neither: off)
   double spare_gb = 0;     // its probation budget (CoreOpts::spare_gb): explicit, else the profile's, else SPARE_GB_DEFAULT
   int spare_uses = 3;      // its promotion rule (CoreOpts::spare_uses / spare_margin / spare_copy_mb): explicit, else the
   double spare_margin = 0.1, spare_copy_mb = 32;  // profile's, else these

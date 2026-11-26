@@ -455,7 +455,10 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   co.qos = (int)e->qos;
   if (o.reader_qos > 0) co.reader_qos = (int)qos_of(o.reader_qos - 1);
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
-  co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;  // model_options "run:spare-mem=1"
+  // spare memory: the profile's rule for this open's mode (phone: at least 11 GB, exact only), or the app's switch
+  // (model_options "run:spare-mem=0|1") in either mode. The mode is fixed per engine: a mode change is a new dm_open,
+  // which resolves it again, and dm_close drops what this engine held in the file cache (Cache::~Cache)
+  co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;
   co.spare_gb = ro.spare_gb;                            // model_options "run:spare-gb=X"
   co.spare_uses = ro.spare_uses;                        // "run:spare-uses=N", "run:spare-margin=M"
   co.spare_margin = ro.spare_margin;

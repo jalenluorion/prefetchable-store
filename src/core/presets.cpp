@@ -41,7 +41,12 @@ static const char* BUILTIN = R"({
   "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
           "run_ahead": {"picks": "top_k", "depth": 1}},
   "phone": {"mode": "fast", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
-            "spare_memory": {"min_physical_gb": 11.0, "probation_gb": 6.0},
+            "spare_memory": {"min_physical_gb": 11.0, "modes": ["exact"], "probation_gb": 6.0,
+                             "calibration": {"stand_in": "a 12 GB phone on the Mac (phone profile, 4 threads, the readers capped to the drive rate, the slab below), 500 tokens after the code prompt, two alternating runs each, tok/s off | on; exact ids identical on and off for both models",
+                                             "inkling2_loop": {"drive_gbs": 2.3, "slab_gb": 3.6, "exact": "4.26, 4.05 | 7.33, 7.40; drive 460 -> 166 MB per token, hit rate 0.81 -> 0.95, 4.0-4.3 GB of the store held by the system",
+                                                               "fast": "10.68, 11.22 | 7.72, 8.36; approx:drop:w=0.15, compute 57 -> 94-100 ms per token, one pressure shrink"},
+                                             "qwen3_5_moe": {"drive_gbs": 3.0, "slab_gb": 2.8, "exact": "11.72, 11.24 | 11.12, 14.18; drive 206 -> 100-154 MB per token", "fast": "16.61, 17.11 | 16.45, 16.03; approx:drop:w=0.15"},
+                                             "rule": "on in exact mode, off in fast mode"}},
             "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
   "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
                   "readers": 8, "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
@@ -160,6 +165,32 @@ static int top_k_of(const ms::Manifest* m, const std::string& dir) {
   if (!ms::json_load(dir + "/config.json", cfg, e)) return 0;
   const Json& tc = cfg["text_config"].kind == Json::OBJ ? cfg["text_config"] : cfg;
   return (int)tc["num_experts_per_tok"].i(0);
+}
+
+// a profile key's "modes" list (run_ahead, spare_memory): whether the mode in force is listed. An entry names a mode
+// ("exact" / "fast", or an engine string): it matches by the engine mode's class (lossless: exact, any other: fast), the
+// names rule's reading of a mode
+static bool mode_listed(const Json& modes, const std::string& engine_mode) {
+  const std::string cls = engine_mode == "lossless" ? "exact" : "fast";
+  for (auto& x : modes.arr) {
+    const std::string m = x.s();
+    if (m == cls || engine_mode_of(m) == engine_mode) return true;
+  }
+  return false;
+}
+
+std::string Preset::spare_rule_json() const {
+  char g[32];
+  snprintf(g, sizeof g, "%g", spare_min_gb);
+  std::string o = std::string("{\"min_physical_gb\":") + g + ",\"modes\":";
+  if (spare_modes.empty()) {
+    o += "null";
+  } else {
+    o += "[";
+    for (size_t i = 0; i < spare_modes.size(); i++) o += (i ? ",\"" : "\"") + spare_modes[i] + "\"";
+    o += "]";
+  }
+  return o + ",\"device\":" + (spare_device ? "true" : "false") + ",\"mode\":" + (spare_mode ? "true" : "false") + "}";
 }
 
 bool resolve_preset(const std::string& dir, const std::string& profile_req, const std::string& mode_req, const std::string& derived_dir,
@@ -384,20 +415,22 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.ra_budget = (*ra)["budget"].f(0);
     p.ra_max_tok = (int)(*ra)["max_tok"].i(0);
     p.ra_sat_skip = (*ra)["sat_skip"].kind == Json::BOOL && (*ra)["sat_skip"].b;
-    if ((*ra)["modes"].kind == Json::ARR) {  // on only in the listed modes (the phones: exact)
-      bool in = false;
-      for (auto& x : (*ra)["modes"].arr) in |= engine_mode_of(x.s()) == p.engine_mode;
-      if (!in) p.run_ahead = 0;
-    }
+    if ((*ra)["modes"].kind == Json::ARR && !mode_listed((*ra)["modes"], p.engine_mode)) p.run_ahead = 0;  // (the phones: exact)
   }
   if (const Json* rd = prof("readers"); rd && rd->kind == Json::NUM) p.readers = (int)rd->i(0);
-  // the spare tier (store.h, Cache::file_under): on where the device has at least min_physical_gb of physical memory
-  // (the phone: 11, the 12 GB class; a 6 or 8 GB phone has no spare pages), its probation budget probation_gb;
-  // undeclared = off
+  // spare memory (store.h, Cache::file_under): on where the device has at least min_physical_gb of physical memory (the
+  // phone: 11, the 12 GB class; a 6 or 8 GB phone has no spare pages) and the mode in force is in its "modes" (the phone:
+  // exact; none listed: every mode), its probation budget probation_gb; undeclared = off
   if (const Json* sm = prof("spare_memory"); sm && sm->kind == Json::OBJ && (*sm)["min_physical_gb"].kind == Json::NUM) {
+    p.spare_declared = true;
     p.spare_min_gb = (*sm)["min_physical_gb"].f(0);
     const double phys = physical_memory_bytes();
-    p.spare_mem = p.spare_min_gb > 0 && phys >= p.spare_min_gb * 1e9;
+    p.spare_device = p.spare_min_gb > 0 && phys >= p.spare_min_gb * 1e9;
+    if ((*sm)["modes"].kind == Json::ARR) {
+      for (auto& x : (*sm)["modes"].arr) p.spare_modes.push_back(x.s());
+      p.spare_mode = mode_listed((*sm)["modes"], p.engine_mode);
+    }
+    p.spare_mem = p.spare_device && p.spare_mode;
     if ((*sm)["probation_gb"].kind == Json::NUM) p.spare_gb = (*sm)["probation_gb"].f(0);
     if (const Json* pr = member(sm, "promote"); pr && pr->kind == Json::OBJ) {
       if ((*pr)["uses"].kind == Json::NUM) p.spare_uses = (int)(*pr)["uses"].i(0);
@@ -500,8 +533,12 @@ std::string Resolved::json() const {
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   o << ",\"resident\":" << qq(resident) << ",\"resident_bits\":" << resident_bits;
+  if (spare_mem || !spare_rule.empty()) {  // (on, or the profile declares the rule: the decision and its source)
+    o << ",\"spare_memory\":" << (spare_mem ? "true" : "false") << ",\"spare_memory_from\":" << qq(spare_from);
+    if (!spare_rule.empty()) o << ",\"spare_memory_rule\":" << spare_rule;
+  }
   if (spare_mem)
-    o << ",\"spare_memory\":true,\"spare_probation_gb\":" << spare_gb << ",\"spare_promote\":{\"uses\":" << spare_uses << ",\"margin\":" << spare_margin << ",\"copy_mb\":" << spare_copy_mb << "}";
+    o << ",\"spare_probation_gb\":" << spare_gb << ",\"spare_promote\":{\"uses\":" << spare_uses << ",\"margin\":" << spare_margin << ",\"copy_mb\":" << spare_copy_mb << "}";
   if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
   if (ctx > 0) o << ",\"ctx\":" << ctx;
   if (draft != "none") o << ",\"draft_max\":" << draft_max;  // (only while drafting: the block is unchanged with it off)
@@ -598,6 +635,8 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.rd_prio = rd_prio;
   x.prefill_chunk = prefill_chunk;
   x.spare_mem = spare_mem;
+  x.spare_from = spare_from;
+  if (profiled && preset.spare_declared) x.spare_rule = preset.spare_rule_json();
   x.spare_gb = spare_mem ? spare_gb : 0;
   x.spare_uses = spare_uses;
   x.spare_margin = spare_margin;
@@ -675,7 +714,10 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   // picks 4 positions ahead read 40-70 MB per token more than plain decoding and cancelled the passes' gain (early 0: fewer
   // MB per token than plain decoding at the same tokens per step); --early N still sets it
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
+  // spare memory: an explicit switch (--spare-mem, the C API's run:spare-mem: the app's) in any mode, else the profile's
+  // rule (the device's memory and the mode in force)
   r.spare_mem = g.spare_mem ? *g.spare_mem : pf ? P.spare_mem : r.spare_mem;
+  r.spare_from = g.spare_mem ? "explicit" : pf && P.spare_declared ? "rule" : "";
   r.spare_gb = g.spare_gb && *g.spare_gb > 0 ? *g.spare_gb : pf && P.spare_gb > 0 ? P.spare_gb : r.spare_gb > 0 ? r.spare_gb : SPARE_GB_DEFAULT;
   r.spare_uses = g.spare_uses ? std::max(2, *g.spare_uses) : pf && P.spare_uses > 0 ? std::max(2, P.spare_uses) : r.spare_uses;
   r.spare_margin = g.spare_margin ? *g.spare_margin : pf && P.spare_margin == P.spare_margin ? P.spare_margin : r.spare_margin;

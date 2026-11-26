@@ -145,11 +145,14 @@ outputs
   --drive-gbs X          bench only: the readers' combined drive rate capped at X GB/s (one clock across the reader
                          threads, prompt and decode reads alike; the wait counts as a slow read's), a slower drive's
                          stand-in; off by default and in every profile (C API: model_options "run:drive-gbs=X")
-  --spare-mem 0|1 --spare-gb X --spare-uses N --spare-margin M   the spare tier (include/dmeng/store.h): reads land in a probation tier in the OS file
-                         cache, their reuse moves them into the slab; on by the profile's rule (phone: at least 11 GB
-                         physical) or forced with 1 on any profile; X = its probation budget in GB (the profile's, else 6);
-                         a record used in N distinct tokens (3) moves into the slab if a slab slot is free or its keep
-                         score beats the record it would displace by M (0.1)
+  --spare-mem 0|1 --spare-gb X --spare-uses N --spare-margin M --spare-copy-mb X   spare memory (include/dmeng/store.h):
+                         the model's files that the system keeps in memory the app does not own are used before reading
+                         the drive (a record the slab has no room for is read into the OS file cache and used there; one
+                         reused across tokens moves into the slab). The default on a phone profile with at least 11 GB of
+                         physical memory in exact mode (off in fast mode: measured, docs/MANIFEST-PRESETS.md); 0|1
+                         forces it off or on in any profile and mode; X = the file cache's budget in GB (the profile's,
+                         else 6); a record used in N distinct tokens (3) moves into the slab if a slab slot is free or
+                         its keep score beats the record it would displace by M (0.1), at most X MB of moves per token (32)
   --state-check         after the decode, restore the state saved after the prompt (fixed + positional parts) and
                          decode again: the ids must be the same
   --prefill-chunk N      the prompt through the model's batched prefill in chunks of N (1: single steps); exact
@@ -565,6 +568,7 @@ int main(int argc, char** argv) {
   co.spare_uses = ro.spare_uses;
   co.spare_margin = ro.spare_margin;
   co.spare_copy_mb = ro.spare_copy_mb;
+  ro.spare_mem = co.spare_mem;  // (as applied: not with --mem file, whose whole cache is the file cache)
   co.drive_gbs = ro.drive_gbs;
   co.skip_reads = a.skip_reads;
   co.loop_hold = a.loop_hold;

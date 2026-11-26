@@ -11,7 +11,7 @@
  * --arms LIST (with --warm-n N): arms of one prompt in ONE process, each its own dm_open .. dm_close, in order, after a
  * warm-up open of N tokens (tier off): "off" (spare memory off: run:spare-mem=0), "on" (run:spare-mem=1), "nothing"
  * (spare memory on, but each record's pages leave the file cache when the slab evicts it: file_evict_hint 2, the OS
- * keeping no spare pages). An arm name followed by "+warm" (on+warm) keeps the file cache the previous arm left; every
+ * keeping no spare pages), "rule" (no run:spare-mem: the profile's rule for the arm's mode decides). An arm name followed by "+warm" (on+warm) keeps the file cache the previous arm left; every
  * other arm starts with the store's pages dropped from the file cache (msync MS_INVALIDATE over each store file: no
  * sudo; the resident fraction before and after is printed). Per arm: tok/s, MB per token read by the readers, MB per
  * token served by the file cache, the process's drive bytes per token (proc_pid_rusage diskio, decode only), wait ms
@@ -229,8 +229,9 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   char mo[1024], v[64], mode_s[64] = "", mem_s[16] = "", drive[64] = "";
   const int nothing = !strncmp(arm, "nothing", 7);
   int on = nothing || !strncmp(arm, "on", 2);
+  int rule = !strncmp(arm, "rule", 4);  /* spare memory as the profile's rule decides for the arm's mode */
   const int warm = strstr(arm, "+warm") != NULL;
-  if (arm_opt(arm, "spare", v, sizeof v)) on = atoi(v) != 0;
+  if (arm_opt(arm, "spare", v, sizeof v)) on = atoi(v) != 0, rule = 0;
   if (arm_opt(arm, "mode", mode_s, sizeof mode_s)) o.mode = mode_s;
   if (arm_opt(arm, "mem", mem_s, sizeof mem_s))
     o.memory_mode = !strcmp(mem_s, "file") ? DM_MEM_FILE : !strcmp(mem_s, "plain") ? DM_MEM_PLAIN : DM_MEM_MLOCK;
@@ -259,7 +260,9 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
       if (c) *c = '=';
       snprintf(extra + strlen(extra), sizeof extra - strlen(extra), ";run:%s", t);
     }
-  snprintf(mo, sizeof mo, "%s%srun:spare-mem=%d%s%s", o.model_options ? o.model_options : "", o.model_options && *o.model_options ? ";" : "", on,
+  char sw[32] = "";
+  if (!rule) snprintf(sw, sizeof sw, "run:spare-mem=%d", on);
+  snprintf(mo, sizeof mo, "%s%s%s%s%s", o.model_options ? o.model_options : "", o.model_options && *o.model_options && *sw ? ";" : "", sw,
            drive, extra);
   o.model_options = mo;
   if (nothing) o.file_evict_hint = 2;
@@ -337,13 +340,13 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   const double wait = (c1.wait_ms - c0.wait_ms) / steps;
   char line[32768];
   snprintf(line, sizeof line,
-           "{\"arm\":\"%s\",\"mode\":\"%s\",\"mem\":%d,\"threads\":%d,\"readers\":%d,\"spare_memory\":%d,\"evict_hint\":%d,\"store_cache_gb_before\":%.2f,"
-           "\"store_cache_gb_at_start\":%.2f,\"store_cache_gb_at_end\":%.2f,\"cache_gb\":%.2f,\"load_s\":%.2f,\"prefill_s\":%.2f,\"prefill_mb\":%.0f,"
+           "{\"arm\":\"%s\",\"mode\":\"%s\",\"mem\":%d,\"threads\":%d,\"readers\":%d,\"spare_memory\":%d,\"evict_hint\":%d,\"store_cache_gb_before\":%.4f,"
+           "\"store_cache_gb_at_start\":%.4f,\"store_cache_gb_at_end\":%.4f,\"cache_gb\":%.2f,\"load_s\":%.2f,\"prefill_s\":%.2f,\"prefill_mb\":%.0f,"
            "\"tokens\":%d,\"measured_tokens\":%d,\"tok_s\":%.3f,\"ms_per_token\":%.2f,\"wait_ms_per_token\":%.2f,\"compute_ms_per_token\":%.2f,"
            "\"hit_rate\":%.4f,\"mb_drive_counter_per_token\":%.2f,\"mb_spare_per_token\":%.2f,\"mb_disk_rusage_per_token\":%.2f,"
            "\"read_gb_s_busy\":%.3f,\"pageins_per_token\":%.2f,\"file_refaults_per_token\":%.3f,\"teacher_forced\":%d,\"agreement_with_exact\":%.4f,"
            "\"tok_s_first_300\":%.3f,\"peak_footprint_gb\":%.2f,\"mb_by_pool_per_token\":[%.2f,%.2f],\"loop\":%s,\"reads\":%s,\"run_ahead\":%s,\"approx\":%s,"
-           "\"sampler\":{\"temp\":%g,\"top_k\":%d,\"top_p\":%g,\"min_p\":%g,\"seed\":%llu},\"step_n\":%d,\"calls\":%d,\"tokens_per_call\":%.3f,\"draft\":%s,\"resolved\":%.*s}",
+           "\"probation_gb_at_end\":%.4f,\"sampler\":{\"temp\":%g,\"top_k\":%d,\"top_p\":%g,\"min_p\":%g,\"seed\":%llu},\"step_n\":%d,\"calls\":%d,\"tokens_per_call\":%.3f,\"draft\":%s,\"resolved\":%.*s}",
            arm, o.mode ? o.mode : "", inf.memory_mode, inf.threads, inf.readers, c1.spare_memory, o.file_evict_hint, before, at_start,
            store_cache_gb(model, 0), inf.cache_bytes / 1e9, load_s, prefill_s, sr.mb_read, k, k - k0, (k - k0) / (dec_ms / 1e3),
            dec_ms / steps, wait, dec_ms / steps - wait, picks ? (double)(c1.hits - c0.hits) / picks : 0,
@@ -351,7 +354,7 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
            (c1.bytes_read - c0.bytes_read) / 1e9 / ((c1.read_busy_ns - c0.read_busy_ns) / 1e9 + 1e-12), (double)(pi1 - pi0) / steps,
            (double)(c1.file_refaults - c0.file_refaults) / steps, force != NULL, forced ? (double)agree / forced : -1.0,
            t300 > 0 ? 300 / ((t300 - td) / 1e3) : -1.0, arm_peak / 1e9, (pool1[0] - pool0[0]) * 1e3 / steps, (pool1[1] - pool0[1]) * 1e3 / steps, loop, reads, ra, apx,
-           g_s.temp, g_s.top_k, g_s.top_p, g_s.min_p, (unsigned long long)g_s.seed, stepn, calls, calls ? (double)(k - k0) / calls : 0.0, drj, rlen, rs);
+           c1.probation_bytes / 1e9, g_s.temp, g_s.top_k, g_s.top_p, g_s.min_p, (unsigned long long)g_s.seed, stepn, calls, calls ? (double)(k - k0) / calls : 0.0, drj, rlen, rs);
   printf("%s\n", line);
   fflush(stdout);
   if (jf) fprintf(jf, "%s\n", line), fflush(jf);

@@ -225,6 +225,17 @@ app.
 | Qwen3.6-35B-A3B | published app, out of the box | 11 |
 | Inkling 2 Mini | published app, out of the box | 4 |
 
+**Spare memory.** On phones with at least 11 GB (the iPhone 17 Pro class), the model's files that the system keeps in
+memory the app does not own are used before reading the drive: experts the app's cache has no room for stay in the
+system's file cache and are used from there, and one that keeps being used moves into the app's cache. It is on by
+default there in exact mode and off in fast mode, by measurement on a 12 GB-phone stand-in (the Mac under the phone
+profile, the drive capped to the phone's rate, two runs each, tokens/s off / on): Inkling 2 Mini exact 4.1-4.3 / 7.3-7.4
+(460 -> 166 MB per token from the drive), fast 10.7-11.2 / 7.7-8.4; Qwen3.6-35B-A3B exact 11.2-11.7 / 11.1-14.2
+(206 -> 100-154 MB per token), fast 16.6-17.1 / 16.0-16.5.
+Exact tokens are the same either way. The app's switch (Settings › Diagnostics, shown where it is on) overrides the
+default, and a choice made there holds in either mode ([docs/MANIFEST-PRESETS.md](docs/MANIFEST-PRESETS.md),
+`spare_memory`).
+
 The run records behind the tables of Qwen3.6-35B-A3B and Inkling 2 Mini on the Mac and the iPhone 15 Plus are in
 [results/headline](results/headline).
 
