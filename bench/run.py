@@ -293,7 +293,7 @@ def row_of(a, runs_dir, base_meta, refs):
                top_k_in_named16=named.get("top_k_in_named16"), router_ms_per_token=rt.get("router_ms_per_token", rt.get("ms_per_token")),
                weight_replaced=ap.get("weight_replaced") if ap.get("on") else None,
                steps_with_a_replacement=ap.get("steps_with_a_replacement") if ap.get("on") else None,
-               weight_read_now=ap.get("weight_read_now") if ap.get("on") else None, bg_per_token=ap.get("bg_per_token") if ap.get("on") else None,
+               weight_read_now=ap.get("weight_read_now") if ap.get("on") else None,
                draft_tokens_per_step=get(dr, "tokens_per_step"), draft_accepted=get(dr, "accepted"), draft_offered=get(dr, "offered"),
                footprint_peak_gb_engine=t.get("footprint_peak_gb"),
                peak_footprint_gb=g.get("peak_footprint_gb_time") if g.get("peak_footprint_gb_time") is not None else g.get("peak_footprint_gb_guard"),

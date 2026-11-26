@@ -44,8 +44,8 @@ bool Approx::preset(const std::string& spec) {
   // read_w; Flash-Next's capped form also mass = read_mass and late = -1 (a light pick in flight is not waited for)
   const size_t c = spec.find(':');
   if (spec.substr(0, c) != "drop") return false;
-  late_ms = 1000;  // P2 (phone sizes): a missing pick of weight <= 0.1 is left out (no substitute, no renormalisation of
-  read_w = 0.1;    // the kept weights), so no floor of experts in memory is needed
+  late_ms = 1000;  // a missing pick of weight <= 0.1 is left out (no substitute, no renormalisation of the kept weights);
+  read_w = 0.1;    // a pick in flight is waited for
   read_mass = 2;
   for (size_t i = c == std::string::npos ? spec.size() : c + 1; i < spec.size();) {
     size_t j = spec.find(':', i);

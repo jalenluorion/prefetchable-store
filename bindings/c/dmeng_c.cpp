@@ -78,20 +78,9 @@ struct dm_engine {
   double ab_n[2] = {0, 0}, ab_ms[2] = {0, 0}, ab_wait[2] = {0, 0}, ab_mb[2] = {0, 0}, ab_urg[2] = {0, 0}, ab_named[2] = {0, 0};
   // drafting (dm_step_n): the controller dmeng and dmserve run (draft.h), over the prefix cache's live sequence as in
   // dmserve's worker; null when the resolved drafting is none (then nothing of it is allocated)
-  struct PcTarget : DraftTarget {
-    PrefixCache& pc;
-    LM& lm;
-    PcTarget(PrefixCache& p, LM& l) : pc(p), lm(l) {}
-    int pos() const override { return lm.pos(); }
-    void step(int id) override { pc.step(id, nullptr); }
-    const float* logits() const override { return pc.logits(); }
-    bool verify(const int* ids, int n) override { return pc.verify(ids, n); }
-    const float* logits_at(int i) const override { return pc.logits_at(i); }
-    void commit(int a) override { pc.commit(a); }
-  };
   std::unique_ptr<Drafter> dr;
   std::unique_ptr<HeadSource> hs;
-  std::unique_ptr<PcTarget> tgt;
+  std::unique_ptr<PrefixTarget> tgt;
   std::vector<int32_t> dhist;               // the drafter's sequence: the live one + the token fed
   std::vector<int> dgot, dstop;             // one call's produced tokens, its stop ids
   std::vector<int32_t> shist;               // the sampler's history (the caller's + this call's tokens before the one drawn)
@@ -531,7 +520,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   }
   if (mode != "lossless") {  // fast, or its rule as an engine string (dmeng --mode)
     const std::string md = mode;
-    const std::string preset = md == "approx" ? "" : md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
+    const std::string preset = md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
     if (!e->C->ns.preset(preset)) {  // drop[:w=W] (Approx::preset; Flash-Next's capped form :mass=M:late=-1)
       g_err = "mode: exact|fast|lossless|approx:drop[:w=W], got " + md;
       return nullptr;
@@ -650,7 +639,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       std::string ce;
       if (stat(e->draft_cost.c_str(), &sb) == 0 && !dr.load_cost(e->draft_cost, ce)) fprintf(stderr, "dmeng: %s (the family's prior)\n", ce.c_str());
     }
-    e->tgt = std::make_unique<dm_engine::PcTarget>(*e->pc, *e->lm);
+    e->tgt = std::make_unique<PrefixTarget>(*e->pc, *e->lm);
   } else if (draft_cost != "\x01" && !draft_cost.empty() && draft_cost != "none") {
     fprintf(stderr, "dmeng: run:draft-cost without drafting: ignored\n");
   }

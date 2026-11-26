@@ -134,7 +134,6 @@ struct Args {
   int rd_prio = -1, rt_cand = 16, name_gate = 0;
   // the user-facing surface (include/dmeng/presets.h)
   std::string profile = "auto", mode;
-  int drafts = -1;
   int fast_head = 1;  // the screened head (exact) for greedy and top-k <= 64 requests; 0 = the full head always
   bool print_defaults = false;
   std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
@@ -513,7 +512,7 @@ int main(int argc, char** argv) {
   }
   a.gpu_frac = ro.gpu_frac, a.gpu_experts = ro.gpu_experts;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
-  a.readers = ro.readers, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early, a.chunk = ro.prefill_chunk;
+  a.readers = ro.readers, a.draft = ro.draft, a.early = ro.early, a.chunk = ro.prefill_chunk;
   a.draft_max = ro.draft_max;  // (--draft-max is a run setting: explicit, else the profile's drafts.max, else 7)
   if (ro.bg_ranks > 0) {  // background reads are a dmeng option only: say so, never resolve to something not done
     fprintf(stderr, "dmserve: the profile's background reads (ranks %d) are not implemented in the server: off\n", ro.bg_ranks);
@@ -614,7 +613,7 @@ int main(int argc, char** argv) {
     C.hook = &xt;
   }
   if (a.mode != "lossless") {  // opt-in approximate mode, as dmeng --mode
-    const std::string preset = a.mode == "approx" ? "" : a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
+    const std::string preset = a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
     if (!C.ns.preset(preset)) {
       fprintf(stderr, "--mode exact|fast|lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
       return 2;
@@ -733,17 +732,7 @@ int main(int argc, char** argv) {
     if (!M->set_option("verify_old", "1", e)) fprintf(stderr, "dmserve: --verify-old: %s\n", e.c_str());
   }
   C.chunk_names = a.verify_names != 0;
-  struct PcTarget : DraftTarget {
-    PrefixCache& pc;
-    LM& lm;
-    PcTarget(PrefixCache& p, LM& l) : pc(p), lm(l) {}
-    int pos() const override { return lm.pos(); }
-    void step(int id) override { pc.step(id, nullptr); }
-    const float* logits() const override { return pc.logits(); }
-    bool verify(const int* ids, int n) override { return pc.verify(ids, n); }
-    const float* logits_at(int i) const override { return pc.logits_at(i); }
-    void commit(int a2) override { pc.commit(a2); }
-  } tgt(pc, lm);
+  PrefixTarget tgt(pc, lm);
   AheadRunner ahead(lm, pc, a.ahead_span > 0 ? a.ahead_span : a.span, a.span, a.ahead_park, a.ahead_min);
   std::unique_ptr<HotSet> hot;
   if (!a.hotset.empty()) hot.reset(new HotSet(lm, a.hotset));

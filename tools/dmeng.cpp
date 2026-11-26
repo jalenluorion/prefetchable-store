@@ -243,7 +243,6 @@ struct Args {
   bool skip_reads = false, router_stats = false, loop_hold = true, state_check = false;
   // the user-facing surface (include/dmeng/presets.h)
   std::string profile = "auto", prompt_text, reasoning_effort;
-  int drafts = -1;
   bool cache_auto = false, print_defaults = false, chat = false;
   MemRule mr;
   std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
@@ -538,7 +537,7 @@ int main(int argc, char** argv) {
   if (!set_start_rule(a.mr, ro.cache_start, err)) return die("cache", err);
   a.prefill_gpu_frac = ro.gpu_frac, a.prefill_gpu_experts = ro.gpu_experts, a.prefill_chunk = ro.prefill_chunk;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
-  a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early;
+  a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.draft = ro.draft, a.early = ro.early;
   a.draft_max = ro.draft_max;  // (--draft-max is a run setting: explicit, else the profile's drafts.max, else 7)
   LoadOpts lo;
   std::string family;
@@ -670,7 +669,7 @@ int main(int argc, char** argv) {
 
   // ---- the mode
   if (a.mode != "lossless") {
-    const std::string preset = a.mode == "approx" ? "" : a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
+    const std::string preset = a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
     if (!C.ns.preset(preset)) {
       fprintf(stderr, "--mode lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
       return 2;

@@ -17,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "dmeng/draft.h"
 #include "dmeng/lm.h"
 
 namespace dm {
@@ -139,6 +140,19 @@ class PrefixCache {
   void park_live(int keep_upto);
   bool load_disk(const std::vector<int>& ids, int& got, double& ms_preload, int& npre, int cut = 1);
   int best_disk(const std::vector<int>& ids, std::string& path, int cut = 1) const;
+};
+
+// The drafter's target over a prefix cache's live sequence (dmserve's worker and the C API draft through it)
+struct PrefixTarget : DraftTarget {
+  PrefixCache& pc;
+  LM& lm;
+  PrefixTarget(PrefixCache& p, LM& l) : pc(p), lm(l) {}
+  int pos() const override { return lm.pos(); }
+  void step(int id) override { pc.step(id, nullptr); }
+  const float* logits() const override { return pc.logits(); }
+  bool verify(const int* ids, int n) override { return pc.verify(ids, n); }
+  const float* logits_at(int i) const override { return pc.logits_at(i); }
+  void commit(int a) override { pc.commit(a); }
 };
 
 }  // namespace dm

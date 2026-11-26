@@ -105,7 +105,7 @@ struct Approx {
   double read_mass = 2;    // ... then the largest missing picks until the step's missing released weight <= read_mass
   double late_ms = 1000;   // a light pick (weight <= read_w) still in flight: >= 1000 waited for; < 0 left out at once
   bool prio = true, cancel = true;  // reader settings that go with it: nearest step first, stale reads dropped
-  // statistics (left out: "replaced" in the names, as the statistics have always been keyed)
+  // statistics (the picks left out are counted under the "replaced" keys the JSON reports)
   double steps = 0, w_replaced = 0, n_replaced = 0, n_read_now = 0, w_read_now = 0, n_late_waited = 0, n_late_dropped = 0,
          steps_replaced = 0, w_replaced_max = 0;
   double w_hist[6] = {0};  // left-out picks by released weight: <.02, <.05, <.1, <.2, <.4, >=.4

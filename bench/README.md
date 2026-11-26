@@ -109,7 +109,7 @@ The wall-clock columns follow. A wall-clock figure is marked `!` when the others
 - the timed run's `hit_rate`, `late_rate`, `miss_rate` and `hit_rate_looped` / `hit_rate_other`;
 - from `read_queue`: `misses_per_token`, `late_per_token`, `wait_miss_ms_per_token`; from `drive`: `gb_s_while_busy` (the one drive rate: reader bytes / wall time with a read in flight);
 - the routers' `top_k_in_named8/12/16` and `router_ms_per_token`;
-- the approx cells' `weight_replaced`, `steps_with_a_replacement`, `weight_read_now` and `bg_per_token`;
+- the approx cells' `weight_replaced`, `steps_with_a_replacement` and `weight_read_now`;
 - from `draft`, when it is used: `tokens_per_step`, `accepted` and `offered`;
 - `policy_ms_per_token`, the swap growth, and `time -l`'s whole-process `proc_ins` / `proc_cyc`;
 - for the counting run: `work_*`, `main_serial_*`, `spin_*`, `pool_runs`, `useful_*_per_token`, `cnt_reclaims` and
