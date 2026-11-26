@@ -818,20 +818,26 @@ int Cache::name(int L, int e, long step, int reserve, int fit_names) {
 
 bool Cache::read_bg_value(int L, int e, double value, long until) {
   const size_t k = (size_t)L * NE + e;
-  if (tab[k] >= 0 || !hazard_evict || rk.on || !lcap.empty() || mem == Mem::PURGEABLE) return false;
+  if (tab[k] >= 0 || !hazard_evict || rk.on || mem == Mem::PURGEABLE) return false;
   if (floor_v.empty()) {
     floor_v.assign((size_t)NL * NE, 0.f);
     floor_until.assign((size_t)NL * NE, -1);
   }
   SlotPool& S = pool(L);
+  // per-layer caps: a layer at its cap takes a background read's slot from its own records, as a name does (the same
+  // reserve, the same value test); below its cap the pool's choice, as without caps
+  const bool capped = !lcap.empty() && lheld[L] >= lcap[L];
   int v;
-  if (!S.free_.empty()) {
+  if (!capped && !S.free_.empty()) {
     v = S.free_.back();
     S.free_.pop_back();
   } else {
     PolicyTimer pt(st.policy_ms);
     hz_tick(tok_now);
-    v = hz_victim(L, false, 2 * K + extra_reserve[layer_pool[L]]);
+    // the reserve a name leaves in its layer (2K + holds; with :fit, what the cap leaves after a step's names and holds)
+    int reserve = 2 * K + extra_reserve[layer_pool[L]];
+    if (capped && cap_fit) reserve = std::min(reserve, std::max(0, lcap[L] - K - (layer_hold.empty() ? 0 : layer_hold[L])));
+    v = hz_victim(L, capped, reserve);
     if (v < 0) return false;
     const Slot& x = S.s[v];
     if (x.layer >= 0 && keep_score(x.layer, x.e, tok_now) >= value) {
