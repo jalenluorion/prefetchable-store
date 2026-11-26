@@ -45,12 +45,13 @@ struct ReplyRecord: Codable {
     var memoryWarnings: Int = 0
     /// "cold", "live prefix" or "restored prefix" (ReplyDetail.prefill).
     var prefillKind: String?
-    /// What the UI showed at the end of the reply: the live decode rate (tokens / the engine's decode clock, prefill
-    /// excluded), the time to the first token (send -> first piece, wall), MB per token (1e6 B) since the prefill.
+    /// What the UI showed at the end of the reply: the speed (GenSpeed.rate over the message's rounds so far), the time to
+    /// the first token (send -> first piece, wall), MB per token (1e6 B) since the prefill.
     var uiDecodeTokPerSec: Double?
     var uiTtftMs: Double?
     var uiMBPerToken: Double?
-    /// The engine's split rate (GenerationResult.tokPerSec) and the UI's difference from it, in percent.
+    /// The engine counters' rate over the same rounds (dm_counters: decode steps / time inside dm_step) and the shown
+    /// speed's difference from it, in percent.
     var engineTokPerSec: Double?
     var uiRateDiffPct: Double?
     /// The round's wall time, generate call to the stream's end (tool rounds).
@@ -208,10 +209,23 @@ final class ChatModel: ObservableObject {
     }
     @Published var prefixStatus = ""
 
-    // live stats. replyTokPerSec: the reply's decode rate so far = generated tokens / the engine's decode clock (from the
-    // first sample to this token; prefill, template and prefix restore excluded).
+    // live stats. replyTokPerSec: the one speed figure (GenSpeed.rate: tokens generated / the engine's generating time,
+    // over every round of the message so far; the prompt, tool rounds and background time excluded). The live line, the
+    // caption, the status line, Diagnostics and the Copy text all read it (or replySpeed, its parts).
     @Published var lastTokPerSec: Double = 0
-    @Published var replyTokPerSec: Double = 0
+    @Published private(set) var replyTokPerSec: Double = 0
+    /// The figure's parts: the message's rounds so far (live) / at the end of its last round.
+    private(set) var replySpeed = GenSpeed()
+    /// The finished rounds of the message being generated: the shown speed's and the engine counters' (RATE line).
+    private var messageSpeed = GenSpeed(), messageEngine = GenSpeed(), messageRounds = 0
+    private func showSpeed(_ sp: GenSpeed) {
+        replySpeed = sp
+        replyTokPerSec = sp.rate
+    }
+    /// The engine's "Last reply in detail" rows with its Speed row as the message's (the one figure).
+    var lastReplyRows: [(String, String)] {
+        engine.lastReplyRows.map { $0.0 == "Speed" ? ("Speed", replySpeed.detail) : $0 }
+    }
     @Published var mbPerToken: Double = 0
     /// Time to the first token of the reply in progress (send -> first piece, wall ms); nil until it arrives.
     @Published var replyTtftMs: Double?
@@ -690,7 +704,7 @@ final class ChatModel: ObservableObject {
             return String(format: "%d tokens · %.1f tok/s", liveTokens, replyTokPerSec)
         }
         if let s = lastSummary, s.tokens > 0 {
-            var parts = [String(format: "%.1f tok/s", s.meanTokPerSec)]
+            var parts = [String(format: "%.1f tok/s", replyTokPerSec)]
             if let t = lastTtftMs { parts.append(String(format: "first token %.1f s", t / 1000)) }
             return parts.joined(separator: " · ")
         }
@@ -715,7 +729,7 @@ final class ChatModel: ObservableObject {
             return replyTokPerSec > 0 ? String(format: "Replying · %.1f tokens/s", replyTokPerSec) : "Replying…"
         }
         if let s = lastSummary, s.tokens > 0 {
-            var parts = [String(format: "%.1f tokens/s", s.meanTokPerSec)]
+            var parts = [String(format: "%.1f tokens/s", replyTokPerSec)]
             if let t = lastTtftMs { parts.append(String(format: "started in %.1f s", t / 1000)) }
             return parts.joined(separator: " · ")
         }
@@ -798,6 +812,7 @@ final class ChatModel: ObservableObject {
         let mx = maxNew ?? AppSettings.maxTokens
         let think = engine.thinking
         let tSend = Date()
+        messageSpeed = GenSpeed(); messageEngine = GenSpeed(); messageRounds = 0  // the speed over this message's rounds
         // round 1; then, while the answer ends in a complete tool call: run it, append the call and the result, generate
         // again from the engine's live state (only the result is prefilled)
         var rounds: [ReplyRecord] = []
@@ -1044,7 +1059,8 @@ final class ChatModel: ObservableObject {
         var toolStopSent = false
         prefill = expectedPrefill(history: history, convID: convID, waiting: false)
 
-        replyTokPerSec = 0
+        showSpeed(messageSpeed)  // the message's rounds before this one (none: 0)
+        var roundSpeed = GenSpeed()
         mbPerToken = 0
         replyTtftMs = nil
         var rec = ReplyRecord(prompt: prompt, thinking: think, tokens: 0, reason: StopReason.cancelled.rawValue,
@@ -1074,8 +1090,7 @@ final class ChatModel: ObservableObject {
                 batch.stats = nil
                 liveTokens = batch.n
                 lastTokPerSec = st.tokPerSec
-                // decode rate: tokens over the engine's decode clock (prefill excluded), as the engine's split rate
-                replyTokPerSec = st.decodeSeconds > 0 ? Double(st.index + 1) / st.decodeSeconds : 0
+                showSpeed(messageSpeed + st.speed)
                 mbPerToken = st.mbTotal > 0 ? st.mbTotal / Double(st.index + 1) : batch.mbSum / Double(max(1, batch.n))
                 inMemory = st.inMemory
                 expertsInMemory = st.expertsInMemory
@@ -1127,6 +1142,7 @@ final class ChatModel: ObservableObject {
                     mbSum += st.mbRead
                     batch.text += piece
                     batch.stats = st
+                    roundSpeed = st.speed
                     batch.n = n
                     batch.mbSum = mbSum
                     let since = ProcessInfo.processInfo.systemUptime - batch.last
@@ -1152,6 +1168,7 @@ final class ChatModel: ObservableObject {
                     rec.seconds = s.seconds
                     rec.meanTokPerSec = s.meanTokPerSec
                     rec.meanMBPerToken = s.meanMBPerToken
+                    roundSpeed = s.speed  // the round's every step, the one that produced the stop included
                 }
             }
         } catch {
@@ -1161,10 +1178,14 @@ final class ChatModel: ObservableObject {
         flush()  // the batch's rest (the text and the stats bar before the caption)
         if !finished {
             rec.tokens = n
-            rec.seconds = Date().timeIntervalSince(t0)
-            rec.meanTokPerSec = rec.seconds > 0 ? Double(n) / rec.seconds : 0
+            rec.seconds = roundSpeed.seconds
+            rec.meanTokPerSec = roundSpeed.rate
             rec.meanMBPerToken = n > 0 ? mbSum / Double(n) : 0
         }
+        // the message's speed: this round added to the ones before it (the figure every screen shows from here)
+        messageSpeed = messageSpeed + roundSpeed
+        messageRounds += 1
+        showSpeed(messageSpeed)
         rec.text = conversation(convID)?.messages.last(where: { $0.id == aid })?.content ?? ""
         rec.wallMs = Date().timeIntervalSince(t0) * 1000
         rec.memoryWarnings = memoryWarnings - warnings0
@@ -1179,7 +1200,15 @@ final class ChatModel: ObservableObject {
             lastSplit = d.split
             lastPrefill = d.prefillStats
             lastPrefillKind = d.prefill
-            rec.engineTokPerSec = d.tokPerSec
+            if let es = d.split?["engine_steps"], let et = d.split?["engine_step_s"] {
+                messageEngine = messageEngine + GenSpeed(steps: Int(es), seconds: et)
+            }
+        }
+        // the shown figure beside the engine counters' over the same rounds (SelfCheck.rateOK: within 2%)
+        if messageEngine.steps > 0 {
+            rec.engineTokPerSec = messageEngine.rate
+            rec.split?["rate_shown"] = replyTokPerSec
+            rec.split?["rate_engine"] = messageEngine.rate
         }
         // what the UI shows at the end of the reply (the stats bar, the settings sheet), logged next to the engine's
         lastTtftMs = rec.firstTokenMs
@@ -1187,7 +1216,7 @@ final class ChatModel: ObservableObject {
             rec.uiDecodeTokPerSec = replyTokPerSec
             rec.uiMBPerToken = mbPerToken
             rec.uiTtftMs = rec.firstTokenMs
-            if let e = rec.engineTokPerSec, e > 0 { rec.uiRateDiffPct = 100 * (replyTokPerSec - e) / e }
+            if let e = rec.engineTokPerSec, e > 0 { rec.uiRateDiffPct = 100 * (replyTokPerSec - e) / e }  // (RATE line)
         }
         // the message's caption and the conversation's token count, saved with it
         var meta = MessageMeta(tokens: rec.tokens, reason: rec.error != nil ? "error" : rec.reason)
@@ -1220,6 +1249,13 @@ final class ChatModel: ObservableObject {
         prefixStatus = engine.prefixCacheStatus
         log(String(format: "REPLY tokens=%d reason=%@ %.2f tok/s %.1f MB/token", rec.tokens, rec.reason,
                    rec.meanTokPerSec, rec.meanMBPerToken))
+        // one line per reply: the shown figure (the message's rounds so far) beside the engine counters' over the same rounds
+        log(String(format: "RATE reply=%d shown %.3f tokens/s (%d steps, %.2f s generating, %d round%@; this round %.2f s wall) engine counters %@ caption %@",
+                   replyNo, replySpeed.rate, replySpeed.steps, replySpeed.seconds, messageRounds, messageRounds == 1 ? "" : "s",
+                   (rec.wallMs ?? 0) / 1000,
+                   messageEngine.steps > 0 ? String(format: "%.3f tokens/s (%d steps, %.2f s in dm_step) diff %+.2f%%", messageEngine.rate,
+                                                    messageEngine.steps, messageEngine.seconds, rec.uiRateDiffPct ?? 0) : "n/a",
+                   meta.decodeTokPerSec.map { String(format: "%.3f", $0) } ?? "none"))
         memSample("end of reply \(replyNo) (\(rec.tokens) tokens, \(rec.reason))")
         return rec
     }

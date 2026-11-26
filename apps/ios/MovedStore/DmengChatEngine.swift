@@ -175,7 +175,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     }
 
     /// Rows for one reply: the counters at the decode's start and end, its tokens and seconds.
-    static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, seconds: Double) -> [(String, String)] {
+    static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, speed: GenSpeed) -> [(String, String)] {
+        let seconds = speed.seconds
         let n = Double(max(1, tokens))
         let ms = 1000 * seconds / n
         let wait = (c1.wait_ms - c0.wait_ms) / n
@@ -185,7 +186,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let picks = Double(c1.picks &- c0.picks)
         let vm = MemProbe.vmInfo()
         var r: [(String, String)] = [
-            ("Speed", String(format: "%.2f tokens/s (%d tokens in %.1f s)", Double(tokens) / max(1e-9, seconds), tokens, seconds)),
+            ("Speed", speed.detail),  // this round's; ChatModel.lastReplyRows shows the message's (GenSpeed)
             ("Read from storage", String(format: "%.1f MB per token", read / 1e6 / n)),
         ]
         if c1.spare_memory != 0 {
@@ -291,6 +292,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     func load(progress: @escaping (String) -> Void) async throws {
         let dir = DmengLaunch.modelDir.path
         let kind = DmengLaunch.kind
+        AppClock.start()
         progress("tokenizer + chat template from \(DmengLaunch.modelDir.lastPathComponent)/ (\(kind.displayName))")
         let c = try await TextCodec.load(dir: dir)
         log("DMENG model \(kind.rawValue) (\(kind.displayName)): family \(c.family.isEmpty ? "unknown" : c.family), front end \(c.isInkling ? "InklingChat (stop ids \(c.stopIds.sorted()))" : "the chat template (Jinja)")")
@@ -782,7 +784,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let c0 = m.counters
         var cl = c0
         let t0 = Date()
-        var tLast = t0
+        let clock = GenClock()
         if !sr.cancelled {
             for _ in 0..<maxNew {
                 if isCancelled { reason = .cancelled; break }
@@ -823,21 +825,23 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                 let cn = m.counters
                 let now = Date()
                 let picks = Double(cn.picks &- cl.picks)
-                cont.yield(.text(piece, TokenStats(index: new.count - 1, ms: 1000 * now.timeIntervalSince(tLast),
-                                                   tokPerSec: 1 / max(1e-9, now.timeIntervalSince(tLast)),
+                cont.yield(.text(piece, TokenStats(index: new.count - 1, ms: 1000 * clock.last,
+                                                   tokPerSec: clock.last > 0 ? 1 / clock.last : 0,
                                                    mbRead: Double(cn.bytes_read &- cl.bytes_read) / 1e6,
                                                    inMemory: picks > 0 ? Double(cn.hits &- cl.hits) / picks : 0,
                                                    expertsInMemory: Int(Double(cn.held_bytes) / rec),
-                                                   decodeSeconds: now.timeIntervalSince(t0),
-                                                   mbTotal: Double(cn.bytes_read &- c0.bytes_read) / 1e6, phase: phase.rawValue)))
+                                                   mbTotal: Double(cn.bytes_read &- c0.bytes_read) / 1e6, phase: phase.rawValue,
+                                                   speed: clock.speed)))
                 cl = cn
-                tLast = now
                 if new.count == 1 {
                     log(String(format: "DMENG REPLY first token %.0f ms after the reply started (prompt %d tokens: %@, reused %d, computed %d, prefill %.0f ms, restore %.0f ms; sampler %@)",
                                1000 * now.timeIntervalSince(tStart), ids.count, sr.source, sr.reused, sr.computed, sr.msPrefill,
                                sr.msRestore, sampler.isGreedy ? "greedy" : String(format: "temperature %g top_k %d top_p %g seed %llu", sampler.temp, sampler.topK, sampler.topP, sampler.seed)))
                 }
-                guard try m.step(Int32(tk), logits: &logits) else { reason = .cancelled; break }
+                let a = clock.begin()
+                let stepped = try m.step(Int32(tk), logits: &logits)
+                clock.end(a, counted: stepped)
+                guard stepped else { reason = .cancelled; break }
             }
         }
         let dt = Date().timeIntervalSince(t0)
@@ -861,22 +865,30 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                                        "gen_seed": Double(sampler.seed), "gen_thinking_budget": Double(gen.thinkingBudget ?? -1),
                                        "think_tokens": Double(tracker.thinkingTokens), "think_closed": tracker.closed ? 1 : 0,
                                        "think_forced_close": tracker.forcedClose ? 1 : 0]
-        split["compute_ms_per_token"] = 1000 * dt / Double(n) - split["wait_ms_per_token"]!
+        let sp = clock.speed
+        split["compute_ms_per_token"] = 1000 * sp.seconds / Double(max(1, sp.steps)) - split["wait_ms_per_token"]!
+        // the engine counters' own account of the same steps (dm_counters: decode steps, time inside dm_step), for the
+        // RATE line and the self-check (ChatModel adds them over a message's rounds as it adds the shown speed)
+        split["engine_steps"] = Double(cEnd.decode_steps - c0.decode_steps)
+        split["engine_step_s"] = Double(cEnd.step_ns &- c0.step_ns) / 1e9
+        split["gen_steps"] = Double(sp.steps)
+        split["gen_s"] = sp.seconds
+        split["wall_decode_s"] = dt
         let mbTok = Double(cEnd.bytes_read &- c0.bytes_read) / 1e6 / Double(n)
         let d = ReplyDetail(promptIds: ids, ids: new, prefill: kind, prefillTokens: sr.computed, prefillSeconds: sr.msPrefill / 1000,
-                            seconds: dt, tokPerSec: Double(new.count) / max(1e-9, dt), mibPerToken: mbTok * 1e6 / 1048576,
+                            seconds: sp.seconds, tokPerSec: sp.rate, mibPerToken: mbTok * 1e6 / 1048576,
                             releasedTop8InMemory: picks > 0 ? Double(cEnd.hits &- c0.hits) / picks : 0,
                             heldExpertsMean: Double(cEnd.held_bytes) / rec, syncReads: Int(cEnd.misses &- c0.misses), split: split,
                             prefillStats: ["prefill_s": sr.msPrefill / 1000, "prefill_mb_read": sr.mbRead,
                                            "prefill_reused": Double(sr.reused), "prefill_computed": Double(sr.computed)])
-        let rows = Self.replyRows(c0, cEnd, tokens: new.count, seconds: dt)
+        let rows = Self.replyRows(c0, cEnd, tokens: new.count, speed: sp)
         lock.withLock { _last = d; _replyRows = rows }
         log("DMENG REPLY ids " + new.map(String.init).joined(separator: ","))
         if ink { log("DMENG REPLY raw " + (lead + c.decode(new)).debugDescription + " (stop: \(reason.rawValue)\(stopId.map { ", token \($0)" } ?? ""))") }
         log(String(format: "DMENG REPLY done: %d tokens (%@), %.2f tok/s, %.1f MB read/token, hit %.3f, refaults %.0f, budget %.2f GB", new.count,
-                   reason.rawValue, Double(new.count) / max(1e-9, dt), mbTok, d.releasedTop8InMemory, split["file_refaults"] ?? 0,
+                   reason.rawValue, sp.rate, mbTok, d.releasedTop8InMemory, split["file_refaults"] ?? 0,
                    Double(cEnd.budget_bytes) / 1e9))
-        cont.yield(.finished(GenSummary(reason: reason, tokens: new.count, seconds: dt,
-                                        meanTokPerSec: Double(new.count) / max(1e-9, dt), meanMBPerToken: mbTok)))
+        cont.yield(.finished(GenSummary(reason: reason, tokens: new.count, seconds: sp.seconds,
+                                        meanTokPerSec: sp.rate, meanMBPerToken: mbTok, speed: sp)))
     }
 }

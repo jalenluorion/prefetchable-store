@@ -254,6 +254,7 @@ typedef struct dm_counters_t {
                                            the slab; DM_MEM_FILE: resident records not read) */
   uint64_t read_busy_ns;                /* wall time with at least one expert read in flight (drive rate = bytes_read / it) */
   int spare_memory;                     /* the file cache under the slab: 0 off, 1 on, 2 paused (dm_spare_memory_pause) */
+  uint64_t step_ns;                     /* wall time inside dm_step (steady clock), summed: decode_steps / it = the rate */
 } dm_counters_t;
 int dm_counters(dm_engine* e, dm_counters_t* out);
 

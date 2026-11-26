@@ -176,6 +176,17 @@ checks it: at the bottom within 1 pt while following, a held position within 1 p
 content moving with the finger. `hold` and `history` wait for touches from the Simulator (`UITEST TOUCH NOW` in the
 console; `-uitestQuiet N` keeps `history` open N seconds after the last scroll, for a tap on the arrow).
 
+## Checking the speed figure
+
+The tokens/s the app shows (the live line, the caption under a reply, the status line, Diagnostics and Copy diagnostics)
+is one figure, `GenSpeed.rate` in `ChatEngine.swift`: tokens generated divided by the time the engine spent stepping them,
+on a monotonic clock, with any time the app spent in the background left out; a message made of several rounds (web
+search) adds its rounds, the search time in none; the prompt keeps its own "started in" figure. Every reply logs `RATE`
+with the shown figure beside the engine counters' (decode steps over the time inside `dm_step`); the self-check fails
+when they differ by more than 2%. The UITEST scenario `rate` (`-uitest rate`) runs a normal reply, one with tool rounds,
+one with the app in the background about 10 s in the middle (it logs `UITEST BACKGROUND NOW`: bring another app to the
+front for 10 s, then this one), and a stopped one, and logs `UITEST RATE ... OK` when the figure is the scripted rate.
+
 ## Troubleshooting
 
 - **"Failed to register bundle identifier" or "No profiles for ... were found".** The bundle identifier is taken or

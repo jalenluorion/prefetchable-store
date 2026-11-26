@@ -21,6 +21,8 @@ import UIKit
 enum UITestFlags {
     /// The fake engine keeps the thinking phase going (slowly) while this is true (scenario hold).
     nonisolated(unsafe) static var holdThinking = false
+    /// The fake engine's step in flight waits while the app is in the background (scenario rate).
+    nonisolated(unsafe) static var stallInBackground = false
     nonisolated(unsafe) static var tokenInterval: Double = {
         let a = ProcessInfo.processInfo.arguments
         if let i = a.firstIndex(of: "-uitestTokenMs"), i + 1 < a.count, let v = Double(a[i + 1]) { return v / 1000 }
@@ -119,6 +121,62 @@ enum UITest {
             let quiet = args.firstIndex(of: "-uitestQuiet").flatMap { i in i + 1 < args.count ? Double(args[i + 1]) : nil } ?? 6
             await rec.waitForTouches(quiet: 6)
             await sleep(max(0, quiet - 6))
+        case "rate":
+            // the speed figure (README "Checking the speed figure"): a normal reply, a reply with tool rounds (the figure
+            // over all its rounds), one with the app in the background ~10 s in the middle (driven from outside on
+            // `UITEST BACKGROUND NOW`; the step in flight waits while the app is away, as a suspended step does, and the
+            // app stops the reply after it), a stopped one. The fake engine's step is one token interval and the
+            // thinking hold pauses 0.2 s between steps (not generating): every case must show the normal reply's figure
+            // (the Simulator's actual step rate) within 2%, and the caption and the status line the same figure
+            var ref = 0.0
+            func check(_ what: String) {
+                let shown = m.replyTokPerSec
+                if ref == 0 { ref = shown }
+                let cap = m.conv.messages.last(where: { $0.role == .assistant }).flatMap { m.conv.meta[$0.id]?.decodeTokPerSec } ?? -1
+                let status = m.statusText
+                let ok = abs(shown - ref) / ref <= 0.02 && abs(cap - shown) < 1e-9 && status.hasPrefix(String(format: "%.1f tokens/s", shown))
+                    && abs(shown * UITestFlags.tokenInterval - 1) < 0.1
+                log(String(format: "UITEST RATE %@ shown %.3f tokens/s (%d steps, %.2f s generating), caption %.3f, status \"%@\"; tokens / wall %.3f; the normal reply's %.3f, scripted %.3f: %@",
+                           what, shown, m.replySpeed.steps, m.replySpeed.seconds, cap, status,
+                           Double(m.lastReply?.tokens ?? 0) / max(1e-9, (m.lastReply?.wallMs ?? 0) / 1000), ref, 1 / UITestFlags.tokenInterval,
+                           ok ? "OK" : "FAIL"))
+            }
+            m.thinking = true
+            send(m, msg1)
+            await waitIdle(m)
+            check("normal")
+            await sleep(1.5)
+            send(m, msg2)
+            await waitIdle(m)
+            check("tool rounds")
+            await sleep(1.5)
+            UITestFlags.holdThinking = true
+            UITestFlags.stallInBackground = true
+            send(m, msg1)
+            await sleep(3)
+            let bg0 = AppClock.background
+            log("UITEST BACKGROUND NOW")
+            var k = 0
+            while AppClock.background - bg0 < 8 || UIApplication.shared.applicationState != .active {
+                await sleep(0.5)
+                k += 1
+                if k % 4 == 0 { log(String(format: "UITEST waiting: background %.1f s, state %d", AppClock.background - bg0, UIApplication.shared.applicationState.rawValue)) }
+            }
+            await sleep(1)
+            UITestFlags.holdThinking = false
+            await waitIdle(m)
+            UITestFlags.stallInBackground = false
+            log(String(format: "UITEST background %.1f s", AppClock.background - bg0))
+            check("background")
+            await sleep(1.5)
+            UITestFlags.holdThinking = true
+            send(m, msg1)
+            await sleep(3)
+            m.stop()
+            await waitIdle(m)
+            UITestFlags.holdThinking = false
+            check("stopped (\(m.lastSummary?.reason.rawValue ?? "?"))")
+            await sleep(1)
         case "open":
             rec.mark("switch long"); m.open(longID); await sleep(3)
             rec.mark("back"); nav("back"); await sleep(2)
@@ -372,14 +430,19 @@ final class FakeChatEngine: ChatEngine {
                                                     prefillElapsed: Double(i) * 0.1)))
                     try? await Task.sleep(nanoseconds: 100_000_000)
                 }
-                let t0 = Date()
+                AppClock.start()
+                let clock = GenClock()
                 var n = 0
                 func emit(_ p: String) async {
                     n += 1
-                    let el = Date().timeIntervalSince(t0) + 0.001
-                    cont.yield(.text(p, TokenStats(index: n - 1, ms: dt * 1000, tokPerSec: 1 / dt, mbRead: 45, inMemory: 0.6,
-                                                   expertsInMemory: 400, decodeSeconds: el, mbTotal: 45 * Double(n))))
+                    cont.yield(.text(p, TokenStats(index: n - 1, ms: clock.last * 1000, tokPerSec: clock.last > 0 ? 1 / clock.last : 0,
+                                                   mbRead: 45, inMemory: 0.6, expertsInMemory: 400,
+                                                   mbTotal: 45 * Double(n), speed: clock.speed)))
+                    let a = clock.begin()  // the scripted "step": one token interval
                     try? await Task.sleep(nanoseconds: UInt64(dt * 1e9))
+                    // (scenario rate) a step the app's suspension caught midway: it ends after the app is back
+                    while UITestFlags.stallInBackground && AppClock.inBackground { try? await Task.sleep(nanoseconds: 200_000_000) }
+                    clock.end(a)  // a step that ran is counted, as the engine's (a stop is seen before the next one)
                 }
                 outer: for seg in plan {
                     switch seg {
@@ -397,9 +460,8 @@ final class FakeChatEngine: ChatEngine {
                         }
                     }
                 }
-                let secs = Date().timeIntervalSince(t0)
-                cont.yield(.finished(GenSummary(reason: isStopped ? .cancelled : .eos, tokens: n, seconds: secs,
-                                                meanTokPerSec: Double(n) / max(0.001, secs), meanMBPerToken: 45)))
+                cont.yield(.finished(GenSummary(reason: isStopped ? .cancelled : .eos, tokens: n, seconds: clock.speed.seconds,
+                                                meanTokPerSec: clock.speed.rate, meanMBPerToken: 45, speed: clock.speed)))
                 cont.finish()
             }
         }
