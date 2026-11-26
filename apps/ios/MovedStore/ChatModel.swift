@@ -242,7 +242,11 @@ final class ChatModel: ObservableObject {
     private var events: [String] = []
 
     init() {
+        #if UITEST
+        engine = UITest.active ? FakeChatEngine() : DmengChatEngine()
+        #else
         engine = DmengChatEngine()
+        #endif
         engine.thinking = false
         let pref = (UserDefaults.standard.object(forKey: "prefixCache") as? Bool) ?? true
         prefixCache = pref
@@ -852,6 +856,9 @@ final class ChatModel: ObservableObject {
                     let t = "Error: tool limit reached. Answer with what you have."
                     return (t, ToolMeta(name: call.name, query: call.query, backend: "-", resultTokens: eng.toolResultTokens(t), error: "limit"))
                 }
+                #if UITEST
+                if UITest.active { return await UITest.fakeSearch(call) }
+                #endif
                 return await WebSearch.run(call, context: context, last: last, count: { eng.toolResultTokens($0) })
             }
             toolTask = task

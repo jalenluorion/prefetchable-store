@@ -92,6 +92,9 @@ struct ChatRoot: View {
                 #else
                 model.startOnce()
                 #endif
+                #if UITEST
+                UITest.start(model)
+                #endif
             }
             .onChange(of: phase) { _, new in
                 model.phaseChanged(new)

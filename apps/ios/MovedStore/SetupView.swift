@@ -15,6 +15,9 @@ final class SetupGate: ObservableObject {
     private init() {
         ModelKind.resolveAtLaunch()  // a selected model whose files are gone gives way to the other one when it is complete
         showSetup = Self.needsSetup()
+        #if UITEST
+        if UITest.active { showSetup = false }
+        #endif
     }
 
     /// The selected model's files are not all here (a download of the other model, from Model files, never blocks the

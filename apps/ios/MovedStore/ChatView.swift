@@ -14,6 +14,11 @@ struct RootView: View {
             ConversationListView(path: $path)
                 .navigationDestination(for: Route.self) { _ in ChatView() }
         }
+        #if UITEST
+        .onReceive(NotificationCenter.default.publisher(for: UITest.navNote)) { n in
+            path = (n.object as? String) == "back" ? [] : [.chat]
+        }
+        #endif
     }
 }
 
@@ -83,6 +88,9 @@ struct ChatView: View {
                                    isLastAssistant: r.message.id == lastAssistantID, sources: r.sources,
                                    onEdit: { msg in editingID = msg.id; draft = msg.content; focused = true })
                             .id(r.message.id)
+                            #if UITEST
+                            .modifier(UITestRowProbe(id: r.message.id))
+                            #endif
                     }
                     Color.clear.frame(height: 1).id(bottomID)
                         .onAppear { if FollowTracking.legacy { atBottom = true; follow = true } }
@@ -91,9 +99,16 @@ struct ChatView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
                 .padding(.bottom, 8)
+                #if UITEST
+                .coordinateSpace(name: UITest.contentSpace)
+                #endif
             }
             .scrollDismissesKeyboard(.interactively)
             .modifier(FollowTracking(follow: $follow, atBottom: $atBottom))
+            #if UITEST
+            .onChange(of: follow) { _, v in UITest.rec.follow = v; UITest.rec.mark("follow \(v)") }
+            .onChange(of: atBottom) { _, v in UITest.rec.atBottom = v }
+            #endif
             .onChange(of: m.conv.messages.last) { _, _ in
                 // Tool rounds replace the last row as streaming updates it. Use the same scroll
                 // transaction for both so an animated row change cannot compete with token updates.
@@ -257,12 +272,15 @@ struct FollowTracking: ViewModifier {
     @State private var userScrolling = false
 
     static var legacy: Bool {
+        #if UITEST
+        if UITest.forceLegacy { return true }
+        #endif
         if #available(iOS 18.0, *) { return false }
         return true
     }
 
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
+        if #available(iOS 18.0, *), !Self.legacy {
             content
                 .onScrollPhaseChange { _, p in
                     userScrolling = p == .tracking || p == .interacting || p == .decelerating
