@@ -1893,7 +1893,8 @@
   "whole_from": 0,
   "join": 0.25,
   "gpu_min": 256,
-  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, the last span joined under a quarter span, the GPU's share from sub-chunks of 256; the experts all at once once landed (no waves)"
+    "drop_upto": 64,
+  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, the last span joined under a quarter span, the GPU's share from sub-chunks of 256; the experts all at once once landed (no waves); fast mode: a prompt of at most 64 positions keeps the decode's leave-out rule in its batched pass (as Flash-Next; iPhone 15 Plus, phone-small: a new chat's first token 15.9 -> 11.8 s, a follow-up 17.9 -> 6.8 s against the lossless pass), longer prompts lossless(no waves)"
  },
  "drafting": {
   "cost_prior": {

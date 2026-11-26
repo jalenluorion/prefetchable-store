@@ -52,6 +52,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   },
   "prefill": {
    "chunk": 256,
+   "drop_upto": 64,
    "gpu_min": 256,
    "join": 0.25,
    "span": 8192,
