@@ -128,7 +128,7 @@ struct Resolved {
 };
 
 // exact -> lossless, fast -> approx:drop (the built-in names); anything else is returned unchanged (lossless,
-// approx[:PRESET] stay accepted everywhere)
+// approx:drop[:w=W] stay accepted everywhere)
 std::string engine_mode_of(const std::string& mode);
 
 // the device's physical memory in bytes (hw.memsize; DMENG_TEST_PHYS_MEM overrides it, tests only)
@@ -139,7 +139,7 @@ double physical_memory_bytes();
 std::string device_profile(int64_t avail_bytes, double min_gb, std::string& why);
 
 // Resolve the defaults of model folder `dir` for profile `profile_req` ("" / "auto" = the device's) and mode
-// `mode_req` ("" = the profile's; exact | fast | lossless | approx[:PRESET]). derived_dir: the engine's cache folder
+// `mode_req` ("" = the profile's; exact | fast | lossless | approx:drop[:w=W]). derived_dir: the engine's cache folder
 // ("" = DIR/.dmeng). Router files are found (or derived) as docs/MANIFEST-PRESETS.md says. A mode's engine string is the
 // model-level modes.<mode>.engine, replaced by the profile's own profiles.<profile>.modes.<mode>.engine when it declares
 // one (Preset::engine_mode_from says which); a mode_req that names no declared mode is an engine string and is kept.
@@ -151,7 +151,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
 // dm_open_opts); an unset member is left to the profile, then the manifest's defaults, then the built-in values. The
 // front ends differ only in that spelling, never in the precedence, so a setting resolves the same way in all three.
 struct Given {
-  std::optional<std::string> mode;      // exact | fast | lossless | approx[:PRESET]
+  std::optional<std::string> mode;      // exact | fast | lossless | approx:drop[:w=W]
   std::optional<std::string> resident;  // an explicit resident file
   std::optional<std::string> routers;   // an engine router file, or "none"
   std::optional<std::string> xtok;      // a cross-token router file, or "none"

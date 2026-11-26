@@ -20,7 +20,7 @@ resolve to, as JSON, without loading the model.
 ## Groups
 
 - **Profiles and modes**: `--profile auto|mac|phone|phone-small|none`, `--mode exact|fast` (also the internal names
-  `lossless` and `approx[:PRESET]`, with the measurement presets `bounded`, `drop` and `never`), `--drafts 0|1`,
+  `lossless` and `approx:drop[:w=W]`, fast mode's leave-out rule with its weight), `--drafts 0|1`,
   `--print-defaults`.
 - **Model and memory**: `--resident F` (another in-memory weights file, such as the 4-bit `resident_q4`),
   `--embeddings F`, `--cache-gb G|auto`, `--reserve-gb G` (memory left to the system by `auto`, default 5.5),
@@ -31,8 +31,7 @@ resolve to, as JSON, without loading the model.
   cross-token names `--xtok F --xtok-tau T` and `--xtok-bg F`, the read planner `--plan-routers ...`, `--router-stats`,
   `--router-ecache`, `--router-heavy`.
 - **Reads and eviction**: `--evict auto|hazard|freq|pred`, `--layer-caps`, `--evict-policy F`, `--rd-prio`,
-  `--rd-excl`, `--spec-max`, `--cancel`; the approximate rule set by hand: `--late`, `--read-w`, `--read-mass`,
-  `--bg`, `--drop`.
+  `--rd-excl`, `--spec-max`, `--cancel`.
 - **Prompt path**: `--prefill-chunk N`, `--prefill-gpu-frac F` (dmeng); `--chunk`, `--span`, `--stream`,
   `--gpu-frac`, `--keep-scratch`, the prefix cache (`--ckpt-gb`, `--park-gb`, `--ckpt-every`, `--disk DIR|none`,
   `--disk-gb`, `--disk-every`, `--preload`), idle-time prefill (`--ahead-span`, `--ahead-park`; the front end's

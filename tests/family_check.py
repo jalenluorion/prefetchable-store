@@ -626,14 +626,14 @@ if wanted("presets"):
         # manifest: that profile resolves to its string, every other profile to the folder's own declaration if it has one
         # (none of the published manifests does: the model-level mode, modes.fast), in all three front ends ("preset":
         # engine_mode, engine_mode_from; "resolved": mode); an explicit engine string is kept as given
-        OVER = "approx:drop:w=0.15:mass=0.15:late=-1"
+        OVER = "approx:drop:w=0.12"
         op = "phone" if "phone" in man["profiles"] else next(iter(man["profiles"]))
 
         PER_MODE = {"exact": {"rule": "top", "m": 5}, "fast": {"rule": "confidence", "tau": 0.25, "candidates": 12}, "calibration": {"measured": "(a test value)"}}
 
         def over(m2):
             m2["profiles"][op]["modes"] = {"fast": {"definition": "the fast mode with this profile's own leave-out threshold", "engine": OVER,
-                                                    "read_if": {"missing_routing_weight_over": 0.15}, "calibration": {"measured": "(a test value)"}}}
+                                                    "read_if": {"missing_routing_weight_over": 0.12}, "calibration": {"measured": "(a test value)"}}}
             m2["profiles"][op]["names"] = PER_MODE  # a names rule per mode (profiles.<p>.names: {"exact": rule, "fast": rule})
 
         FO = declared("pm", edit=over)

@@ -246,7 +246,7 @@ for nm, fl in (("few slots", FEW), ("few slots, 5 threads", FEW + ["--threads", 
                ("few slots, run-ahead 10", FEW + ["--run-ahead", "10"]),
                ("few slots, routers + run-ahead", FEW + ["--routers", router[0], "--m", "10", "--run-ahead", "10"]),
                ("few slots, frequency eviction", FEW + ["--evict", "freq"]),
-               ("fast mode with every missing pick read on the spot (read rule 0)", FEW + ["--mode", "fast", "--read-w", "0"])):
+               ("fast mode with every missing pick read on the spot (read rule 0)", FEW + ["--mode", "approx:drop:w=0"])):
     g, info = dmeng(ids300, *fl, name="c1")
     compare(f"C {nm} (reads {info.get('reads', '?')})", g, base, 0.0)
 for lead in ("1", "2", "4", "token"):  # a whole token of names (80 pins) needs more slots than FEW

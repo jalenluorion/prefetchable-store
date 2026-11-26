@@ -36,7 +36,7 @@ Useful work is `work + main_serial`. Spins are left out.
 
 ```
 python bench/run.py --model DIR --out DIR [--cells cache,routers,policy,approx] [--gb 3.3,5] [--prompts pitt,code]
-                    [--routers F.dmr] [--router-args "--m 12"] [--evict-policy F.json] [--hazard] [--approx bounded]
+                    [--routers F.dmr] [--router-args "--m 12"] [--evict-policy F.json] [--hazard] [--approx drop]
                     [--cell NAME=FLAGS] [--reps 2] [--bin build/dmeng] [--count-bin build-counters/dmeng | --no-counts]
                     [--guard GUARD | $DM_GUARD] [--resident F] [--extra "..."] [--dry-run] [--report [--symbolize]]
 ```
@@ -66,7 +66,7 @@ python bench/run.py --model DIR --out DIR [--cells cache,routers,policy,approx] 
 | `cache` | the cache alone (`--prefetch none`) | |
 | `routers` | `--prefetch router --routers F` + `--router-args` | `--routers` |
 | `policy` | the routers + `--evict-policy F` and / or `--evict hazard` + `--policy-args` | `--evict-policy` (with `--routers`) or `--hazard` |
-| `approx` | the routers + `--mode approx:PRESET` (`--approx`, default `bounded`) | `--routers` |
+| `approx` | the routers + `--mode approx:RULE` (`--approx`, default `drop`; `drop:w=0.12` for another weight) | `--routers` |
 | `--cell NAME=FLAGS` | any dmeng flags; `{routers}` expands to the routers' flags | |
 
 With no `--cells`, the campaign runs every standard cell whose inputs are given, then the `--cell` ones. Each cell runs

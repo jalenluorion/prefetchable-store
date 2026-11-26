@@ -160,7 +160,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
   --profile auto|mac|phone|phone-small|none   defaults from the profile (auto: the device's; none: the worker's
                          built-in values). A default fills only what the command line leaves unset; --routers or --xtok
                          makes the early address entirely the command line's (--routers none: no names)
-  --mode exact|fast|lossless|approx[:PRESET]   default: the profile's
+  --mode exact|fast|lossless|approx:drop[:w=W]   default: the profile's
   --drafts 0|1           1 = --draft lookup (no early names) (as in dmeng); default: the profile's drafts {lookup, head} (off)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)
@@ -615,7 +615,7 @@ int main(int argc, char** argv) {
   if (a.mode != "lossless") {  // opt-in approximate mode, as dmeng --mode
     const std::string preset = a.mode == "approx" ? "" : a.mode.rfind("approx:", 0) == 0 ? a.mode.substr(7) : "?";
     if (!C.ns.preset(preset)) {
-      fprintf(stderr, "--mode exact|fast|lossless|approx[:PRESET]; presets: %s\n", Approx::presets_help());
+      fprintf(stderr, "--mode exact|fast|lossless|approx:drop[:w=W]: %s\n", Approx::presets_help());
       return 2;
     }
     if (C.ns.prio) C.cache.rd.prio = true;

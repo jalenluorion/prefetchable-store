@@ -112,8 +112,9 @@ typedef struct dm_open_opts {
                               router_m whatever the profile) */
   int router_cand;         /* candidates of the confidence rule; 0 = 16 */
   int split;               /* pieces per record read; 0 = 1 */
-  const char* mode;        /* NULL = the profile's; "exact" (= "lossless") or "fast" (= "approx:drop", approximate: tokens
-                              can differ from the exact ones); the advanced "approx[:PRESET]" ("approx:bounded", ...) */
+  const char* mode;        /* NULL = the profile's; "exact" (= "lossless") or "fast" (the model's declared leave-out rule,
+                              approx:drop[:w=W]; approximate: tokens can differ from the exact ones); or that rule as an
+                              engine string, "approx:drop:w=0.12" */
   int resident_bits;       /* 0 = the profile's (8-bit; phone-small 35B: 4-bit when the file is there); 8 = the 8-bit
                               resident (resident_q8); 4 = the 4-bit variant resident_q4
                               (<derived_dir>/resident_q4.dmres1.<12 hex of resident.safetensors' sha256>.bin, made by

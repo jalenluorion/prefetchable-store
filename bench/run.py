@@ -3,7 +3,7 @@
 through a guard (one model process at a time, under /usr/bin/time -l), resumable (a run whose JSON exists is skipped).
 
   python bench/run.py --model DIR --out DIR [--cells cache,routers,policy,approx] [--gb 4,6] [--prompts pitt,code]
-                      [--routers F.dmr] [--evict-policy F.json] [--hazard] [--approx bounded] [--reps 2]
+                      [--routers F.dmr] [--evict-policy F.json] [--hazard] [--approx drop] [--reps 2]
                       [--bin build/dmeng] [--count-bin build-counters/dmeng | --no-counts] [--guard engine/bench/guard.py]
                       [--dry-run] [--report]
 
@@ -38,7 +38,7 @@ def parse_args(argv):
     p.add_argument("--evict-policy", help="learned keep-score (JSON) for the policy cell")
     p.add_argument("--hazard", action="store_true", help="the policy cell evicts with --evict hazard")
     p.add_argument("--policy-args", default="", help='more flags of the policy cell, e.g. "--layer-caps uniform"')
-    p.add_argument("--approx", default="bounded", help="preset of the approx cell, --mode approx:PRESET (default bounded)")
+    p.add_argument("--approx", default="drop", help="the approx cell's leave-out rule, --mode approx:RULE (default drop; drop:w=0.12 ...)")
     p.add_argument("--n", type=int, default=400, help="tokens per run (default 400)")
     p.add_argument("--ctx", type=int, default=16384)
     p.add_argument("--mem", default="mlock")
@@ -95,7 +95,7 @@ def cell_flags(a):
     have = {"cache": ([], True)}
     if rt:
         have["routers"] = (rt, True)
-        have["approx"] = (rt + ["--mode", "approx:" + a.approx if a.approx else "approx"], False)
+        have["approx"] = (rt + ["--mode", "approx:" + (a.approx or "drop")], False)
     if pol and (rt or not a.evict_policy):  # the learned keep-score takes its features from the routers
         have["policy"] = (rt + pol, True)
     for c in a.cell:

@@ -178,8 +178,8 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   // layer (a long span is otherwise one boundary); records still pinned go at a later boundary
   if (cache.budget_req.load(std::memory_order_relaxed) >= 0) cache.apply_budget();
   Cache::ChunkClock chunk_clock(cache, tok_clock + off + n - 1);  // the pass is one token to the time-ordered statistics
-  if ((ns.on && !ns.drop) || (force && pos < force_n) || n < 1) {
-    fprintf(stderr, "moe_chunk: lossless or the drop rule, unforced only\n");
+  if ((force && pos < force_n) || n < 1) {
+    fprintf(stderr, "moe_chunk: unforced only\n");
     abort();
   }
   if (!ch_) ch_ = std::make_shared<Chunk>();
@@ -295,7 +295,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   auto& S = cache.st;
   const int reg = looped(step) ? 0 : 1;
   auto& ut = used_tok[L];
-  // fast mode: the single step's leave-out rule (Core::approx with ns.drop) for every position, decided at the step's
+  // fast mode: the single step's leave-out rule (Core::approx) for every position, decided at the step's
   // start. A pick held in memory (landed or in flight) is used; a missing pick is read now when its released weight is
   // > read_w (then the largest missing until the position's missing weight is <= read_mass); a missing pick of lower
   // weight is left out, unless another position of the pass reads that expert now (then it is in memory when computed,
@@ -961,7 +961,7 @@ void Core::span_name_router(int step, int n, const float* const* x) {
     }
     std::partial_sort(idx.begin(), idx.begin() + K, idx.end(), [&](int a, int b) { return key[a] > key[b] || (key[a] == key[b] && a < b); });
     int nk = K;
-    if (ns.on && ns.drop) {  // fast mode's short prompt (PrefillOpts::drop_upto): only the picks its leave-out rule would read,
+    if (ns.on) {  // fast mode's short prompt (PrefillOpts::drop_upto): only the picks its leave-out rule would read,
                              // heaviest first until what is left weighs at most read_mass of the top K (weights in the top K)
       double w[MAXK], tot = 0;
       for (int j = 0; j < K; j++) {

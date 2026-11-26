@@ -529,11 +529,11 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     e->C->hook = e->X.get();
     if (ro.rd_prio > 0) e->C->cache.rd.prio = true;
   }
-  if (mode != "lossless") {  // fast or an advanced approximate preset (dmeng --mode)
+  if (mode != "lossless") {  // fast, or its rule as an engine string (dmeng --mode)
     const std::string md = mode;
     const std::string preset = md == "approx" ? "" : md.rfind("approx:", 0) == 0 ? md.substr(7) : "?";
-    if (!e->C->ns.preset(preset)) {  // PRESET[:w=W:mass=M:late=MS:bg=0|1] (Approx::preset)
-      g_err = "mode: exact|fast|lossless|approx[:PRESET[:w=W:mass=M:late=MS:bg=0|1]], got " + md;
+    if (!e->C->ns.preset(preset)) {  // drop[:w=W] (Approx::preset; Flash-Next's capped form :mass=M:late=-1)
+      g_err = "mode: exact|fast|lossless|approx:drop[:w=W], got " + md;
       return nullptr;
     }
     if (e->C->ns.prio) e->C->cache.rd.prio = true;
@@ -1042,8 +1042,7 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"weight_replaced_per_step\":" << N.w_replaced / std::max(1.0, N.steps) << ",\"replaced\":" << N.n_replaced
       << ",\"steps_with_a_replacement\":" << N.steps_replaced << ",\"max_replaced_weight\":" << N.w_replaced_max
       << ",\"read_now\":" << N.n_read_now << ",\"weight_read_now_sum\":" << N.w_read_now << ",\"late_waited\":" << N.n_late_waited
-      << ",\"late_got\":" << N.n_late_got << ",\"late_dropped\":" << N.n_late_dropped << ",\"late_wait_ms\":" << N.late_wait_ms
-      << ",\"bg\":" << N.n_bg << ",\"bg_on\":" << N.bg << ",\"read_w\":" << N.read_w << ",\"late_ms\":" << N.late_ms << ",\"drop\":" << N.drop;
+      << ",\"late_dropped\":" << N.n_late_dropped << ",\"read_w\":" << N.read_w << ",\"late_ms\":" << N.late_ms;
     std::vector<float> w = N.w_tok;  // released weight left out per token
     double sum = 0;
     for (float x : w) sum += x;

@@ -94,31 +94,26 @@ struct Times {
   std::string stages_json(double n) const;
 };
 
-// Approximate mode (opt-in): a released pick that is not in memory may be replaced by the released router's next-ranked
-// expert that is (its top K among the experts in memory, weighted as the release weights its top K), except where a rule
-// says to wait for it or read it now. With nothing replaced, set, weights and order are the lossless path's, bit for bit.
+// Fast mode (opt-in, approx:drop): a released pick that is not in memory is left out when its released weight is at most
+// read_w (no substitute; the kept picks keep their released weights, the release's top-K weighting, no re-weighting over
+// the kept set); a heavier one is read on the spot and waited for, and a pick whose read is in flight is waited for. With
+// nothing left out, set, weights and order are the lossless path's, bit for bit.
 struct Approx {
   bool on = false;
-  double late_ms = 1000;   // a named pick still in flight: < 0 replace at once; 0 use it if it landed while the step's
-                           // other experts ran; T wait up to T ms after the router; >= 1000 always wait
-  double read_w = 2;       // a missing pick whose released weight > read_w is read on the spot
-  double read_mass = 2;    // ... and the largest missing picks until the step's missing released weight <= read_mass
-  bool bg = true;          // a replaced miss is fetched in the background for the layer's next use
-  int cold_floor = -1;     // replacing needs at least this many other landed experts of the layer, else the step runs
-                           // lossless (-1: 2K; 0: never: the released top-k among whatever is held)
-  bool drop = false;       // leave a missing pick out instead of replacing it; the kept picks keep their released weights
-                           // (the release's top-K weighting, no re-weighting over the kept set)
+  double read_w = 2;       // a missing pick whose released weight > read_w is read on the spot (approx:drop: 0.1; :w=W)
+  // Flash-Next's capped form (approx:drop:w=W:mass=M:late=-1), kept until it is recalibrated:
+  double read_mass = 2;    // ... then the largest missing picks until the step's missing released weight <= read_mass
+  double late_ms = 1000;   // a light pick (weight <= read_w) still in flight: >= 1000 waited for; < 0 left out at once
   bool prio = true, cancel = true;  // reader settings that go with it: nearest step first, stale reads dropped
-  // statistics
-  double steps = 0, w_replaced = 0, n_replaced = 0, n_read_now = 0, w_read_now = 0, n_late_waited = 0, n_late_got = 0,
-         n_late_dropped = 0, n_bg = 0, steps_replaced = 0, w_replaced_max = 0, late_wait_ms = 0, cold = 0;
-  double w_hist[6] = {0};  // replaced picks by released weight: <.02, <.05, <.1, <.2, <.4, >=.4
-  double w_tok_cur = 0;          // released weight replaced / dropped in the current token (summed over its steps)
+  // statistics (left out: "replaced" in the names, as the statistics have always been keyed)
+  double steps = 0, w_replaced = 0, n_replaced = 0, n_read_now = 0, w_read_now = 0, n_late_waited = 0, n_late_dropped = 0,
+         steps_replaced = 0, w_replaced_max = 0;
+  double w_hist[6] = {0};  // left-out picks by released weight: <.02, <.05, <.1, <.2, <.4, >=.4
+  double w_tok_cur = 0;          // released weight left out in the current token (summed over its steps)
   std::vector<float> w_tok;      // ... per finished token since the last reset (mean and p90 in the stats)
   void reset_stats();
-  // named rule sets, optionally followed by :w=W:mass=M:late=MS:bg=0|1; false if the name or a key is unknown
+  // "drop", optionally followed by :w=W (and Flash-Next's :mass=M:late=-1); false if the name, a key or a value is unknown
   bool preset(const std::string& spec);
-  bool preset_base(const std::string& name);
   static const char* presets_help();
 };
 
@@ -167,7 +162,7 @@ class Core {
   long tok_clock = 0;  // forward passes so far (the cache's time)
   int pos = 0;         // position of the token being computed
   // the routing of the last forward pass, [steps][K]: released picks / weights, and what was used (= released when
-  // nothing was replaced)
+  // nothing was left out)
   std::vector<int32_t> picks, used;
   std::vector<float> pw, uw;
   std::vector<double> wait_step;      // [steps] wait ms (decode statistics)

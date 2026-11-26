@@ -540,7 +540,7 @@ bool Flash::prefill(State& s0, const int32_t* ids, int n, bool want_logits, cons
       if (lgts[r] > lgts[id]) id = r;
     return id;
   };
-  if (po.chunk <= 1 || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n)) {
+  if (po.chunk <= 1 || (core->force && S->pos < core->force_n)) {
     const bool r = Model::prefill(s0, ids, n, want_logits, capture, sink, st, cancel);  // single steps
     if (r && fast_head && want_logits) greedy_ = argmax();
     return r;
@@ -681,7 +681,7 @@ const float* Flash::logits_at(int i) const { return V && i >= 0 && i < V->n ? V-
 
 bool Flash::verify(State& s0, const int32_t* ids, int n, Want want) {
   S = (FState*)&s0;
-  if (n < 1 || n > TMAX || (core->ns.on && !core->ns.drop) || (core->force && S->pos < core->force_n) || S->pos + n > S->ctx) return false;
+  if (n < 1 || n > TMAX || (core->force && S->pos < core->force_n) || S->pos + n > S->ctx) return false;
   greedy_ = -1;
   const int H = c.H, C = c.conv_dim();
   const size_t PW = proj_width(c);
