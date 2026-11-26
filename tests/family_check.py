@@ -273,7 +273,7 @@ if wanted("drafting"):
                     ra = js.get("draft", {}).get("read_ahead", {})
                     (okd if out == plain and ra.get("positions", 0) > 0 and ra.get("names_spent", 0) > 0 else bad).append(
                         f"{sm} --draft-ahead 8 ({ra.get('positions', 0)} positions named ahead, {ra.get('positions_dropped', 0)} dropped)")
-            # --drafts 1 means the same in every front end (dmserve: --draft lookup --early 4), also in a folder holding a
+            # --drafts 1 means the same in every front end (dmserve: --draft lookup), also in a folder holding a
             # model's draft head file (dmeng used to switch to --draft both there, by the model's name)
             F = os.path.join(T, "drafts1")
             shutil.rmtree(F, ignore_errors=True)

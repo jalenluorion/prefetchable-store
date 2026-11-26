@@ -62,7 +62,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          what the command line leaves unset; any of --prefetch, --routers, --xtok, --oracle,
                          --plan-routers makes the early address entirely the command line's
   --mode exact|fast|lossless|approx[:PRESET]   exact = lossless, fast = approx:drop (default: the profile's)
-  --drafts 0|1           1 = --draft lookup --early 4, as in dmserve (a model's draft head: --draft head|both); default:
+  --drafts 0|1           1 = --draft lookup (no early names), as in dmserve (a model's draft head: --draft head|both); default:
                          the profile's (off)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
   --print-defaults       print the resolved profile defaults as JSON and exit
