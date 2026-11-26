@@ -115,7 +115,10 @@ enum UITest {
             m.open(longID)
             await sleep(2.5)
             log("UITEST TOUCH NOW: scroll up through the chat")
+            // -uitestQuiet N: wait N s after the last touch before ending (taps on the arrow, which is not a scroll)
+            let quiet = args.firstIndex(of: "-uitestQuiet").flatMap { i in i + 1 < args.count ? Double(args[i + 1]) : nil } ?? 6
             await rec.waitForTouches(quiet: 6)
+            await sleep(max(0, quiet - 6))
         case "open":
             rec.mark("switch long"); m.open(longID); await sleep(3)
             rec.mark("back"); nav("back"); await sleep(2)

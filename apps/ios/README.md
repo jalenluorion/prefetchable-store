@@ -166,7 +166,7 @@ reply and let go), `history` (scroll up through a long chat) or `open` (chats op
 chat's scroll view every frame to `Documents/uitest-<scenario>.json`; `python3 apps/ios/tests/scroll_check.py <file>`
 checks it: at the bottom within 1 pt while following, a held position within 1 pt while the reply below changes,
 content moving with the finger. `hold` and `history` wait for touches from the Simulator (`UITEST TOUCH NOW` in the
-console).
+console; `-uitestQuiet N` keeps `history` open N seconds after the last scroll, for a tap on the arrow).
 
 ## Troubleshooting
 
