@@ -45,6 +45,16 @@ enum SelfCheck {
     /// for `exactTokens`, with the engine's counters for the decode steps only. `-selfcheck-verify` also hashes the files.
     static let codeIds = [248045,846,198,40,2688,3133,383,264,2526,12654,2393,421,43303,18805,1433,7189,321,17657,287,1070,310,12977,13,9170,2706,1010,7189,513,5384,321,22217,279,1788,3150,369,5158,10598,13,5514,369,279,523,25,271,71093,12305,198,464,29174,11,854,11,2857,271,1005,417,27150,25,198,262,687,1259,2251,3676,701,11,1752,11,1866,11789,28,16,15,15,11,1866,30997,625,28,17,13,15,1590,198,285,638,3745,283,1752,198,285,638,6469,11789,283,1866,11789,198,285,638,6469,30997,625,283,1866,30997,625,198,285,638,43007,283,2958,198,285,638,7155,24230,283,2168,198,285,638,20362,283,29174,30371,363,198,285,29174,30977,8373,7424,1385,66032,11,37993,3497,553,2388,363,271,262,687,884,1153,11,1347,1590,198,285,440,638,20362,25,198,309,413,524,638,43007,25,198,388,638,7155,24230,283,854,6177,363,198,309,638,43007,1989,20009,8,198,285,413,2343,1153,43007,8,2518,638,6469,11789,25,198,309,638,22320,363,271,262,687,696,66032,1153,1590,198,285,1345,2912,25,198,309,854,10795,7,15,13,16,8,198,309,413,638,7155,24230,321,854,6177,363,471,638,7155,24230,835,638,6469,30997,625,25,198,388,638,22320,363,271,262,687,17657,1153,1590,198,285,3470,283,638,43007,198,285,440,1724,1153,3745,11,328,64,871,430,281,25,198,309,364,427,303,3470,25,198,388,281,3708,9028,20868,2515,8,478,2823,77,871,198,285,440,638,20362,25,198,309,638,43007,283,2958,198,309,638,7155,24230,283,2168,198,71093,271,9592,1396,6741,303,411,1970,11,10033,1204,1754,799,31130,466,40922,7189,11,321,2873,264,34773,2243,13,13262,279,569,3622,279,1788,11,321,884,264,3160,363,1654,421,17657,287,8554,369,2047,13,248046,198,248045,74455,198,248068,198]
     static let followPrompt = "And why are sunsets red?"
+    /// Inkling's prompts: Documents/p2/ink_pitt_ids.txt and ink_code_ids.txt (the Nov 23 phone runs' files), else its
+    /// Pittsburgh prompt built in (the coding row is then left out).
+    static let inkPittBuiltIn = [371, 151698, 149879, 149876, 152652, 149879, 220, 136558, 165300, 149899]
+    static func idsFile(_ rel: String) -> [Int]? {
+        guard let s = try? String(contentsOf: docsURL.appendingPathComponent(rel), encoding: .utf8) else { return nil }
+        let v = s.split { $0 == "," || $0.isWhitespace }.compactMap { Int($0) }
+        return v.isEmpty ? nil : v
+    }
+    static var pittIds: [Int] { ModelKind.selected == .inkling ? (idsFile("p2/ink_pitt_ids.txt") ?? inkPittBuiltIn) : builtInIds }
+    static var codeRowIds: [Int]? { ModelKind.selected == .inkling ? idsFile("p2/ink_code_ids.txt") : codeIds }
     static func thermal() -> String { thermalName(ProcessInfo.processInfo.thermalState) }
     static func mem(_ label: String) -> Any {
         let m = MemProbe.read(label)
@@ -179,6 +189,26 @@ enum SelfCheck {
         return r
     }
 
+    /// The footprint by kind (GB): task_vm_info's internal / external / compressed and the graphics (Metal, IOSurface)
+    /// and media ledgers, and the malloc zones' bytes in use and allocated.
+    static func regions() -> [String: Double] {
+        var r: [String: Double] = [:]
+        if let v = MemProbe.vmInfo() {
+            r["footprint"] = Double(v.phys_footprint) / 1e9
+            r["internal"] = Double(v.internal) / 1e9
+            r["external"] = Double(v.external) / 1e9
+            r["compressed"] = Double(v.compressed) / 1e9
+            r["graphics"] = Double(v.ledger_tag_graphics_footprint) / 1e9
+            r["media"] = Double(v.ledger_tag_media_footprint) / 1e9
+            r["purgeable_nonvolatile"] = Double(v.ledger_purgeable_nonvolatile) / 1e9
+        }
+        var ms = malloc_statistics_t()
+        malloc_zone_statistics(nil, &ms)
+        r["malloc_in_use"] = Double(ms.size_in_use) / 1e9
+        r["malloc_allocated"] = Double(ms.size_allocated) / 1e9
+        return r
+    }
+
     private static func run(_ model: ChatModel) async {
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-remove-35b") {
             out["remove_35b"] = remove35B()
@@ -228,11 +258,11 @@ enum SelfCheck {
                 if model.engineState == .ready {
                     r["resolved"] = resolved(d.selfCheckStats)
                     let th = thermal()
-                    if let g = try? await d.selfCheckGreedy(Array(codeIds.prefix(48)), n: 1) {
+                    if let g = try? await d.selfCheckGreedy(Array((codeRowIds ?? codeIds).prefix(48)), n: 1) {
                         r["short_prefill_s"] = g.prefillSeconds
                         r["short_prefill"] = json(g.prefillJSON)
                     }
-                    if let g = try? await d.selfCheckGreedy(builtInIds, n: n) {
+                    if let g = try? await d.selfCheckGreedy(pittIds, n: n) {
                         r["pitt"] = ["tokens": g.ids.count, "decode_s": g.seconds, "tok_per_s": Double(g.ids.count) / max(1e-9, g.seconds),
                                      "ids": g.ids, "stats": json(g.decodeStats)] as [String: Any]
                         log("SELFCHECK lever \(lever) \(arm): \(String(format: "%.2f", Double(g.ids.count) / max(1e-9, g.seconds))) tok/s")
@@ -252,6 +282,8 @@ enum SelfCheck {
         // -selfcheck-memrow: only the memory of one long prompt (the coding prompt, 357 ids) in the default mode: the
         // footprint before it, its highest value while the prompt is read (sampled every 50 ms) and after ~10 s of decode
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-memrow") {
+            optsOverride = arg("-selfcheck-lever-opts")  // a diagnostic's model options for this launch (e.g. the GPU share off)
+            out["memrow_opts"] = optsOverride ?? ""
             model.startOnce()
             for _ in 0..<900 where model.engineState != .ready {
                 if case .failed = model.engineState { break }
@@ -260,14 +292,20 @@ enum SelfCheck {
             if let d = model.engine as? DmengChatEngine, model.engineState == .ready {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)  // the launch's warm-up in idle time
                 let before = MemProbe.read("memrow before")
-                final class Peak: @unchecked Sendable { var v = 0; var on = true }
+                let regBefore = regions()
+                let statsBefore = json(d.selfCheckStats)
+                final class Peak: @unchecked Sendable { var v = 0; var on = true; var reg: [String: Double] = [:] }
                 let pk = Peak()
                 let sampler = Thread {
-                    while pk.on { pk.v = max(pk.v, MemProbe.read("").physFootprint); usleep(50_000) }
+                    while pk.on {
+                        let f = MemProbe.read("").physFootprint
+                        if f > pk.v { pk.v = f; pk.reg = regions() }
+                        usleep(50_000)
+                    }
                 }
                 sampler.start()
                 let t0 = Date()
-                let g = try? await d.selfCheckGreedy(codeIds, n: 26)
+                let g = try? await d.selfCheckGreedy(codeRowIds ?? codeIds, n: 26)
                 let secs = Date().timeIntervalSince(t0)
                 pk.on = false
                 let after = MemProbe.read("memrow after")
@@ -281,6 +319,11 @@ enum SelfCheck {
                 mr["tokens"] = g?.ids.count ?? -1
                 mr["seconds"] = secs
                 mr["thermal"] = after.thermal
+                mr["regions_before"] = regBefore
+                mr["regions_peak"] = pk.reg
+                mr["regions_after"] = regions()
+                mr["stats_before"] = (statsBefore as? [String: Any])?["memory"] ?? NSNull()
+                mr["stats_after"] = (json(d.selfCheckStats) as? [String: Any])?["memory"] ?? NSNull()
                 out["memrow"] = mr
                 log("SELFCHECK memrow before \(before.physFootprint) peak \(pk.v) after \(after.physFootprint) (decode \(g?.seconds ?? -1) s)")
             }
@@ -334,7 +377,11 @@ enum SelfCheck {
                 out["load_s_\(mode)"] = Date().timeIntervalSince(tl)
                 guard model.engineState == .ready else { continue }
                 out["resolved_\(mode)"] = resolved(d.selfCheckStats)
-                for (row, ids) in [("pitt", builtInIds), ("code", codeIds)] {
+                // -selfcheck-code-mode M: the coding row in mode M only (both when not given)
+                let codeMode = arg("-selfcheck-code-mode")
+                var rows: [(String, [Int])] = [("pitt", pittIds)]
+                if let c = codeRowIds, codeMode == nil || codeMode == mode { rows.append(("code", c)) }
+                for (row, ids) in rows {
                     let th = thermal()
                     do {
                         let g = try await d.selfCheckGreedy(ids, n: exactTokens)
