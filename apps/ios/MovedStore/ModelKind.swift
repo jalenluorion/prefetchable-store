@@ -63,8 +63,12 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
         case .inkling: return fast ? 2.4 : 1.5
         }
     }
-    /// The engine's GPU share of the batched prefill on iOS. 35B: 0.65 / 0.65 (measured). Inkling: off (its in-memory
-    /// projections are 4-bit on phone-small and the GPU split takes only 8-bit ones).
+    /// The engine's GPU share of the batched prefill on iOS. 35B: 0.65 / 0.65 (measured: a 472-token first token 24.6 ->
+    /// 19.5 s). Inkling: off, by measurement (iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact
+    /// ids identical either way): 0.65 / 0.65 took 48.7 / 61.1 s (Exact / Fast) against 40.0 / 50.2 s off from a nominal
+    /// start, 56.5 / 67.1 against 44.8 / 54.5 from serious (the CPU waits ~11 s on the GPU's NVFP4 expert share) and
+    /// left 0.12-0.22 GB more footprint; the projections alone (experts 0) 59.5 / 55.4 s, no gain. The GPU split does take
+    /// its 4-bit projections (gpu_split.cpp): that is not the reason.
     var iosPrefillGpu: (projections: Double, experts: Double) { self == .qwen36 ? (0.65, 0.65) : (-1, -1) }
 
     // MARK: selection
