@@ -50,12 +50,13 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
         case .inkling: return profile == "phone-small" ? 15_526_167_637 : 17_992_385_621
         }
     }
-    /// Decode speed measured on the iPhone 15 Plus (phone-small), tokens/s; nil elsewhere (not measured).
+    /// Decode speed measured on the iPhone 15 Plus (phone-small), tokens/s; nil elsewhere and in Fast (not measured
+    /// under the Fast rules the manifests declare now).
     func tokensPerSec(profile: String, fast: Bool) -> Double? {
-        guard profile == "phone-small" else { return nil }
+        guard profile == "phone-small", !fast else { return nil }
         switch self {
-        case .qwen36: return fast ? 3.9 : 3.1
-        case .inkling: return fast ? 2.4 : 1.5
+        case .qwen36: return 3.1
+        case .inkling: return 1.5
         }
     }
 
