@@ -121,7 +121,7 @@ class SkeletonSource : public DraftSource {
 // running acceptance per probability bin. Not run while backed off (after a lost try: no draft, its draft not chosen or
 // none of it kept, or the step plus the head slower per token than a plain step; backoff0 tokens, doubling up to
 // backoff_max), nor while an earlier source's offer is worth more than the head has been (its running value, its own
-// cost included).
+// cost included). An offer the controller declined backs it off by backoff0 only (the controller's costs, not the head).
 class HeadSource : public DraftSource {
  public:
   static constexpr int NB = 6;
@@ -136,7 +136,7 @@ class HeadSource : public DraftSource {
   void outcome(const DraftCtl& ctl, int l, double gain, bool chosen, int accepted, double step_ms) override;
   void restart() override { backoff = backoff0, backoff_until = 0, h_val = 1.5; }
   std::string stats_json() const;
-  long runs = 0, offers = 0, used = 0, acc = 0, lost = 0, skipped_backoff = 0, skipped_lookup = 0;
+  long runs = 0, offers = 0, used = 0, acc = 0, lost = 0, skipped_backoff = 0, skipped_lookup = 0, declined = 0;
   double ms_total = 0;
   // acceptance per probability bin (priors: the share kept per bin on the Pittsburgh generation and the coding answer,
   // dmeng --draft-check records, results/ink_draft/DRAFT-HEAD.md)
@@ -314,8 +314,10 @@ class Drafter {
   double c1 = 0;                // a plain step's compute ms (running)
   long plain_n = 0;
   double est(int n) const;      // estimated ms of a pass of n positions (1: a plain step)
-  // the compute ratios of passes measured by an earlier run (a line "draft_cost FAMILY r1 .. r8"), in place of the
-  // prior (the manifest's, else the neutral one); after init. save_cost writes this run's (false: too few passes, or not
+  // the compute ratios of passes measured by an earlier run (a line "draft_cost FAMILY r1 .. r8 [wait w2 .. w8]"), in place
+  // of the prior (the manifest's, else the neutral one); after init. The optional wait part: a pass's wait for reads over a
+  // plain step's, per width (the prior otherwise: each drafted position reads two plain steps' urgent MB, which declined
+  // every first offer of Inkling's draft head in the server). save_cost writes this run's (false: too few passes, or not
   // written): the measured prior of the next run
   bool load_cost(const std::string& path, std::string& err);
   bool save_cost(const std::string& path) const;
@@ -336,6 +338,7 @@ class Drafter {
   std::map<std::pair<long, long>, std::vector<std::array<int, 3>>> ea_held_;
   void early(const Draft& d, int L, long p);
   double rho0_[DraftCtl::DMAX + 1] = {0};  // the family's prior compute ratios
+  double wr0_[DraftCtl::DMAX + 1] = {0};   // a cost file's measured pass waits over a plain step's (0: none; the urgent-MB prior)
   std::string family_;
   double cp_n_ = 0, cp_k_ = 0;  // the copy source's drafts verified / kept (decayed per pass)
   int pend_n_ = 0;

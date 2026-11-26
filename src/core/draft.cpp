@@ -206,6 +206,9 @@ void HeadSource::outcome(const DraftCtl& ctl, int l, double gain, bool chosen, i
   const bool faster = ctl.c1 <= 0 || (double)(1 + accepted) * ctl.c1 >= step_ms;
   if (chosen && accepted > 0 && faster) {
     backoff = backoff0;
+  } else if (!chosen && !prob_.empty()) {  // drafts offered and declined by the controller's costs: not the head's own
+    lost++, declined++;                    // failure, so the next try comes backoff0 later (no doubling)
+    backoff_until = now + backoff0;
   } else {
     lost++;
     backoff_until = now + backoff;
@@ -217,7 +220,7 @@ std::string HeadSource::stats_json() const {
   std::ostringstream o;
   o << "{\"thr\":" << thr << ",\"backoff\":[" << backoff0 << "," << backoff_max << "],\"runs\":" << runs << ",\"offers\":" << offers
     << ",\"steps\":" << used << ",\"accepted\":" << acc << ",\"lost\":" << lost << ",\"skipped_backoff\":" << skipped_backoff
-    << ",\"skipped_lookup\":" << skipped_lookup << ",\"ms_total\":" << ms_total << ",\"ms_per_run\":" << ms_total / std::max<long>(1, runs)
+    << ",\"skipped_lookup\":" << skipped_lookup << ",\"declined\":" << declined << ",\"ms_total\":" << ms_total << ",\"ms_per_run\":" << ms_total / std::max<long>(1, runs)
     << ",\"memory_gb\":" << (M ? M->draft_head_bytes() / 1e9 : 0.0) << ",\"calibration\":[";
   for (int b = 0; b < NB; b++) o << (b ? "," : "") << cal[b];
   o << "]}";
@@ -559,8 +562,19 @@ bool Drafter::load_cost(const std::string& path, std::string& err) {
   int got = fscanf(f, "draft_cost %63s", fam);
   for (int k = 1; got == 1 && k <= DraftCtl::DMAX; k++)
     if (fscanf(f, " %lf", &r[k]) != 1) got = 0;
+  double w[DraftCtl::DMAX + 1] = {0};
+  bool has_w = false;
+  if (got == 1) {
+    char tag[16] = {0};
+    if (fscanf(f, " %15s", tag) == 1 && std::string(tag) == "wait") {
+      has_w = true;
+      for (int k = 2; k <= DraftCtl::DMAX; k++)
+        if (fscanf(f, " %lf", &w[k]) != 1 || !(w[k] >= 0)) has_w = false;
+    }
+  }
   fclose(f);
   if (got != 1 || family_ != fam) return (err = path + ": not a draft cost line of " + family_), false;
+  for (int k = 0; k <= DraftCtl::DMAX; k++) wr0_[k] = has_w ? w[k] : 0;
   for (int k = 2; k <= DraftCtl::DMAX; k++)
     if (!(r[k] >= r[k - 1] && r[k] <= k)) return (err = path + ": the ratios must rise and stay at most n"), false;
   r[0] = 0, r[1] = 1;
@@ -589,6 +603,20 @@ bool Drafter::save_cost(const std::string& path) const {
   if (!f) return false;
   fprintf(f, "draft_cost %s", family_.c_str());
   for (int k = 1; k <= DraftCtl::DMAX; k++) fprintf(f, " %.4f", r[k]);
+  const double w1 = ws[1].wait;
+  if (w1 > 0) {  // the waits: a width's own (three or more recent passes), else the fitted line, over a plain step's
+    double wa = 0, wb = 0;
+    f_wait.solve(0, 0, 0, wa, wb);
+    fprintf(f, " wait");
+    double prev = 0;
+    for (int k = 2; k <= DraftCtl::DMAX; k++) {
+      const WidthStat& M = ws[k];
+      double v = M.d_n >= 3 ? M.d_wait / M.d_n : std::max(0.0, wa + std::max(0.0, wb) * (k - 2));
+      v = std::max(prev, v / w1);
+      fprintf(f, " %.4f", v);
+      prev = v;
+    }
+  }
   fprintf(f, "\n");
   fclose(f);
   return rename(tmp.c_str(), path.c_str()) == 0;
@@ -792,6 +820,7 @@ double Drafter::est(int n) const {
   // carry to wide passes, whose reads run side by side
   const double kp = u1 > 0.5 ? w1 / u1 : 0.3;
   double wa = kp * std::max(0.0, ua), wb = kp * std::max(0.0, ub);
+  if (wr0_[2] > 0) wa = wr0_[2] * w1, wb = std::max(0.0, wr0_[3] - wr0_[2]) * w1;  // a cost file's measured waits
   f_wait.solve(wa, wb, 2, wa, wb);
   const double wt = std::max(0.0, wa + std::max(0.0, wb) * (n - 2));
   // what a pass leaves the next step (pooled; may be negative: a pass can read what the next step needs)
