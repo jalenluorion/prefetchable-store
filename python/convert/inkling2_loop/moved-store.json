@@ -1091,18 +1091,62 @@
    "engine": "lossless"
   },
   "fast": {
-   "definition": "The model's own router still picks. A picked expert that is not in memory is waited for if its routing weight is over 0.1 or its read is already in flight; otherwise it is left out (no substitute, no renormalisation). Router names are on.",
-   "engine": "approx:drop",
-   "wait_if": {
-    "routing_weight_over": 0.1,
-    "read_in_flight": true
+   "definition": "The model's own router still picks. The picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation). A light pick whose read is in flight is not waited for. Router names are on (the one leave-out rule, as Flash-Next).",
+   "engine": "approx:drop:w=0.13:mass=0.13:late=-1",
+   "read_if": {
+    "missing_routing_weight_over": 0.13,
+    "order": "heaviest missing pick first"
    },
    "otherwise": "left out",
    "substitute": false,
-   "renormalise": false
+   "renormalise": false,
+   "calibration": {
+    "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
+    "rows": [
+     {
+      "setting": "leave-out rule 0.13 (this)",
+      "tok_s": [
+       8.08,
+       6.8
+      ],
+      "mb_per_token": [
+       225.7,
+       223.4
+      ],
+      "top1_agree": [
+       0.985,
+       0.983
+      ],
+      "nll_delta": [
+       0.0045,
+       0.0039
+      ]
+     },
+     {
+      "setting": "weight 0.1, wait for reads in flight (before)",
+      "tok_s": [
+       6.47,
+       7.24
+      ],
+      "mb_per_token": [
+       221.3,
+       219.7
+      ],
+      "top1_agree": [
+       0.985,
+       0.975
+      ],
+      "nll_delta": [
+       0.0045,
+       0.0063
+      ]
+     }
+    ],
+    "reason": "at least as good as the rule before on the Mac (tok/s 7.44 against 6.86 mean, agreement 0.984 against 0.980); not yet measured on a phone"
+   }
   },
   "fast-eps": {
-   "definition": "Fast mode under one leave-out rule (Flash-Next's fast mode): the picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation); a light pick whose read is in flight is not waited for. Built and selectable (--mode fast-eps); not a default: not measured on this model (its calibration of eps against agreement with exact mode is still to do).",
+   "definition": "The same as fast (kept as a name: fast mode is this rule now).",
    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
   }
  },

@@ -1054,10 +1054,54 @@
    },
    "otherwise": "left out",
    "substitute": false,
-   "renormalise": false
+   "renormalise": false,
+   "calibration": {
+    "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
+    "rows": [
+     {
+      "setting": "weight 0.1, wait for reads in flight (this)",
+      "tok_s": [
+       13.06,
+       6.38
+      ],
+      "mb_per_token": [
+       92.0,
+       91.8
+      ],
+      "top1_agree": [
+       0.982,
+       0.983
+      ],
+      "nll_delta": [
+       0.0021,
+       0.0012
+      ]
+     },
+     {
+      "setting": "leave-out rule 0.13 (fast-eps)",
+      "tok_s": [
+       14.61,
+       15.11
+      ],
+      "mb_per_token": [
+       92.7,
+       92.8
+      ],
+      "top1_agree": [
+       0.982,
+       0.978
+      ],
+      "nll_delta": [
+       0.0021,
+       0.0034
+      ]
+     }
+    ],
+    "reason": "kept: the one leave-out rule (fast-eps) measured worse on the iPhone (phone-small, where fast mode is the default: 3.57 against 4.1 tok/s); on the Mac it ran faster (14.9 against 13.1 tok/s in the clean run; the 6.38 run had 400% other CPU) at agreement 0.980 against 0.982"
+   }
   },
   "fast-eps": {
-   "definition": "Fast mode under one leave-out rule (Flash-Next's fast mode): the picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation); a light pick whose read is in flight is not waited for. Built and selectable (--mode fast-eps); not a default: not measured on this model (its calibration of eps against agreement with exact mode is still to do).",
+   "definition": "Fast mode under the one leave-out rule (Flash-Next's and Inkling's fast mode): the picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation); a light pick whose read is in flight is not waited for. Selectable (--mode fast-eps), not this model's fast mode: measured worse on the iPhone (3.57 against 4.1 tok/s); on the Mac faster (see fast.calibration).",
    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
   }
  },

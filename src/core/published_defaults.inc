@@ -45,7 +45,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "engine": "lossless"
    },
    "fast": {
-    "engine": "approx:drop"
+    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
    },
    "fast-eps": {
     "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
