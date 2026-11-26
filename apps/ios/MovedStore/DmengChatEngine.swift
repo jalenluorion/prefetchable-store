@@ -65,13 +65,11 @@ enum DmengLaunch {
         }
         return miss
     }
-    /// The expert cache on phone-small: sized for a 2.96 GB app footprint, less what the model holds beside the cache
-    /// (ModelKind.phoneSmallSlabGB: 1.42 GB for the 35B, 1.70 GB for Inkling). On larger phones the engine sizes it
-    /// from the memory iOS makes available (0 here); on the Mac 3.3 GB.
-    static let footprintTargetGB = 2.96
+    /// The expert cache: 0 on iOS, the profile's slab rule decides (phone-small: profiles.phone-small.cache_slab, the
+    /// footprint target less the model's measured non-cache footprint; phone: what iOS makes available); on the Mac 3.3 GB.
     static var cacheGB: Double {
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        return profile == "phone-small" ? kind.phoneSmallSlabGB : 0
+        return 0
         #else
         return 3.3
         #endif
@@ -437,7 +435,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.checkpointGB = 0
         o.parkGB = 0.001
         #endif
-        o.ctx = kind.ctx(profile: DmengLaunch.profile)
+        o.ctx = 0  // the profile's positions (Inkling's phone-small: 4096), else the engine's 16384
         // Inkling: the profile named explicitly (its phone-small set's NVFP4 layers 20-23 come from the profile's experts
         // override); the 35B: the C API's own choice from the memory available at open
         if kind == .inkling { o.profile = DmengLaunch.profile }
@@ -467,10 +465,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.mode = DmengLaunch.engineMode ?? "exact"
         o.residentBits = bitsNow
         o.prefillThreads = 0
-        // the batched prefill split with the GPU (exact: the GPU's rows are the CPU kernels' bits). The 35B on the phone:
-        // 0.65 / 0.65 (a 472-token input: first token in 19.5 s against 24.6 s without the split)
+        // the batched prefill split with the GPU (exact: the GPU's rows are the CPU kernels' bits): on iOS the profile's
+        // (phone and phone-small declare the 35B 0.65 / 0.65, Inkling 0 / 0, with their iPhone measurements); off on the Mac
         #if os(iOS) && !targetEnvironment(macCatalyst)
-        let gpu = kind.iosPrefillGpu
+        let gpu = (projections: 0.0, experts: 0.0)
         #else
         let gpu = (projections: -1.0, experts: -1.0)
         #endif

@@ -414,6 +414,20 @@ if wanted("presets"):
 
         bad, ncell, cross = [], 0, []
         FRONT_SPECIFIC = set()  # (the prompt's sub-chunk is the model's declared one in all three: printed as 0)
+
+        def slab_rule(prof):
+            """The slab rule a profile resolves to, from the manifest (presets.h SlabRule): its cache_slab, else the
+            built-in available rule."""
+            sl = man["profiles"][prof].get("cache_slab") or {"rule": "available"}
+            e = {"rule": sl["rule"], "min_gb": sl.get("min_gb", 0.6), "max_gb": sl.get("max_gb", 8.0)}
+            if sl["rule"] == "footprint_target":
+                e.update(target_gb=sl["target_gb"], non_cache_gb=sl["non_cache_gb"])
+            else:
+                e.update(state_gb=sl.get("state_gb", 0.3), margin_gb=sl.get("margin_gb", 0.9))
+            return e
+
+        def slab_exp(prof):  # as resolved.slab prints it: only when the profile's cache is a slab
+            return slab_rule(prof) if man["profiles"][prof].get("cache") == "slab" else None
         for prof in man["profiles"]:
             r = run([DMENG, "--model", M, "--profile", prof, "--print-defaults"])
             P = json.loads(r.stdout)
@@ -426,12 +440,21 @@ if wanted("presets"):
             # the profile's declared drafting (the C API has none: off there, below); the tiny folders' profiles declare it
             # as the published manifests do (a family without what it needs would fail at open: the drafting check)
             exp_default["drafts"] = P["drafts"]
+            exp_default["slab"] = slab_exp(prof)  # (the mac profile: not printed, the block unchanged)
+            # the profile's declared context positions (profiles.<p>.ctx: N or {"positions": N}; not printed when undeclared)
+            cx = man["profiles"][prof].get("ctx")
+            ctx_decl = (cx.get("positions") if isinstance(cx, dict) else cx) or None
+            exp_default["ctx"] = ctx_decl
+            # the profile's declared prompt GPU share, from the manifest (a build without Metal: CPU only, with a note)
+            pg = man["profiles"][prof].get("prefill_gpu")
+            if pg and not any("without Metal" in n for n in P["notes"]):
+                exp_default["prefill_gpu"] = {"projections": pg.get("projections", 0), "experts": pg.get("experts", 0)}
             gpu = P["prefill_gpu"]
             cells = [("default", [], exp_default),
                      ("mode fast", ["--mode", "fast"], {"mode": json.loads(run([DMENG, "--model", M, "--profile", prof, "--mode", "fast", "--print-defaults"]).stdout)["engine_mode"]}),
                      ("top m 4", ["--m", "4"], {"names": {"rule": "top", "m": 4}} if P["routers"] else {"names": None}),
                      ("names off", ["--routers", "none"], {"routers": "", "names": None}),
-                     ("cache 0.05", ["--cache-gb", "0.05"], {"cache_gb": 0.05, "cache_auto": False}),
+                     ("cache 0.05", ["--cache-gb", "0.05"], {"cache_gb": 0.05, "cache_auto": False, "slab": None}),
                      ("evict freq", ["--evict", "freq"], {"eviction": "freq"}),
                      ("gpu 0.2", ["--gpu", "0.2"], {"prefill_gpu": {"projections": 0.2, "experts": gpu["experts"]}}),
                      ("gpu off", ["--gpu-off"], {"prefill_gpu": {"projections": 0, "experts": 0}}),
@@ -440,6 +463,7 @@ if wanted("presets"):
                      ("run-ahead limits", ["--run-ahead-budget", "0.5", "--run-ahead-max", "3", "--run-ahead-sat-skip", "1"],
                       {"run_ahead": {"budget": 0.5, "max_tok": 3, "sat_skip": True}}),
                      ("readers 2", ["--readers", "2"], {"readers": 2}),
+                     ("ctx 2048", ["--ctx", "2048"], {"ctx": 2048 if ctx_decl else None}),  # an explicit ctx over the declared one
                      ("drafts 0", ["--drafts", "0"], {"drafts": {"lookup": False, "head": False}, "draft": "none"})]
             if routers:
                 cells.append(("router file", ["--routers", routers[0]], {"routers": routers[0], "names": {"rule": "top", "m": 8}}))
@@ -458,6 +482,40 @@ if wanted("presets"):
                     keys = set().union(*[g.keys() for g in got.values()]) - FRONT_SPECIFIC
                     cross.append(f"{prof} {nm}: " + ", ".join(f"{k} {{{', '.join(f'{fe} {json.dumps(got[fe].get(k))}' for fe in got)}}}" for k in sorted(keys)
                                                              if len({json.dumps(got[fe].get(k)) for fe in got}) > 1))
+        # the slab on iOS (the C API as on an iPhone, DMENG_TEST_AVAIL_OPEN: 4.0 GB available at open), every profile: the
+        # profile's declared rule (cache_slab), else the built-in available rule (the mac profile too, as the C API sizes
+        # a slab wherever iOS reports the memory): policy.slab_rule prints the rule, its inputs and the slab, and the
+        # slab follows from them; resolved.slab is the rule, resolved.cache_gb the slab
+        AV = 4.0e9
+        for prof in man["profiles"]:
+            if os.path.exists(j := os.path.join(T, "pr.json")):
+                os.remove(j)
+            r = run([DMGATE, "--model", M, "--profile", prof, "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j],
+                    env={"DMENG_TEST_AVAIL_OPEN": str(int(AV))})
+            st = json.load(open(j))["stats"] if r.returncode == 0 else None
+            if not st:
+                bad.append(f"{prof} capi iOS slab: rc {r.returncode} {r.stderr[-200:]}")
+                continue
+            sr, rs = st["policy"].get("slab_rule") or {}, st["resolved"]
+            e = slab_rule(prof)
+            clamp = lambda x: min(e["max_gb"], max(e["min_gb"], x))
+            want_gb = clamp(e["target_gb"] - e["non_cache_gb"]) if e["rule"] == "footprint_target" else \
+                clamp(sr.get("available_gb", -9) - sr.get("resident_gb", 9) - sr.get("router_gb", 9) - e["state_gb"] - e["margin_gb"])
+            errs = sub(e, sr) + sub(e, rs.get("slab"))
+            # (slab_rule.gb and resolved.cache_gb are printed to 6 digits, dm_stats_json's slab_auto_gb to 3)
+            for k, g, tol in (("policy.slab_rule.gb", sr.get("gb"), 1e-4), ("resolved.cache_gb", rs.get("cache_gb"), 1e-4),
+                              ("policy.slab_auto_gb", st["policy"].get("slab_auto_gb"), 5e-3)):
+                if g is None or abs(g - want_gb) > tol:
+                    errs.append(f"{k}: {g!r} != {want_gb:.6f}")
+            # the profile's declared prompt GPU share through the C API as on an iPhone (phone and phone-small)
+            pg = man["profiles"][prof].get("prefill_gpu")
+            if pg and not any("without Metal" in n for n in json.loads(run([DMENG, "--model", M, "--profile", prof, "--print-defaults"]).stdout)["notes"]):
+                errs += sub({"projections": pg.get("projections", 0), "experts": pg.get("experts", 0)}, rs.get("prefill_gpu"))
+            if e["rule"] == "available":
+                errs += sub(AV / 1e9, sr.get("available_gb")) + ([] if sr.get("resident_gb", 0) > 0 else ["resident_gb not > 0"])
+            if errs:
+                bad.append(f"{prof} capi iOS slab: {'; '.join(errs)}")
+            ncell += 1
         # the C API has no drafting: a profile's declared drafts are left off with a note, an explicit request is refused
         FD = declared("pd", {"lookup": True, "head": False})
         j = os.path.join(T, "pr.json")
@@ -488,14 +546,18 @@ if wanted("presets"):
                     bad.append(f"{prof} prefill {fe}: {g} != {want}")
             ncell += 1
         # a profile's own mode declaration (profiles.<p>.modes.fast) over the model-level modes.fast, in a temporary
-        # manifest: that profile resolves to its string, every other profile to the model-level one, in all three front
-        # ends ("preset": engine_mode, engine_mode_from; "resolved": mode); an explicit engine string is kept as given
+        # manifest: that profile resolves to its string, every other profile to the folder's own declaration (the 35B's
+        # phone-small: approx:drop:w=0.08) or the model-level one, in all three front ends ("preset": engine_mode,
+        # engine_mode_from; "resolved": mode); an explicit engine string is kept as given
         OVER = "approx:drop:w=0.15:mass=0.15:late=-1"
         op = "phone" if "phone" in man["profiles"] else next(iter(man["profiles"]))
+
+        PER_MODE = {"exact": {"rule": "top", "m": 5}, "fast": {"rule": "confidence", "tau": 0.25, "candidates": 12}, "calibration": {"measured": "(a test value)"}}
 
         def over(m2):
             m2["profiles"][op]["modes"] = {"fast": {"definition": "the fast mode with this profile's own leave-out threshold", "engine": OVER,
                                                     "read_if": {"missing_routing_weight_over": 0.15}, "calibration": {"measured": "(a test value)"}}}
+            m2["profiles"][op]["names"] = PER_MODE  # a names rule per mode (profiles.<p>.names: {"exact": rule, "fast": rule})
 
         FO = declared("pm", edit=over)
         model_fast = man["modes"]["fast"]["engine"]
@@ -516,7 +578,11 @@ if wanted("presets"):
             d = json.loads(ready[0][6:]) if ready else None
             return (d["preset"], d["resolved"]) if d else r.stderr[-200:]
 
-        cases = [(prof, "fast", (OVER, f"profiles.{op}.modes.fast") if prof == op else (model_fast, "modes.fast")) for prof in man["profiles"]]
+        def own_fast(prof):  # the folder's own declaration of a profile's fast mode (the 35B's phone-small), else the model-level one
+            e = man["profiles"][prof].get("modes", {}).get("fast", {}).get("engine")
+            return (e, f"profiles.{prof}.modes.fast") if e else (model_fast, "modes.fast")
+
+        cases = [(prof, "fast", (OVER, f"profiles.{op}.modes.fast") if prof == op else own_fast(prof)) for prof in man["profiles"]]
         cases.append((op, "approx:drop:w=0.2", ("approx:drop:w=0.2", "given")))  # an explicit engine string wins
         for prof, mode, (s, src) in cases:
             for fe in ("dmeng", "capi", "dmserve"):
@@ -525,6 +591,45 @@ if wanted("presets"):
                     got_s = g if not isinstance(g, tuple) else (g[0].get("engine_mode"), g[0].get("engine_mode_from"), g[1].get("mode"))
                     bad.append(f"{prof} --mode {mode} with {op}'s own fast {fe}: {got_s} != {(s, src, s)}")
             ncell += 1
+        # the names rule per mode: a profile's names may be one rule or {"exact": rule, "fast": rule}, taken for the mode in
+        # force; resolved.names in all three front ends, in the folder (its own declarations: the 35B's phone-small) and
+        # in the temporary manifest above (op's per-mode rule), for --mode exact / fast and an engine string
+        m_over = json.loads(json.dumps(man))
+        over(m_over)
+
+        def names_exp(mm, prof, mode):
+            for nb in (mm["profiles"][prof].get("names"), mm.get("defaults", {}).get("names")):
+                if isinstance(nb, dict):
+                    r = nb if "rule" in nb else nb.get(mode)
+                    if r:
+                        return {"rule": "confidence", "tau": r.get("tau", 0.5), "candidates": r.get("candidates", 16)} if r["rule"] == "confidence" \
+                            else {"rule": "top", "m": r.get("m", 8)}
+            return {"rule": "top", "m": 8}
+
+        for fold, mm in ((M, man), (FO, m_over)):
+            for prof in man["profiles"]:
+                for mode, nmode in (("exact", "exact"), ("fast", "fast"), ("approx:drop:w=0.2", "fast")):
+                    want_n = names_exp(mm, prof, nmode)
+                    for fe in ("dmeng", "capi", "dmserve"):
+                        if os.path.exists(j):
+                            os.remove(j)
+                        if fe == "dmeng":
+                            r = run([DMENG, "--model", fold, "--profile", prof, "--mode", mode, "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
+                            g = json.load(open(j))["resolved"] if r.returncode == 0 else None
+                        elif fe == "capi":
+                            r = run([DMGATE, "--model", fold, "--profile", prof, "--mode", mode, "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j])
+                            g = json.load(open(j))["stats"]["resolved"] if r.returncode == 0 else None
+                        else:
+                            r = run([DMSERVE, "--model", fold, "--profile", prof, "--mode", mode, "--threads", "2"], inp="", timeout=120)
+                            ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+                            g = json.loads(ready[0][6:])["resolved"] if ready else None
+                        if g is None:
+                            bad.append(f"{prof} names --mode {mode} {fe}: {r.stderr[-200:]}")
+                            continue
+                        e = sub(want_n if g.get("routers") else None, g.get("names"))
+                        if e:
+                            bad.append(f"{prof} names --mode {mode} {fe}{' (per-mode test manifest)' if fold == FO else ''}: {'; '.join(e)}")
+                    ncell += 1
         detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])})"
         verdict("presets", "FAIL" if bad or cross else "PASS", detail + ("" if not bad else " | precedence: " + " || ".join(bad[:6]))
                 + ("" if not cross else " | front ends differ: " + " || ".join(cross[:6])))

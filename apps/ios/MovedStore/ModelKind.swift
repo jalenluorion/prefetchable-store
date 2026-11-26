@@ -36,20 +36,14 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     /// The engine's saved states (Application Support/<bundle>/<name>): one folder per model, so a state computed with
     /// one model's weights is never offered to the other.
     var prefixDirName: String { self == .qwen36 ? "dmeng-prefix" : "dmeng-prefix-inkling" }
-    /// Positions the engine reserves. Inkling on phone-small: 4096 (16K would reserve 0.54 GB of attention cache).
-    func ctx(profile: String) -> Int { self == .inkling && profile == "phone-small" ? 4096 : 16384 }
     /// The mode setting's key: one per model (each model has its default per profile).
     var modeKey: String { self == .qwen36 ? "engine.mode" : "engine.mode.inkling" }
     /// Fast on both phone profiles (phone, phone-small), for both models; Exact elsewhere (the manifests' profiles agree).
     func defaultMode(profile: String) -> String { profile == "phone" || profile == "phone-small" ? "fast" : "exact" }
-    /// The engine's mode string for the app's Fast. 35B: approx:drop at the threshold measured for the calibrated 4-bit
-    /// in-memory weights (0.08); Inkling: the engine's own fast preset.
-    var fastEngineMode: String { self == .qwen36 ? "approx:drop:w=0.08" : "fast" }
-    /// phone-small's expert cache, one rule for both models: the 2.96 GB app footprint target less what the model holds
-    /// beside the cache (measured on the iPhone 15 Plus in decode: the 35B 1.54 GB, Inkling 1.26 GB, its footprint
-    /// 2.90-2.98 GB at a 1.70 GB cache). A model property: it belongs in the manifests' phone-small profile (staged).
-    var phoneSmallNonSlabGB: Double { self == .qwen36 ? 1.54 : 1.26 }
-    var phoneSmallSlabGB: Double { DmengLaunch.footprintTargetGB - phoneSmallNonSlabGB }
+    /// The engine's mode string for the app's Fast: "fast", the manifest's own definition for both models (the threshold
+    /// is the manifest's to set: the 35B's 0.08 measured with the calibrated 4-bit in-memory weights is staged for its
+    /// phone-small profile, ModelKind's staged values).
+    var fastEngineMode: String { "fast" }
     /// The download's size before the manifest is in (the Hub manifest's profile bytes).
     func approxBytes(profile: String) -> Int64 {
         switch self {
@@ -65,13 +59,6 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
         case .inkling: return fast ? 2.4 : 1.5
         }
     }
-    /// The engine's GPU share of the batched prefill on iOS. 35B: 0.65 / 0.65 (measured: a 472-token first token 24.6 ->
-    /// 19.5 s). Inkling: off, by measurement (iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact
-    /// ids identical either way): 0.65 / 0.65 took 48.7 / 61.1 s (Exact / Fast) against 40.0 / 50.2 s off from a nominal
-    /// start, 56.5 / 67.1 against 44.8 / 54.5 from serious (the CPU waits ~11 s on the GPU's NVFP4 expert share) and
-    /// left 0.12-0.22 GB more footprint; the projections alone (experts 0) 59.5 / 55.4 s, no gain. The GPU split does take
-    /// its 4-bit projections (gpu_split.cpp): that is not the reason.
-    var iosPrefillGpu: (projections: Double, experts: Double) { self == .qwen36 ? (0.65, 0.65) : (-1, -1) }
 
     // MARK: selection
 

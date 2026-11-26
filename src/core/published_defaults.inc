@@ -44,10 +44,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "engine": "lossless"
    },
    "fast": {
-    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
-   },
-   "fast-eps": {
-    "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
+    "engine": "approx:drop:w=0.15"
    }
   },
   "prefill": {
@@ -105,6 +102,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "rule": "confidence",
      "tau": 0.5
     },
+    "prefill_gpu": {
+     "experts": 0,
+     "projections": 0
+    },
     "readers": 8,
     "resident": "resident_q8",
     "run_ahead": {
@@ -119,6 +120,14 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone-small": {
     "cache": "slab",
+    "cache_slab": {
+     "non_cache_gb": 1.26,
+     "rule": "footprint_target",
+     "target_gb": 2.96
+    },
+    "ctx": {
+     "positions": 4096
+    },
     "drafts": {
      "head": false,
      "lookup": false
@@ -128,6 +137,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "candidates": 16,
      "rule": "confidence",
      "tau": 0.5
+    },
+    "prefill_gpu": {
+     "experts": 0,
+     "projections": 0
     },
     "readers": 8,
     "resident": "resident_q4",
@@ -239,6 +252,10 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "rule": "confidence",
      "tau": 0.5
     },
+    "prefill_gpu": {
+     "experts": 0.65,
+     "projections": 0.65
+    },
     "readers": 8,
     "resident": "resident_q8",
     "run_ahead": {
@@ -253,15 +270,38 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    },
    "phone-small": {
     "cache": "slab",
+    "cache_slab": {
+     "non_cache_gb": 1.54,
+     "rule": "footprint_target",
+     "target_gb": 2.96
+    },
+    "ctx": {
+     "positions": 16384
+    },
     "drafts": {
      "head": false,
      "lookup": false
     },
     "mode": "fast",
+    "modes": {
+     "fast": {
+      "engine": "approx:drop:w=0.08"
+     }
+    },
     "names": {
-     "candidates": 16,
-     "rule": "confidence",
-     "tau": 0.5
+     "exact": {
+      "candidates": 16,
+      "rule": "confidence",
+      "tau": 0.5
+     },
+     "fast": {
+      "m": 3,
+      "rule": "top"
+     }
+    },
+    "prefill_gpu": {
+     "experts": 0.65,
+     "projections": 0.65
     },
     "readers": 8,
     "resident": "resident_q4",

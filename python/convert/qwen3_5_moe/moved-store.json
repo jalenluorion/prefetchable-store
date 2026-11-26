@@ -1038,7 +1038,7 @@
  "unknown": [],
  "generated": {
   "by": "moved-store release tools, from the manifest of 2026-11-21 plus the new parts",
-  "date": "2026-11-22"
+  "date": "2026-11-26"
  },
  "modes": {
   "exact": {
@@ -1685,6 +1685,15 @@
    "bytes": 21309272620,
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0.65,
+    "experts": 0.65,
+    "calibration": {
+     "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
+     "reason": "the GPU split pays on this phone for this model",
+     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class; the app has passed this share on phone so far, so the resolved behaviour on phones does not change"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,
@@ -1698,6 +1707,16 @@
   "phone-small": {
    "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
    "mode": "fast",
+   "modes": {
+    "fast": {
+     "definition": "the model-level fast mode with the leave-out threshold of this profile's calibrated 4-bit in-memory weights: a picked expert not in memory is waited for if its routing weight is over 0.08 or its read is in flight, otherwise left out",
+     "engine": "approx:drop:w=0.08",
+     "calibration": {
+      "measured": "top choice equal to the exact 8-bit engine, prose / agent text, the calibrated 4-bit in-memory weights (engine session, Mac): 0.900 / 0.885 at threshold 0.08, 0.888 / 0.878 at 0.09, 0.860 / 0.873 at 0.10 (the model-level value); exact 0.913 / 0.884; on the iPhone 15 Plus (phone-small, 1.42 GB slab, 400 tokens of prose) 3.52 tok/s at 0.08 (results/ios/p2/P2.md)",
+      "reason": "0.10 gives up 0.04 of prose agreement on these weights; 0.08 keeps fast within 0.013 of exact; the 8-bit profiles keep the model-level threshold"
+     }
+    }
+   },
    "drafts": {
     "lookup": false,
     "head": false
@@ -1706,12 +1725,31 @@
    "precision": "4-bit",
    "precision_detail": "4-bit affine, groups of 64, calibrated",
    "names": {
-    "rule": "confidence",
-    "tau": 0.5,
-    "candidates": 16
+    "exact": {
+     "rule": "confidence",
+     "tau": 0.5,
+     "candidates": 16
+    },
+    "fast": {
+     "rule": "top",
+     "m": 3
+    },
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, fast at threshold 0.08 with linear_k2, 8 readers, slab 1.485 GB, 200 tokens each, one run per cell, judged by counters (results/ios/p2/P2.md, names at threshold 0.08, 2026-11-23): plain top 3 4.33 tok/s, wait / compute 157 / 74 ms, 153 MB per token; the confidence rule (tau 0.5 over 16) 3.94 tok/s, 183 / 70 ms, 167 MB; plain top 2 4.06 tok/s; no names 3.92 tok/s",
+     "reason": "fast: a plain top 3, the lowest wait; exact: the confidence rule, as every profile; the app set this pair before it was declared here; the confidence rule in fast is to be measured again on the phone for the 35B once its restore is in (staged 2026-11-26)"
+    }
    },
    "cache": "slab",
-   "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
+   "cache_rule": "locked slab sized at open by cache_slab: the 2.96 GB app footprint target of the 6 GB class less this model's footprint beside the cache, clamped to 0.6-8 GB",
+   "cache_slab": {
+    "rule": "footprint_target",
+    "target_gb": 2.96,
+    "non_cache_gb": 1.54,
+    "calibration": {
+     "measured": "iPhone 15 Plus (6 GB), phone-small, flash-last / release builds, 2026-11-26: the app footprint beside the expert cache in decode, 1.54 GB (4-bit in-memory weights, router, state, checkpoints); footprint 2.93-2.95 GB in decode at the 1.42 GB slab (results/ios/p2/P2.md)",
+     "reason": "sized for an app footprint of 2.96 GB on the 6 GB class (the old app's footprint on this phone, the equal-footprint comparison of results/ios/p2/P2.md) instead of from the memory iOS reports at open; the target belongs to the device class, the non-cache footprint to the model: 2.96 - 1.54 = 1.42 GB"
+    }
+   },
    "parts": [
     {
      "path": "config.json",
@@ -1963,6 +2001,21 @@
    "status": "top choice equal to the exact 8-bit engine, prose / agent text, measured on the iPhone 15 Plus: exact 0.913 / 0.884, fast (threshold 0.08) 0.891 / 0.881",
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0.65,
+    "experts": 0.65,
+    "calibration": {
+     "measured": "iPhone 15 Plus (A16), phone-small, exact, 4 prefill threads, the cold 472-token input at a 1.42 GB slab (results/ios/p2/P2.md, 2026-11-23): first token 19.5 s at 0.65 / 0.65 against 24.6 s without the split (21.5-25.2 s, Nov 22) and 22.3 s at 0.5 / 0.5; reply ids identical (60 of 60); footprint peak 3.44 GB in the prefill, 2.73 GB in the decode after it",
+     "reason": "the GPU split pays on this phone for this model"
+    }
+   },
+   "ctx": {
+    "positions": 16384,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, 2026-11-26: the state's KV reserve at 16,384 positions is 0.336 GB, inside the 1.54 GB non-cache footprint (cache_slab)",
+     "reason": "the positions every front end reserves on this profile: the value the app set"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,

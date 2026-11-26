@@ -10,6 +10,7 @@
 #include <os/proc.h>
 #endif
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -281,6 +282,28 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     }
     p.cache_start = b;
   }
+  // the slab's sizing rule (cache "slab", the iPhone): the profile's "cache_slab", else the built-in "available" rule
+  if (const Json* sl = prof("cache_slab"); sl && sl->kind == Json::OBJ) {
+    const std::string rule = (*sl)["rule"].str_or("");
+    SlabRule& s = p.slab;
+    if (rule == "footprint_target") {
+      s.rule = rule;
+      s.target_gb = (*sl)["target_gb"].f(0);
+      s.non_cache_gb = (*sl)["non_cache_gb"].f(0);
+      if (s.target_gb <= 0 || s.non_cache_gb < 0) {
+        err = "profile " + p.profile + ": cache_slab footprint_target needs target_gb > 0 and non_cache_gb >= 0";
+        return false;
+      }
+    } else if (rule == "available") {
+      s.state_gb = (*sl)["state_gb"].f(s.state_gb);
+      s.margin_gb = (*sl)["margin_gb"].f(s.margin_gb);
+    } else {
+      err = "profile " + p.profile + ": cache_slab.rule must be available or footprint_target";
+      return false;
+    }
+    s.min_gb = (*sl)["min_gb"].f(s.min_gb);
+    s.max_gb = (*sl)["max_gb"].f(s.max_gb);
+  }
   // names
   if (const Json* rt = dflt("routers")) {
     for (auto& id : rt->arr) {
@@ -292,7 +315,18 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
       }
     }
   }
-  if (const Json* nm = dflt("names")) {
+  // the names rule: one rule, or one per mode ({"exact": rule, "fast": rule}) taken for the mode in force (an engine
+  // string given as the mode: exact when lossless, else fast); a per-mode block without this mode falls through to the
+  // next source (the published profile, the built-in one, the defaults)
+  const std::string nmode = p.mode == "exact" || p.mode == "fast" ? p.mode : p.engine_mode == "lossless" ? "exact" : "fast";
+  auto rule_of = [&](const Json* nm) -> const Json* {
+    if (!nm || nm->kind != Json::OBJ) return nullptr;
+    return (*nm)["rule"].kind == Json::STR ? nm : member(nm, nmode);
+  };
+  const Json* nm = nullptr;
+  for (const Json* o : {mp, fp, bp, md, fd, bd})
+    if (!nm) nm = rule_of(member(o, "names"));
+  if (nm) {
     if ((*nm)["rule"].s() == "confidence") {
       p.tau = (*nm)["tau"].f(0.5);
       p.cand = (int)(*nm)["candidates"].i(16);
@@ -361,6 +395,12 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.bg_ranks = (int)(*bg)["ranks"].i(0);
     p.bg_gate = (int)(*bg)["gate"].i(0);
   }
+  // the context positions (per profile only: the KV reserve the device class holds, measured per model)
+  if (const Json* cx = prof("ctx")) {
+    const Json* n = cx->kind == Json::OBJ ? member(cx, "positions") : cx;
+    if (!n || n->kind != Json::NUM || n->i(0) <= 0) return (err = "profile " + p.profile + ": ctx must be N or {\"positions\": N} with N > 0"), false;
+    p.ctx = (int)n->i(0);
+  }
   return true;
 }
 
@@ -383,10 +423,26 @@ static std::string q(const std::string& s) {
   return o + "\"";
 }
 
+int64_t SlabRule::bytes(int64_t avail, int64_t resident, int64_t router) const {
+  auto B = [](double gb) { return (int64_t)(gb * 1e9); };
+  const int64_t b = rule == "footprint_target" ? B(target_gb) - B(non_cache_gb) : avail - resident - router - B(state_gb) - B(margin_gb);
+  return std::min<int64_t>(B(max_gb), std::max<int64_t>(B(min_gb), b));
+}
+
+std::string SlabRule::json() const {
+  std::ostringstream o;
+  o << "{\"rule\":" << q(rule);
+  if (rule == "footprint_target") o << ",\"target_gb\":" << target_gb << ",\"non_cache_gb\":" << non_cache_gb;
+  else o << ",\"state_gb\":" << state_gb << ",\"margin_gb\":" << margin_gb;
+  o << ",\"min_gb\":" << min_gb << ",\"max_gb\":" << max_gb << "}";
+  return o.str();
+}
+
 std::string Preset::json() const {
   std::ostringstream o;
   o << "{\"profile\":" << q(profile) << ",\"profile_why\":" << q(profile_why) << ",\"mode\":" << q(mode) << ",\"engine_mode\":" << q(engine_mode)
-    << ",\"engine_mode_from\":" << q(engine_mode_from) << ",\"resident\":" << q(resident_id) << ",\"cache\":" << q(cache) << ",\"cache_start\":" << q(cache_start) << ",\"routers\":" << q(router_id) << ",\"routers_file\":" << q(routers)
+    << ",\"engine_mode_from\":" << q(engine_mode_from) << ",\"resident\":" << q(resident_id) << ",\"cache\":" << q(cache) << ",\"cache_start\":" << q(cache_start)
+    << (cache == "slab" ? ",\"slab\":" + slab.json() : std::string()) << ",\"routers\":" << q(router_id) << ",\"routers_file\":" << q(routers)
     << ",\"names\":" << (tau > 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
@@ -394,7 +450,9 @@ std::string Preset::json() const {
     << "},\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
-    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"notes\":[";
+    << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "}";
+  if (ctx > 0) o << ",\"ctx\":" << ctx;  // (declared only)
+  o << ",\"notes\":[";
   for (size_t i = 0; i < notes.size(); i++) o << (i ? "," : "") << q(notes[i]);
   o << "]}";
   return o.str();
@@ -418,8 +476,9 @@ std::string Resolved::json() const {
                         : tau >= 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                   : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << qq(xtok) << ",\"cache_gb\":" << cache_gb << ",\"cache_auto\":" << (cache_auto ? "true" : "false")
-    << ",\"cache_start\":" << (cache_auto ? qq(cache_start) : std::string("null"))
-    << ",\"eviction\":" << qq(evict) << ",\"drafts\":{\"lookup\":" << (draft == "lookup" || draft == "fixed" || draft == "both" ? "true" : "false")
+    << ",\"cache_start\":" << (cache_auto ? qq(cache_start) : std::string("null"));
+  if (!slab.empty()) o << ",\"slab\":" << slab;
+  o << ",\"eviction\":" << qq(evict) << ",\"drafts\":{\"lookup\":" << (draft == "lookup" || draft == "fixed" || draft == "both" ? "true" : "false")
     << ",\"head\":" << (draft == "head" || draft == "both" ? "true" : "false") << "},\"draft\":" << qq(draft) << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
@@ -427,6 +486,7 @@ std::string Resolved::json() const {
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   if (spare_mem) o << ",\"spare_memory\":true";
   if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
+  if (ctx > 0) o << ",\"ctx\":" << ctx;
   o << "}";
   return o.str();
 }
@@ -499,6 +559,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.cache_gb = cache_gb_in_force;
   x.cache_auto = cache != "fixed";
   x.cache_start = cache_start;
+  if (slab_on) x.slab = slab.json();
   x.evict = evict;
   x.draft = draft;
   x.gpu_frac = gpu_frac;
@@ -517,6 +578,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.prefill_chunk = prefill_chunk;
   x.spare_mem = spare_mem;
   x.drive_gbs = drive_gbs;
+  x.ctx = ctx_declared ? ctx : 0;
   return x;
 }
 
@@ -556,6 +618,8 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   else if (g.cache_auto) r.cache = "auto";
   else if (pf) r.cache = P.cache;
   if (pf) r.cache_start = P.cache_start;
+  if (pf) r.slab = P.slab;  // (no profile: the built-in rule)
+  r.slab_on = r.cache == "slab";
   // the prompt path
   r.gpu_frac = g.gpu_frac ? *g.gpu_frac : pf ? P.gpu_frac : r.gpu_frac;
   r.gpu_experts = g.gpu_experts ? *g.gpu_experts : pf ? P.gpu_experts : r.gpu_experts;
@@ -585,6 +649,10 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
   r.spare_mem = g.spare_mem ? *g.spare_mem : pf ? P.spare_mem : r.spare_mem;
   r.drive_gbs = g.drive_gbs && *g.drive_gbs > 0 ? *g.drive_gbs : 0;  // bench only: never from a profile or a manifest
+  // the context positions
+  r.ctx_declared = pf && P.ctx > 0;
+  if (g.ctx && *g.ctx > 0) r.ctx = *g.ctx;
+  else if (r.ctx_declared) r.ctx = P.ctx;
   return true;
 }
 

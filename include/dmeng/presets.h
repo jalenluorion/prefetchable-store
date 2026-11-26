@@ -9,6 +9,24 @@
 
 namespace dm {
 
+// The iPhone's expert slab (a profile's cache "slab"), sized once at open by a named rule: a profile's "cache_slab"
+// declares it, else the built-in "available" rule (every profile of every model):
+//   available         slab = the memory iOS makes available at open - the in-memory weights' file - the router file
+//                     - state_gb (0.3) - margin_gb (0.9)
+//   footprint_target  slab = target_gb (the device class's app footprint) - non_cache_gb (the model's measured footprint
+//                     beside the cache): {"rule": "footprint_target", "target_gb": T, "non_cache_gb": N, "calibration": {...}}
+// either clamped to [min_gb, max_gb] (0.6, 8). Applied by the C API where iOS reports the memory available (macOS front
+// ends size a slab profile's cache by the automatic rule instead).
+struct SlabRule {
+  std::string rule = "available";
+  double state_gb = 0.3, margin_gb = 0.9;   // available
+  double target_gb = 0, non_cache_gb = 0;   // footprint_target
+  double min_gb = 0.6, max_gb = 8.0;
+  // the slab in bytes from what the app has at open, the in-memory weights' file and the router file
+  int64_t bytes(int64_t avail, int64_t resident, int64_t router) const;
+  std::string json() const;  // the rule and its declared inputs
+};
+
 struct Preset {
   std::string family, profile, profile_why;
   std::string cache_dir;           // the engine's cache folder (DIR/.dmeng): prefix-cache disk copies, the saved hot set
@@ -24,8 +42,11 @@ struct Preset {
   // model's memory still to come is in (built-in, G = 3); "free_level:P" keeps the kernel's free level at P% (a
   // manifest's profile "cache_start": {"rule": "free_level", "floor_pct": P}, measured per model)
   std::string cache_start = "headroom:3";
+  SlabRule slab;                   // the slab's sizing rule (cache "slab")
   std::string router_id, routers;  // early routers (names); routers = "" when none resolved
-  int m = 8;                       // names rule: a fixed top m ...
+  // names rule (a profile's or the defaults' "names": one rule, or one per mode {"exact": rule, "fast": rule}, taken
+  // for the mode in force; an engine string given as the mode counts as exact when lossless, else fast):
+  int m = 8;                       // a fixed top m ...
   double tau = -1;                 // ... or the confidence rule (tau > 0) over `cand` candidates
   int cand = 16;
   std::string xtok_id, xtok;       // cross-token routers ("" = none)
@@ -59,6 +80,9 @@ struct Preset {
   // phone 11 (the 12 GB class); mac and phone-small undeclared (off)
   double spare_min_gb = 0;
   bool spare_mem = false;
+  // the context positions the front end reserves (a profile's "ctx": N or {"positions": N, "calibration": {...}});
+  // 0 = undeclared, the front end's own (dmeng and the C API 16384, dmserve 33792)
+  int ctx = 0;
   std::vector<std::string> notes;  // defaults that did not resolve, fallbacks taken
   std::string json() const;
 };
@@ -85,10 +109,14 @@ struct Resolved {
   int bg_ranks = 0, bg_gate = 0;
   bool cache_auto = false;
   std::string cache_start;  // the automatic cache's start rule (Preset::cache_start)
+  // the slab's sizing rule and its declared inputs (SlabRule::json), written only when the cache is a slab (a phone
+  // profile's, or the C API's slab on iOS): the block is unchanged otherwise
+  std::string slab;
   std::string layer_caps;  // "" = the core's rule
   double xtok_tau = 0.5;
   int rd_prio = -1, prefill_chunk = 1;
   bool spare_mem = false;  // written only when on (the block is unchanged with it off)
+  int ctx = 0;             // the context positions in force, written only when the profile declares a ctx (else 0)
   double drive_gbs = 0;    // bench only (--drive-gbs): written only when set (the block is unchanged without it)
   std::string json() const;
 };
@@ -127,6 +155,7 @@ struct Given {
   std::optional<bool> rd_prio;
   std::optional<bool> spare_mem;        // --spare-mem 0|1: the OS file cache under the slab
   std::optional<double> drive_gbs;      // --drive-gbs X: bench only, the readers' drive rate capped (never from a profile)
+  std::optional<int> ctx;               // context positions (dmeng / dmserve --ctx, the C API's ctx > 0)
   std::optional<std::string> evict, layer_caps;
   std::optional<double> cache_gb;       // an explicit size
   bool cache_auto = false;              // the automatic rule asked for explicitly
@@ -167,6 +196,8 @@ struct RunOpts {
   std::string cache = "fixed";      // fixed (cache_gb) | auto (from the machine) | slab (sized at open from what iOS gives)
   double cache_gb = 5.0;
   std::string cache_start = "headroom:3";  // the automatic cache's start rule (Preset::cache_start)
+  SlabRule slab;                           // the slab's rule (Preset::slab; the built-in "available" without a profile)
+  bool slab_on = false;                    // the cache is a slab: the profile's cache "slab" (or the C API's on iOS)
   double gpu_frac = 0, gpu_experts = 0;
   int run_ahead = 0, run_ahead_depth = 1, ra_max_tok = 0;
   double ra_budget = 0;
@@ -178,6 +209,8 @@ struct RunOpts {
   int early = 0;
   bool spare_mem = false;  // the OS file cache under the slab (CoreOpts::spare_mem): explicit, else the profile's rule
   double drive_gbs = 0;    // bench only (CoreOpts::drive_gbs): explicit only, 0 = off
+  int ctx = 16384;         // context positions: explicit, else the profile's declared ctx, else the front end's own
+  bool ctx_declared = false;  // the profile declares one (resolved.ctx is written)
   std::vector<std::string> notes;
   // the "resolved" block of every run's JSON (the cache's size once a front end has computed it)
   Resolved resolved(double cache_gb_in_force) const;

@@ -476,14 +476,17 @@ int main(int argc, char** argv) {
   // the settings: explicit options > the profile > the manifest's defaults > dmserve's own values (resolve_run, the
   // resolver dmeng and the C API use too)
   auto has = [&](const char* f) { return a.given.count(f) > 0; };
-  const Given& g = a.g;
+  Given g = a.g;
+  if (has("--ctx")) g.ctx = a.ctx;
   RunOpts ro;  // dmserve's own values where nothing else sets one: RunOpts', the prompt always batched with the model's
-  // declared sub-chunk (0; the manifest's "prefill", as dmeng under a profile and the C API)
+  // declared sub-chunk (0; the manifest's "prefill", as dmeng under a profile and the C API), its 33792 positions
   ro.prefill_chunk = 0;
+  ro.ctx = a.ctx;
   if (!resolve_run(a.model, a.profile, g, "", -1, ro, err)) {
     fprintf(stderr, "profile: %s\n", err.c_str());
     return 1;
   }
+  a.ctx = ro.ctx;  // explicit, else the profile's declared ctx, else dmserve's own
   const Preset& P = ro.preset;
   const bool profiled = ro.profiled;
   if (a.print_defaults) {

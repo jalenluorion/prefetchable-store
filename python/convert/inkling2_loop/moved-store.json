@@ -1083,7 +1083,7 @@
  ],
  "generated": {
   "by": "moved-store release tools, from the manifest of 2026-11-21 plus the new parts",
-  "date": "2026-11-22"
+  "date": "2026-11-26"
  },
  "modes": {
   "exact": {
@@ -1091,63 +1091,121 @@
    "engine": "lossless"
   },
   "fast": {
-   "definition": "The model's own router still picks. The picked experts that are not in memory are read, heaviest first, until those left weigh at most 0.13 of the step's routing weight; those are left out (no substitute, no renormalisation). A light pick whose read is in flight is not waited for. Router names are on (the one leave-out rule, as Flash-Next).",
-   "engine": "approx:drop:w=0.13:mass=0.13:late=-1",
-   "read_if": {
-    "missing_routing_weight_over": 0.13,
-    "order": "heaviest missing pick first"
+   "definition": "The model's own router still picks. A picked expert that is not in memory is read and waited for if its routing weight is over 0.15, and waited for if its read is already in flight (with no time limit: the preset's late 1000 ms means always); otherwise it is left out (no substitute, no renormalisation). No cap on the weight left out per step (the preset's mass 2 never binds). Router names are on.",
+   "engine": "approx:drop:w=0.15",
+   "wait_if": {
+    "routing_weight_over": 0.15,
+    "read_in_flight": true
    },
    "otherwise": "left out",
    "substitute": false,
    "renormalise": false,
    "calibration": {
-    "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
-    "rows": [
-     {
-      "setting": "leave-out rule 0.13 (this)",
-      "tok_s": [
-       8.08,
-       6.8
-      ],
-      "mb_per_token": [
-       225.7,
-       223.4
-      ],
-      "top1_agree": [
-       0.985,
-       0.983
-      ],
-      "nll_delta": [
-       0.0045,
-       0.0039
-      ]
-     },
-     {
-      "setting": "weight 0.1, wait for reads in flight (before)",
-      "tok_s": [
-       6.47,
-       7.24
-      ],
-      "mb_per_token": [
-       221.3,
-       219.7
-      ],
-      "top1_agree": [
-       0.985,
-       0.975
-      ],
-      "nll_delta": [
-       0.0045,
-       0.0063
-      ]
-     }
-    ],
-    "reason": "at least as good as the rule before on the Mac (tok/s 7.44 against 6.86 mean, agreement 0.984 against 0.980); not yet measured on a phone"
+    "phone": {
+     "measured": "iPhone 15 Plus, phone-small (4-bit in-memory weights); each arm against exact on the device over the same 600 teacher-forced positions",
+     "rows": [
+      {
+       "setting": "w 0.10, waiting for reads in flight (the published rule)",
+       "top1_agree": "592/600 = 0.987",
+       "tok_s": "2.06-2.27"
+      },
+      {
+       "setting": "w 0.13",
+       "top1_agree": "581/600 = 0.968",
+       "tok_s": 2.68
+      },
+      {
+       "setting": "w 0.15 (this)",
+       "top1_agree": "576/600 = 0.960",
+       "tok_s": 3.15
+      },
+      {
+       "setting": "w 0.20",
+       "top1_agree": "554/600 = 0.923",
+       "tok_s": 4.36
+      }
+     ]
+    },
+    "mac": {
+     "measured": "base M4, phone profile, 4.0 GB cache, the same 1,100 teacher-forced positions of exact's own answer to the code prompt",
+     "rows": [
+      {
+       "setting": "w 0.10, waiting for reads in flight (the published rule)",
+       "top1_agree": 0.976,
+       "nll_delta": 0.0075,
+       "mb_per_token": 283
+      },
+      {
+       "setting": "w = mass = 0.13, never waiting (the previous line value)",
+       "top1_agree": 0.973,
+       "nll_delta": 0.0081,
+       "mb_per_token": 287
+      },
+      {
+       "setting": "w 0.12, waiting for reads in flight",
+       "top1_agree": 0.973,
+       "nll_delta": 0.0086,
+       "mb_per_token": 261
+      },
+      {
+       "setting": "w 0.15, never waiting",
+       "top1_agree": 0.955,
+       "nll_delta": 0.0214,
+       "mb_per_token": 242
+      },
+      {
+       "setting": "w 0.15, waiting for reads in flight (this)",
+       "status": "to be added (being measured)"
+      }
+     ]
+    },
+    "previous_rule": {
+     "note": "the calibration of the previous line value (w = mass = 0.13, never waiting), kept as history",
+     "measured": "base M4 16 GB, 5.0 GB cache, mac profile, linear_k2 names, run-ahead on; the 35B's / Inkling's code prompt (357 / 462 tokens) then exact mode's own 650 tokens teacher-forced (650 positions), two alternating pairs, AC, other processes 200-400% CPU",
+     "rows": [
+      {
+       "setting": "leave-out rule 0.13 (this)",
+       "tok_s": [
+        8.08,
+        6.8
+       ],
+       "mb_per_token": [
+        225.7,
+        223.4
+       ],
+       "top1_agree": [
+        0.985,
+        0.983
+       ],
+       "nll_delta": [
+        0.0045,
+        0.0039
+       ]
+      },
+      {
+       "setting": "weight 0.1, wait for reads in flight (before)",
+       "tok_s": [
+        6.47,
+        7.24
+       ],
+       "mb_per_token": [
+        221.3,
+        219.7
+       ],
+       "top1_agree": [
+        0.985,
+        0.975
+       ],
+       "nll_delta": [
+        0.0045,
+        0.0063
+       ]
+      }
+     ],
+     "reason": "at least as good as the rule before on the Mac (tok/s 7.44 against 6.86 mean, agreement 0.984 against 0.980); not yet measured on a phone"
+    },
+    "reason": "the owner's choice (2026-11-26), one rule for the Mac and the phones: threshold 0.15 in the form the phone measured; on the iPhone 3.15 tok/s against 2.06-2.27 at the published rule, top choice agreement 0.960 against 0.987"
    }
-  },
-  "fast-eps": {
-   "definition": "The same as fast (kept as a name: fast mode is this rule now).",
-   "engine": "approx:drop:w=0.13:mass=0.13:late=-1"
   }
  },
  "profiles": {
@@ -1603,6 +1661,15 @@
    "bytes": 17992385621,
    "bytes_rule": "sum of the listed parts' bytes; moved-store.json is fetched first and is not listed",
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0,
+    "experts": 0,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact ids identical either way: 0.65 / 0.65 took 48.7 / 61.1 s (exact / fast) against 40.0 / 50.2 s off from a nominal start, 56.5 / 67.1 against 44.8 / 54.5 s from serious, and left 0.12-0.22 GB more footprint; the projections alone 59.5 / 55.4 s",
+     "reason": "off by measurement: 20% slower with the split (the CPU waits on the GPU's NVFP4 expert share); the same as the built-in CPU only, declared to keep the measurement beside it",
+     "carried": "measured on the 6 GB iPhone 15 Plus (phone-small) and carried to phone: the cause is iOS's shared CPU / GPU power budget, not the memory class; the app has passed this share on phone so far, so the resolved behaviour on phones does not change"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,
@@ -1629,7 +1696,16 @@
     "candidates": 16
    },
    "cache": "slab",
-   "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",
+   "cache_rule": "locked slab sized at open by cache_slab: the 2.96 GB app footprint target of the 6 GB class less this model's footprint beside the cache, clamped to 0.6-8 GB",
+   "cache_slab": {
+    "rule": "footprint_target",
+    "target_gb": 2.96,
+    "non_cache_gb": 1.26,
+    "calibration": {
+     "measured": "iPhone 15 Plus (6 GB), phone-small, flash-last / release builds, 2026-11-26: footprint 2.90-2.98 GB in decode at a 1.70 GB cache, so 1.26 GB beside the cache (4-bit in-memory weights, router, state at 4,096 positions, checkpoints)",
+     "reason": "sized for an app footprint of 2.96 GB on the 6 GB class (the old app's footprint on this phone, the equal-footprint comparison of results/ios/p2/P2.md) instead of from the memory iOS reports at open; the target belongs to the device class, the non-cache footprint to the model: 2.96 - 1.26 = 1.70 GB"
+    }
+   },
    "parts": [
     {
      "path": "config.json",
@@ -1845,6 +1921,21 @@
     "note": "layers 20-23 re-quantised from the release's MXFP8 to NVFP4 (least-squares block scales); the release's files stay as they are for the other profiles"
    },
    "readers": 8,
+   "prefill_gpu": {
+    "projections": 0,
+    "experts": 0,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, its 462-token prompt, the same thermal state, exact ids identical either way: 0.65 / 0.65 took 48.7 / 61.1 s (exact / fast) against 40.0 / 50.2 s off from a nominal start, 56.5 / 67.1 against 44.8 / 54.5 s from serious, and left 0.12-0.22 GB more footprint; the projections alone 59.5 / 55.4 s",
+     "reason": "off by measurement: 20% slower with the split (the CPU waits on the GPU's NVFP4 expert share); the same as the built-in CPU only, declared to keep the measurement beside it"
+    }
+   },
+   "ctx": {
+    "positions": 4096,
+    "calibration": {
+     "measured": "iPhone 15 Plus, phone-small, 2026-11-26: the KV reserve is 0.54 GB at 16,384 positions, 0.135 GB at 4,096; the 1.26 GB non-cache footprint (cache_slab) was measured at 4,096",
+     "reason": "16,384 positions would reserve 0.405 GB more than the 4,096 at which the footprint beside the cache was measured; a rule shared with the 35B (KV reserve at most 0.34 GB) would give 8,192 (0.27 GB) and needs a footprint measurement at that size first"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1,
