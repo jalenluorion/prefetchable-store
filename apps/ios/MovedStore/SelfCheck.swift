@@ -118,6 +118,45 @@ enum SelfCheck {
         }
         log("SELFCHECK screen \(out["first_screen"]!) model \(kind.rawValue) profile \(DmengLaunch.profile) mode \(DmengLaunch.userMode)")
 
+        // -selfcheck-memrow: only the memory of one long prompt (the coding prompt, 357 ids) in the default mode: the
+        // footprint before it, its highest value while the prompt is read (sampled every 50 ms) and after ~10 s of decode
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-memrow") {
+            model.startOnce()
+            for _ in 0..<900 where model.engineState != .ready {
+                if case .failed = model.engineState { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            if let d = model.engine as? DmengChatEngine, model.engineState == .ready {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)  // the launch's warm-up in idle time
+                let before = MemProbe.read("memrow before")
+                final class Peak: @unchecked Sendable { var v = 0; var on = true }
+                let pk = Peak()
+                let sampler = Thread {
+                    while pk.on { pk.v = max(pk.v, MemProbe.read("").physFootprint); usleep(50_000) }
+                }
+                sampler.start()
+                let t0 = Date()
+                let g = try? await d.selfCheckGreedy(codeIds, n: 26)
+                let secs = Date().timeIntervalSince(t0)
+                pk.on = false
+                let after = MemProbe.read("memrow after")
+                var mr: [String: Any] = [:]
+                mr["before_gb"] = Double(before.physFootprint) / 1e9
+                mr["prompt_peak_gb"] = Double(pk.v) / 1e9
+                mr["after_gb"] = Double(after.physFootprint) / 1e9
+                mr["lifetime_peak_gb"] = Double(after.physFootprintPeak) / 1e9
+                mr["prefill_s"] = g?.prefillSeconds ?? -1
+                mr["decode_s"] = g?.seconds ?? -1
+                mr["tokens"] = g?.ids.count ?? -1
+                mr["seconds"] = secs
+                mr["thermal"] = after.thermal
+                out["memrow"] = mr
+                log("SELFCHECK memrow before \(before.physFootprint) peak \(pk.v) after \(after.physFootprint) (decode \(g?.seconds ?? -1) s)")
+            }
+            finish()
+            return
+        }
+
         // 1. the selected model's files against the Hub manifest's profile parts (only with -selfcheck-verify)
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-verify") { out["verify"] = await verify(kind) }
 
