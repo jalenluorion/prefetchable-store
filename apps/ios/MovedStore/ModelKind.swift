@@ -42,9 +42,10 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     var modeKey: String { self == .qwen36 ? "engine.mode" : "engine.mode.inkling" }
     /// Fast on both phone profiles (phone, phone-small), for both models; Exact elsewhere (the manifests' profiles agree).
     func defaultMode(profile: String) -> String { profile == "phone" || profile == "phone-small" ? "fast" : "exact" }
-    /// The engine's mode string for the app's Fast. 35B: approx:drop at the threshold measured for the calibrated 4-bit
-    /// in-memory weights (0.08); Inkling: the engine's own fast preset.
-    var fastEngineMode: String { self == .qwen36 ? "approx:drop:w=0.08" : "fast" }
+    /// The engine's mode string for the app's Fast: "fast", the manifest's own definition for both models (the threshold
+    /// is the manifest's to set: the 35B's 0.08 measured with the calibrated 4-bit in-memory weights is staged for its
+    /// phone-small profile, ModelKind's staged values).
+    var fastEngineMode: String { "fast" }
     /// phone-small's expert cache, one rule for both models: the 2.96 GB app footprint target less what the model holds
     /// beside the cache (measured on the iPhone 15 Plus in decode: the 35B 1.54 GB, Inkling 1.26 GB, its footprint
     /// 2.90-2.98 GB at a 1.70 GB cache). A model property: it belongs in the manifests' phone-small profile (staged).
