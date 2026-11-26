@@ -286,6 +286,12 @@ void Readers::loop() {
         if (scratch.size() < j.n) scratch.resize(j.n);
         dst = scratch.data();
       }
+      int64_t slot_end = 0;  // drive_bps (bench only): this read's slot on the slower drive's clock
+      if (drive_bps > 0 && !from_cache) {
+        std::lock_guard<std::mutex> g(drive_mu_);
+        slot_end = std::max(now_ns(), drive_t_) + (int64_t)((double)j.n * 1e9 / drive_bps);
+        drive_t_ = slot_end;
+      }
       size_t done = 0;
       while (done < j.n) {
         ssize_t r = pread(j.fd, dst + done, j.n - done, j.off + (long)done);
@@ -295,9 +301,14 @@ void Readers::loop() {
         }
         done += (size_t)r;
       }
+      if (slot_end > 0) {
+        const int64_t left = slot_end - now_ns();
+        if (left > 0) std::this_thread::sleep_for(std::chrono::nanoseconds(left));
+      }
       if (!from_cache) {
         bytes.fetch_add(j.n, std::memory_order_relaxed);
         bytes_cls[cls].fetch_add(j.n, std::memory_order_relaxed);
+        if (j.pool >= 0 && j.pool < 4) bytes_pool[j.pool].fetch_add(j.n, std::memory_order_relaxed);
       }
       if (!j.dst && file_prefault) {  // map the cached pages here (soft faults), not in the compute threads
         const size_t pg = (size_t)getpagesize();

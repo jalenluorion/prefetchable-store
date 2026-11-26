@@ -140,6 +140,8 @@ struct CoreOpts {
   double cache_start_gb = 0;  // > 0 and < cache_gb (mlock): slots for cache_gb reserved, only this much locked at start
   Mem mem = Mem::MLOCK;
   bool spare_mem = false;  // a locked / plain slab: the OS file cache under it (store.h, Cache::file_under; --spare-mem)
+  double drive_gbs = 0;    // bench only: the readers' combined drive rate capped at this many GB/s (Readers::drive_bps,
+                           // --drive-gbs); 0 = off, the default, in no profile
   bool skip_reads = false;   // timing without reads (the slots keep whatever bytes they have)
   bool loop_hold = true;     // looped layers: what an earlier pass of the token used stays pinned until its last pass
   std::vector<double> pool_share;  // empty: the model's default

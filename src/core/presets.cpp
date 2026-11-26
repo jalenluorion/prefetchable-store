@@ -177,6 +177,7 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     p.profile_why = "no moved-store.json";
     p.mode = mode_req.empty() ? "exact" : mode_req;
     p.engine_mode = engine_mode_of(p.mode);
+    p.engine_mode_from = p.mode == "exact" || p.mode == "fast" ? "modes." + p.mode : "given";
     return true;
   }
   if (!m) {  // a named profile on a folder without a manifest: the family from config.json, its published declarations
@@ -235,6 +236,15 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   if (!me) me = member(member(member(pub, "modes"), p.mode), "engine");
   if (!me) me = member(member(member(&bi, "modes"), p.mode), "engine");
   p.engine_mode = me ? me->str_or(engine_mode_of(p.mode)) : engine_mode_of(p.mode);
+  p.engine_mode_from = me ? "modes." + p.mode : "given";  // (no declaration of that name: an explicit engine string)
+  // then the profile's own declaration of the mode (measured per device), the folder's profile, else the published one:
+  // its "engine" over the model-level one (its descriptive fields ride along for the reader; the engine reads "engine")
+  const Json* pe = member(member(member(mp, "modes"), p.mode), "engine");
+  if (!pe) pe = member(member(member(fp, "modes"), p.mode), "engine");
+  if (pe && pe->kind == Json::STR) {
+    p.engine_mode = pe->s();
+    p.engine_mode_from = "profiles." + p.profile + ".modes." + p.mode;
+  }
   // the in-memory weights
   const Json* pr = prof("resident");
   p.resident_id = pr ? pr->str_or("resident_q8") : "resident_q8";
@@ -375,7 +385,7 @@ static std::string q(const std::string& s) {
 std::string Preset::json() const {
   std::ostringstream o;
   o << "{\"profile\":" << q(profile) << ",\"profile_why\":" << q(profile_why) << ",\"mode\":" << q(mode) << ",\"engine_mode\":" << q(engine_mode)
-    << ",\"resident\":" << q(resident_id) << ",\"cache\":" << q(cache) << ",\"cache_start\":" << q(cache_start) << ",\"routers\":" << q(router_id) << ",\"routers_file\":" << q(routers)
+    << ",\"engine_mode_from\":" << q(engine_mode_from) << ",\"resident\":" << q(resident_id) << ",\"cache\":" << q(cache) << ",\"cache_start\":" << q(cache_start) << ",\"routers\":" << q(router_id) << ",\"routers_file\":" << q(routers)
     << ",\"names\":" << (tau > 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
@@ -415,6 +425,7 @@ std::string Resolved::json() const {
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   if (spare_mem) o << ",\"spare_memory\":true";
+  if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
   o << "}";
   return o.str();
 }
@@ -504,6 +515,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.rd_prio = rd_prio;
   x.prefill_chunk = prefill_chunk;
   x.spare_mem = spare_mem;
+  x.drive_gbs = drive_gbs;
   return x;
 }
 
@@ -571,6 +583,7 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   // MB per token than plain decoding at the same tokens per step); --early N still sets it
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
   r.spare_mem = g.spare_mem ? *g.spare_mem : pf ? P.spare_mem : r.spare_mem;
+  r.drive_gbs = g.drive_gbs && *g.drive_gbs > 0 ? *g.drive_gbs : 0;  // bench only: never from a profile or a manifest
   return true;
 }
 
@@ -625,6 +638,7 @@ const RunFlag RUN_FLAGS[] = {
     {"--draft", nullptr, RF_STR(draft)},
     {"--early", nullptr, RF_INT(early)},
     {"--spare-mem", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.spare_mem = x != 0), true); }},
+    {"--drive-gbs", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x >= 0 && ((g.drive_gbs = x), true); }},
 };
 #undef RF_INT
 #undef RF_DBL

@@ -13,6 +13,10 @@ struct Preset {
   std::string family, profile, profile_why;
   std::string cache_dir;           // the engine's cache folder (DIR/.dmeng): prefix-cache disk copies, the saved hot set
   std::string mode, engine_mode;   // "exact" / "fast"; the engine's mode string ("lossless", "approx:drop")
+  // where engine_mode comes from: "modes.<mode>" (the model-level declaration: the folder's manifest, the published one,
+  // the built-in), "profiles.<profile>.modes.<mode>" (the profile's own declaration over it), "given" (an explicit
+  // engine mode string, --mode / the C API's mode, which no declaration replaces)
+  std::string engine_mode_from;
   std::string resident_id;         // resident_q8 | resident_q4
   std::string resident;            // the file when it is not the resolver's default (resident_q4); "" = default
   std::string cache = "auto";      // auto (from free memory, then memory pressure) | slab (sized at open, iOS)
@@ -85,6 +89,7 @@ struct Resolved {
   double xtok_tau = 0.5;
   int rd_prio = -1, prefill_chunk = 1;
   bool spare_mem = false;  // written only when on (the block is unchanged with it off)
+  double drive_gbs = 0;    // bench only (--drive-gbs): written only when set (the block is unchanged without it)
   std::string json() const;
 };
 
@@ -101,7 +106,9 @@ std::string device_profile(int64_t avail_bytes, double min_gb, std::string& why)
 
 // Resolve the defaults of model folder `dir` for profile `profile_req` ("" / "auto" = the device's) and mode
 // `mode_req` ("" = the profile's; exact | fast | lossless | approx[:PRESET]). derived_dir: the engine's cache folder
-// ("" = DIR/.dmeng). Router files are found (or derived) as docs/MANIFEST-PRESETS.md says.
+// ("" = DIR/.dmeng). Router files are found (or derived) as docs/MANIFEST-PRESETS.md says. A mode's engine string is the
+// model-level modes.<mode>.engine, replaced by the profile's own profiles.<profile>.modes.<mode>.engine when it declares
+// one (Preset::engine_mode_from says which); a mode_req that names no declared mode is an engine string and is kept.
 bool resolve_preset(const std::string& dir, const std::string& profile_req, const std::string& mode_req, const std::string& derived_dir,
                     int64_t avail_bytes, Preset& p, std::string& err);
 
@@ -119,6 +126,7 @@ struct Given {
   std::optional<double> tau, xtok_tau;
   std::optional<bool> rd_prio;
   std::optional<bool> spare_mem;        // --spare-mem 0|1: the OS file cache under the slab
+  std::optional<double> drive_gbs;      // --drive-gbs X: bench only, the readers' drive rate capped (never from a profile)
   std::optional<std::string> evict, layer_caps;
   std::optional<double> cache_gb;       // an explicit size
   bool cache_auto = false;              // the automatic rule asked for explicitly
@@ -136,7 +144,7 @@ struct Given {
 // function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
 // --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
 // --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
-// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N --spare-mem 0|1; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N --spare-mem 0|1 --drive-gbs X; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
 // run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
 // and err on a malformed value).
 std::string run_flag_name(const std::string& flag);
@@ -169,6 +177,7 @@ struct RunOpts {
   std::string draft = "none";
   int early = 0;
   bool spare_mem = false;  // the OS file cache under the slab (CoreOpts::spare_mem): explicit, else the profile's rule
+  double drive_gbs = 0;    // bench only (CoreOpts::drive_gbs): explicit only, 0 = off
   std::vector<std::string> notes;
   // the "resolved" block of every run's JSON (the cache's size once a front end has computed it)
   Resolved resolved(double cache_gb_in_force) const;

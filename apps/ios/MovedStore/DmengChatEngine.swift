@@ -145,6 +145,81 @@ enum DmengLaunch {
     }
 }
 
+/// Which moved-store.json the engine opens with: the release line's, bundled with the app at build time (the Xcode build
+/// phase "Bundle the line's manifests" copies python/convert/<family>/moved-store.json into manifests/<family>.json), or
+/// the model folder's own (what the Hub served). The bundled one is used when all of these hold, else the folder's:
+///   - the two differ in content (equal: nothing to do);
+///   - the bundled one is not older: its `generated.date` (ISO yyyy-mm-dd) is at least the folder's (a Hub manifest
+///     with a later date wins, so the bundle becomes a no-op once the Hub catches up), and its `format_version` major is
+///     the one this engine reads;
+///   - every part its profile lists for this device (profiles.<profile>.parts) is on disk at the listed size (a derived
+///     file may sit in .dmeng/), moved-store.json and documentation files aside.
+/// The engine reads <dir>/moved-store.json, so the bundled one is opened through a folder of links: every entry of the
+/// model folder linked, and the bundled manifest as its moved-store.json (Application Support/<bundle>/manifest-line/).
+/// No setting is copied into Swift: the engine reads the whole manifest as it would from the Hub.
+enum ManifestChoice {
+    struct Pick { var dir: String; var bundled: Bool; var label: String }
+    static func family(_ k: ModelKind) -> String { k == .qwen36 ? "qwen3_5_moe" : "inkling2_loop" }
+    static func bundledURL(_ k: ModelKind) -> URL? {
+        Bundle.main.url(forResource: family(k), withExtension: "json", subdirectory: "manifests")
+    }
+    private static func stamp(_ j: [String: Any]) -> (date: String, major: Int) {
+        let d = (j["generated"] as? [String: Any])?["date"] as? String ?? ""
+        let v = (j["format_version"] as? String) ?? (j["format_version"] as? NSNumber)?.stringValue ?? ""
+        return (d, Int(v.split(separator: ".").first ?? "") ?? -1)
+    }
+    static func choose(kind: ModelKind, dir: String, profile: String) -> Pick {
+        let fm = FileManager.default
+        let own = URL(fileURLWithPath: dir).appendingPathComponent("moved-store.json")
+        func folder(_ why: String) -> Pick {
+            log("MANIFEST the model folder's (downloaded): " + why)
+            return Pick(dir: dir, bundled: false, label: "downloaded (" + why + ")")
+        }
+        guard let bu = bundledURL(kind), let bd = try? Data(contentsOf: bu),
+              let bj = (try? JSONSerialization.jsonObject(with: bd)) as? [String: Any] else { return folder("no bundled manifest") }
+        guard let od = try? Data(contentsOf: own), let oj = (try? JSONSerialization.jsonObject(with: od)) as? [String: Any] else {
+            return folder("the folder has no readable moved-store.json")
+        }
+        if od == bd { return folder("identical to the bundled one") }
+        let b = stamp(bj), o = stamp(oj)
+        if b.major != 1 { return folder("the bundled one's format_version major \(b.major) is not 1") }
+        if b.date.isEmpty || b.date < o.date { return folder("the bundled one (generated \(b.date)) is older than the folder's (\(o.date))") }
+        // every part the bundled profile lists, at its size
+        var missing: [String] = []
+        if let m = try? MovedStoreManifest.manifest(from: bd, profile: profile) {
+            let docs: Set<String> = ["LICENSE", "NOTICE.md", "README.md", "sha256.txt", "moved-store.json"]
+            for f in m.files where !docs.contains(f.local) {
+                var got = ModelDownloader.resolvedSize(dir + "/" + f.local) ?? -1
+                if got < 0, f.local.hasPrefix("derived/") { got = ModelDownloader.resolvedSize(dir + "/.dmeng/" + (f.local as NSString).lastPathComponent) ?? -1 }
+                if got != f.size { missing.append(f.local) }
+            }
+        } else {
+            missing.append("profiles.\(profile).parts")
+        }
+        if !missing.isEmpty {
+            return folder("the bundled one's profile \(profile) lists \(missing.count) part(s) not on disk at their size: "
+                          + missing.prefix(3).joined(separator: ", "))
+        }
+        // the folder of links
+        let base = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(Bundle.main.bundleIdentifier ?? "app", isDirectory: true)
+            .appendingPathComponent("manifest-line", isDirectory: true).appendingPathComponent(kind.rawValue, isDirectory: true)
+        do {
+            try? fm.removeItem(at: base)
+            try fm.createDirectory(at: base, withIntermediateDirectories: true)
+            for e in try fm.contentsOfDirectory(atPath: dir) where e != "moved-store.json" {
+                try fm.createSymbolicLink(atPath: base.appendingPathComponent(e).path, withDestinationPath: dir + "/" + e)
+            }
+            try bd.write(to: base.appendingPathComponent("moved-store.json"))
+        } catch {
+            return folder("the folder of links could not be made (\(error.localizedDescription))")
+        }
+        let why = "generated \(b.date) against the folder's \(o.date.isEmpty ? "none" : o.date), contents differ, every part of profile \(profile) present"
+        log("MANIFEST the bundled one (the release line's): " + why)
+        return Pick(dir: base.path, bundled: true, label: "bundled with the app (the release line's: " + why + ")")
+    }
+}
+
 final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     private(set) var info = EngineInfo(name: "dmeng", detail: "not loaded")
     private let lock = NSLock()
@@ -169,13 +244,21 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     private var _replyRows: [(String, String)] = []
     /// The last finished reply from the engine's counters (dm_counters deltas over the reply's decode), plain words.
     var replyRows: [(String, String)] { lock.withLock { _replyRows } }
+    /// The profile as the engine read it at open (dm_stats_json policy.preset): engine_mode, engine_mode_from.
+    private var presetAtOpen: [String: Any] = [:]
+    /// The manifest this open used (ManifestChoice): the Engine row "manifest".
+    private var manifestPick: ManifestChoice.Pick?
     /// Spare memory as the engine resolved it at open (nil before a model is open).
     var spareMemoryResolved: Bool? {
         lock.withLock { model == nil ? nil : (resolvedAtOpen["spare_memory"] as? Bool) == true }
     }
 
     /// Rows for one reply: the counters at the decode's start and end, its tokens and seconds.
-    static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, seconds: Double) -> [(String, String)] {
+    /// `storeResident`: the model's files the system's file cache held at the end (nil: not tracked, spare memory off);
+    /// `bigMemory`: a phone where the spare-memory switch is offered (its rows show whether it is on or off).
+    static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, speed: GenSpeed, storeResident: Int64? = nil,
+                          bigMemory: Bool = false) -> [(String, String)] {
+        let seconds = speed.seconds
         let n = Double(max(1, tokens))
         let ms = 1000 * seconds / n
         let wait = (c1.wait_ms - c0.wait_ms) / n
@@ -185,12 +268,16 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let picks = Double(c1.picks &- c0.picks)
         let vm = MemProbe.vmInfo()
         var r: [(String, String)] = [
-            ("Speed", String(format: "%.2f tokens/s (%d tokens in %.1f s)", Double(tokens) / max(1e-9, seconds), tokens, seconds)),
+            ("Speed", speed.detail),  // this round's; ChatModel.lastReplyRows shows the message's (GenSpeed)
             ("Read from storage", String(format: "%.1f MB per token", read / 1e6 / n)),
         ]
-        if c1.spare_memory != 0 {
+        if c1.spare_memory != 0 || bigMemory {
             r.append(("From spare memory", String(format: "%.1f MB per token", spare / 1e6 / n)))
+            r.append(("Model files held by the system", storeResident.map { String(format: "%.2f GB at the end of the reply", Double($0) / 1e9) }
+                      ?? "not tracked (spare memory off)"))
         }
+        r.append(("Read but never used", String(format: "%.1f MB per token (named ahead, dropped before use)",
+                                                Double(c1.bytes_named_unused &- c0.bytes_named_unused) / 1e6 / n)))
         r += [
             ("Waiting on storage", String(format: "%.0f ms per token (%.0f%% of each token)", wait, ms > 0 ? 100 * wait / ms : 0)),
             ("Experts found in memory", picks > 0 ? String(format: "%.1f%% of picks", 100 * Double(c1.hits &- c0.hits) / picks) : "-"),
@@ -208,9 +295,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                                      ("model", (lock.withLock { loadedKind } ?? DmengLaunch.kind).displayName
                                         + (lock.withLock { codec }.map { $0.family.isEmpty ? "" : " (\($0.family))" } ?? "")),
                                      ("profile", String(format: "%@ (%.2f GB available at open)", DmengLaunch.profile, Double(DmengLaunch.availableAtOpen) / 1e9)),
-                                     ("mode", DmengLaunch.engineMode == nil ? "exact" : "fast (\(DmengLaunch.engineMode!))"),
+                                     ("mode", DmengLaunch.userMode + " (passed to the engine as \"\(DmengLaunch.engineMode ?? "exact")\")"),
                                      ("in-memory weights", "\(DmengLaunch.residentBits(dir: DmengLaunch.modelDir.path))-bit"),
-                                     ("model dir", DmengLaunch.modelDir.path)]
+                                     ("model dir", DmengLaunch.modelDir.path),
+                                     ("manifest", lock.withLock { manifestPick }?.label ?? "not opened yet")]
         if let m {
             // every engine row from what the engine RESOLVED at open (dm_stats_json "resolved"), never from the app's own
             // guess of the profile, so this screen cannot disagree with the engine
@@ -226,7 +314,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                 ? String(format: "confidence rule: p >= %.2f over the top %d", num(nm["tau"]), Int(num(nm["candidates"])))
                 : "top \(Int(num(nm["m"])))"
             let picks = Int(num(ra["picks"]))
+            let pre = lock.withLock { presetAtOpen }
             s += [("engine mode", (r["mode"] as? String) ?? "?"),
+                  ("profile's engine_mode", ((pre["engine_mode"] as? String) ?? "?") + ", from "
+                      + ((pre["engine_mode_from"] as? String) ?? "the manifest's modes (no per-profile override reported)")),
                   ("threads", "\(i.threads) compute, \(Int(num(r["readers"]))) readers (disk I/O: \(io))"),
                   ("run-ahead", picks > 0 ? String(format: "%d names, depth %d, budget %.2f x compute", picks, Int(num(ra["depth"])), num(ra["budget"])) : "off"),
                   ("expert cache", String(format: "%@, %.2f GB (resolved %.2f GB), eviction %@%@", mem, Double(i.cache_bytes) / 1e9, num(r["cache_gb"]),
@@ -291,6 +382,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     func load(progress: @escaping (String) -> Void) async throws {
         let dir = DmengLaunch.modelDir.path
         let kind = DmengLaunch.kind
+        AppClock.start()
         progress("tokenizer + chat template from \(DmengLaunch.modelDir.lastPathComponent)/ (\(kind.displayName))")
         let c = try await TextCodec.load(dir: dir)
         log("DMENG model \(kind.rawValue) (\(kind.displayName)): family \(c.family.isEmpty ? "unknown" : c.family), front end \(c.isInkling ? "InklingChat (stop ids \(c.stopIds.sorted()))" : "the chat template (Jinja)")")
@@ -309,6 +401,9 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.readers = 8
         #endif
         // the derived files: the Hub's layout (derived/), else .dmeng/
+        // the manifest the engine opens with (ManifestChoice): the release line's bundled one, or the folder's own
+        let pick = ManifestChoice.choose(kind: kind, dir: dir, profile: DmengLaunch.profile)
+        lock.withLock { manifestPick = pick }
         if FileManager.default.fileExists(atPath: dir + "/derived") { o.derivedDir = dir + "/derived" }
         else if FileManager.default.fileExists(atPath: dir + "/.dmeng") { o.derivedDir = dir + "/.dmeng" }
         // saved states belong to the weights and the mode they were computed with (a Fast decode's positions differ from
@@ -326,7 +421,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                 break
             }
         }
-        let key = (DmengLaunch.engineMode ?? "exact") + "|" + resKey
+        let key = (DmengLaunch.engineMode ?? "exact") + "|" + resKey + (pick.bundled ? "|line-manifest" : "")  // Fast's rule is the manifest's
         var hsh: UInt64 = 1469598103934665603
         for b in key.utf8 { hsh = (hsh ^ UInt64(b)) &* 1099511628211 }
         let sub = DmengLaunch.diskDir.appendingPathComponent(String(format: "s%016llx", hsh), isDirectory: true)
@@ -416,7 +511,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.runAheadAB = false
         progress("opening \(dir) (in-memory weights, routers \(o.routersFile.map { ($0 as NSString).lastPathComponent } ?? o.routersId ?? "the profile's"), cache \(DmengLaunch.cacheGB) GB)")
         let t0 = Date()
-        let m = try await Task.detached(priority: .userInitiated) { try DmengModel(modelDir: dir, options: o) }.value
+        let openDir = pick.dir
+        let m = try await Task.detached(priority: .userInitiated) { try DmengModel(modelDir: openDir, options: o) }.value
         let i = m.info
         lock.withLock {
             model = m
@@ -431,8 +527,11 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         // the settings the engine applied after precedence (explicit option > profile > manifest > built-in)
         let st = m.statsJSON()
         if let r = st.range(of: "\"resolved\":") { log("DMENG RESOLVED " + String(st[r.upperBound...].dropLast())) }
-        let res = ((try? JSONSerialization.jsonObject(with: Data(st.utf8))) as? [String: Any])?["resolved"] as? [String: Any] ?? [:]
-        lock.withLock { resolvedAtOpen = res }
+        let sj = (try? JSONSerialization.jsonObject(with: Data(st.utf8))) as? [String: Any]
+        let res = sj?["resolved"] as? [String: Any] ?? [:]
+        let pre = (sj?["policy"] as? [String: Any])?["preset"] as? [String: Any] ?? [:]  // the profile as the engine read it
+        lock.withLock { resolvedAtOpen = res; presetAtOpen = pre }
+        log("DMENG MODE \(DmengLaunch.engineMode ?? "exact") -> \((res["mode"] as? String) ?? "?") (profile default engine_mode \((pre["engine_mode"] as? String) ?? "?"), from \((pre["engine_mode_from"] as? String) ?? "the manifest's modes"))")
         progress("ready: " + info.detail)
         observeMemory()
     }
@@ -782,7 +881,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let c0 = m.counters
         var cl = c0
         let t0 = Date()
-        var tLast = t0
+        let clock = GenClock()
         if !sr.cancelled {
             for _ in 0..<maxNew {
                 if isCancelled { reason = .cancelled; break }
@@ -823,21 +922,23 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                 let cn = m.counters
                 let now = Date()
                 let picks = Double(cn.picks &- cl.picks)
-                cont.yield(.text(piece, TokenStats(index: new.count - 1, ms: 1000 * now.timeIntervalSince(tLast),
-                                                   tokPerSec: 1 / max(1e-9, now.timeIntervalSince(tLast)),
+                cont.yield(.text(piece, TokenStats(index: new.count - 1, ms: 1000 * clock.last,
+                                                   tokPerSec: clock.last > 0 ? 1 / clock.last : 0,
                                                    mbRead: Double(cn.bytes_read &- cl.bytes_read) / 1e6,
                                                    inMemory: picks > 0 ? Double(cn.hits &- cl.hits) / picks : 0,
                                                    expertsInMemory: Int(Double(cn.held_bytes) / rec),
-                                                   decodeSeconds: now.timeIntervalSince(t0),
-                                                   mbTotal: Double(cn.bytes_read &- c0.bytes_read) / 1e6, phase: phase.rawValue)))
+                                                   mbTotal: Double(cn.bytes_read &- c0.bytes_read) / 1e6, phase: phase.rawValue,
+                                                   speed: clock.speed)))
                 cl = cn
-                tLast = now
                 if new.count == 1 {
                     log(String(format: "DMENG REPLY first token %.0f ms after the reply started (prompt %d tokens: %@, reused %d, computed %d, prefill %.0f ms, restore %.0f ms; sampler %@)",
                                1000 * now.timeIntervalSince(tStart), ids.count, sr.source, sr.reused, sr.computed, sr.msPrefill,
                                sr.msRestore, sampler.isGreedy ? "greedy" : String(format: "temperature %g top_k %d top_p %g seed %llu", sampler.temp, sampler.topK, sampler.topP, sampler.seed)))
                 }
-                guard try m.step(Int32(tk), logits: &logits) else { reason = .cancelled; break }
+                let a = clock.begin()
+                let stepped = try m.step(Int32(tk), logits: &logits)
+                clock.end(a, counted: stepped)
+                guard stepped else { reason = .cancelled; break }
             }
         }
         let dt = Date().timeIntervalSince(t0)
@@ -861,22 +962,31 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                                        "gen_seed": Double(sampler.seed), "gen_thinking_budget": Double(gen.thinkingBudget ?? -1),
                                        "think_tokens": Double(tracker.thinkingTokens), "think_closed": tracker.closed ? 1 : 0,
                                        "think_forced_close": tracker.forcedClose ? 1 : 0]
-        split["compute_ms_per_token"] = 1000 * dt / Double(n) - split["wait_ms_per_token"]!
+        let sp = clock.speed
+        split["compute_ms_per_token"] = 1000 * sp.seconds / Double(max(1, sp.steps)) - split["wait_ms_per_token"]!
+        // the engine counters' own account of the same steps (dm_counters: decode steps, time inside dm_step), for the
+        // RATE line and the self-check (ChatModel adds them over a message's rounds as it adds the shown speed)
+        split["engine_steps"] = Double(cEnd.decode_steps - c0.decode_steps)
+        split["engine_step_s"] = Double(cEnd.step_ns &- c0.step_ns) / 1e9
+        split["gen_steps"] = Double(sp.steps)
+        split["gen_s"] = sp.seconds
+        split["wall_decode_s"] = dt
         let mbTok = Double(cEnd.bytes_read &- c0.bytes_read) / 1e6 / Double(n)
         let d = ReplyDetail(promptIds: ids, ids: new, prefill: kind, prefillTokens: sr.computed, prefillSeconds: sr.msPrefill / 1000,
-                            seconds: dt, tokPerSec: Double(new.count) / max(1e-9, dt), mibPerToken: mbTok * 1e6 / 1048576,
+                            seconds: sp.seconds, tokPerSec: sp.rate, mibPerToken: mbTok * 1e6 / 1048576,
                             releasedTop8InMemory: picks > 0 ? Double(cEnd.hits &- c0.hits) / picks : 0,
                             heldExpertsMean: Double(cEnd.held_bytes) / rec, syncReads: Int(cEnd.misses &- c0.misses), split: split,
                             prefillStats: ["prefill_s": sr.msPrefill / 1000, "prefill_mb_read": sr.mbRead,
                                            "prefill_reused": Double(sr.reused), "prefill_computed": Double(sr.computed)])
-        let rows = Self.replyRows(c0, cEnd, tokens: new.count, seconds: dt)
+        let rows = Self.replyRows(c0, cEnd, tokens: new.count, speed: sp, storeResident: m.storeResidentBytes,
+                                  bigMemory: DmengLaunch.spareMemoryOffered)
         lock.withLock { _last = d; _replyRows = rows }
         log("DMENG REPLY ids " + new.map(String.init).joined(separator: ","))
         if ink { log("DMENG REPLY raw " + (lead + c.decode(new)).debugDescription + " (stop: \(reason.rawValue)\(stopId.map { ", token \($0)" } ?? ""))") }
         log(String(format: "DMENG REPLY done: %d tokens (%@), %.2f tok/s, %.1f MB read/token, hit %.3f, refaults %.0f, budget %.2f GB", new.count,
-                   reason.rawValue, Double(new.count) / max(1e-9, dt), mbTok, d.releasedTop8InMemory, split["file_refaults"] ?? 0,
+                   reason.rawValue, sp.rate, mbTok, d.releasedTop8InMemory, split["file_refaults"] ?? 0,
                    Double(cEnd.budget_bytes) / 1e9))
-        cont.yield(.finished(GenSummary(reason: reason, tokens: new.count, seconds: dt,
-                                        meanTokPerSec: Double(new.count) / max(1e-9, dt), meanMBPerToken: mbTok)))
+        cont.yield(.finished(GenSummary(reason: reason, tokens: new.count, seconds: sp.seconds,
+                                        meanTokPerSec: sp.rate, meanMBPerToken: mbTok, speed: sp)))
     }
 }

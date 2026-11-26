@@ -69,6 +69,7 @@ struct dm_engine {
   std::atomic<bool> cancel_req{false};
   int64_t avail_open = 0, slab_auto = 0;  // iOS: os_proc_available_memory at open, the slab the sizing rule chose
   int64_t steps = 0;
+  uint64_t step_ns = 0;  // wall time inside dm_step, summed (dm_counters step_ns)
   int64_t rs_steps_dt = 0;
   uint64_t rs_dt[7] = {0};  // the readers' time by reads in flight at the last stats call (Readers::depth_times)
   uint32_t ra_lcg = 12345;  // run_ahead_ab: the arm choice per step, as dmeng's DMENG_RA_AB
@@ -375,6 +376,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
   co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;  // model_options "run:spare-mem=1"
   ro.spare_mem = co.spare_mem;
+  co.drive_gbs = ro.drive_gbs;  // model_options "run:drive-gbs=X" (bench only)
   e->C = std::make_unique<Core>();
   if (!e->C->init(e->M->info(), co, model_dir, err) || !e->M->bind(*e->C, err)) {
     g_err = "core: " + err;
@@ -622,6 +624,7 @@ int dm_step(dm_engine* e, int32_t id, float* logits) {
   const uint64_t b0 = e->C->cache.rd.bytes.load(), u0 = e->C->cache.st.bytes_urgent, n0 = e->C->cache.st.bytes_pf;
   e->pc->step(id, logits);
   e->steps++;
+  e->step_ns += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
   if (ab) {  // per arm (on = 1): reads that land during the next token count there (both arms alike)
     const int a = !e->C->ra_off;
     e->ab_n[a] += 1;
@@ -758,6 +761,8 @@ int dm_counters(dm_engine* e, dm_counters_t* out) {
   out->bytes_spare = e->C->cache.rd.file_bytes_skipped.load(std::memory_order_relaxed);
   out->read_busy_ns = e->C->cache.rd.busy_wall();
   out->spare_memory = !e->C->cache.file_under ? 0 : e->C->cache.spare_paused.load() ? 2 : 1;
+  out->step_ns = e->step_ns;
+  out->bytes_named_unused = e->C->cache.st.n_pf_unused_evicted * (uint64_t)e->C->cache.P[0].rec;
   return DM_OK;
 }
 
@@ -765,6 +770,11 @@ int dm_spare_memory_pause(dm_engine* e) {
   if (!e || !e->C->cache.file_under) return DM_EINVAL;
   e->C->cache.spare_pause();
   return DM_OK;
+}
+
+int64_t dm_store_resident_bytes(dm_engine* e) {
+  if (!e || e->C->cache.fmap.empty()) return -1;
+  return (int64_t)e->C->cache.file_resident_bytes();
 }
 
 const char* dm_stats_json(dm_engine* e) {
@@ -819,7 +829,10 @@ const char* dm_stats_json(dm_engine* e) {
     const double rec = (double)Cm.P[0].rec;
     s << ",\"reads\":{\"tokens\":" << dl(stp, e->rs_steps) << ",\"mb_urgent_per_token\":" << Cm.st.bytes_urgent / 1e6 / tok
       << ",\"mb_named_per_token\":" << Cm.st.bytes_pf / 1e6 / tok << ",\"named_records_per_token\":" << Cm.st.n_pf_issued / tok
-      << ",\"mb_named_unused_per_token\":" << Cm.st.n_pf_unused_evicted * rec / 1e6 / tok << ",\"wall_s\":" << wall << ",\"busy_s\":" << busy_s
+      << ",\"mb_named_unused_per_token\":" << Cm.st.n_pf_unused_evicted * rec / 1e6 / tok << ",\"gb_read_by_pool_total\":["
+      << Cm.rd.bytes_pool[0].load() / 1e9 << "," << Cm.rd.bytes_pool[1].load() / 1e9 << "," << Cm.rd.bytes_pool[2].load() / 1e9 << ","
+      << Cm.rd.bytes_pool[3].load() / 1e9 << "],\"pool_record_mb\":[" << Cm.P[0].rec / 1e6 << "," << (Cm.npools > 1 ? Cm.P[1].rec / 1e6 : 0) << "]"
+      << ",\"wall_s\":" << wall << ",\"busy_s\":" << busy_s
       << ",\"busy_pct\":" << 100.0 * busy_s / std::max(1e-9, wall) << ",\"gb_per_s_busy\":" << dl(by, e->rs_bytes) / 1e9 / std::max(1e-9, busy_s)
       << ",\"gb_per_s_wall\":" << dl(by, e->rs_bytes) / 1e9 / std::max(1e-9, wall) << "}";
     e->rs_busy = bw; e->rs_bytes = by; e->rs_steps = stp;

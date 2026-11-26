@@ -252,6 +252,9 @@ public final class DmengModel: @unchecked Sendable {
   /// Spare memory (the system's file cache under the expert cache): stop adding to it for the rest of the session.
   /// Any thread; false when it was not on.
   @discardableResult public func pauseSpareMemory() -> Bool { dm_spare_memory_pause(e) == DM_OK }
+  /// The model's expert files the system's file cache holds now, bytes (nil when they are not mapped: spare memory
+  /// off). Any thread.
+  public var storeResidentBytes: Int64? { let b = dm_store_resident_bytes(e); return b < 0 ? nil : b }
 
   public func persist(_ pos: Int) { dm_persist(e, Int32(pos)) }
   /// Drop a pending cancel that found nothing running (call on `queue`, after a cancel of background work).

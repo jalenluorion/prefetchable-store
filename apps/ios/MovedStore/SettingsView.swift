@@ -371,7 +371,7 @@ struct DiagnosticsView: View {
                      + String(format: ", %.1f GB memory", Double(ProcessInfo.processInfo.physicalMemory) / 1e9)]
         lines.append("")
         lines.append("Last reply in detail")
-        let rows = m.engine.lastReplyRows
+        let rows = m.lastReplyRows
         lines += rows.isEmpty ? ["(no reply yet)"] : rows.map { "\($0.0): \($0.1)" }
         lines.append("")
         lines.append("Engine")
@@ -391,7 +391,7 @@ struct DiagnosticsView: View {
                 row("Experts already in memory", String(format: "%.1f %%", m.inMemory * 100))
                 if let s = m.lastSummary {
                     row("Last reply", String(format: "%d tokens, %@, %.2f tok/s, %.1f MB/tok", s.tokens, s.reason.rawValue,
-                                             s.meanTokPerSec, s.meanMBPerToken))
+                                             m.replyTokPerSec, s.meanMBPerToken))
                 }
                 if let k = m.lastPrefillKind, let p = m.lastPrefill {
                     row("Prefill", String(format: "%@: %.0f reused, %.0f computed, %.2f s", k, p["prefill_reused"] ?? 0,
@@ -408,9 +408,9 @@ struct DiagnosticsView: View {
                 row("Memory warnings", "\(m.memoryWarnings)")
                 Button("Sample memory now") { m.memSample("settings") }
             }
-            if !m.engine.lastReplyRows.isEmpty {
+            if !m.lastReplyRows.isEmpty {
                 Section {
-                    ForEach(Array(m.engine.lastReplyRows.enumerated()), id: \.offset) { _, kv in
+                    ForEach(Array(m.lastReplyRows.enumerated()), id: \.offset) { _, kv in
                         row(kv.0, kv.1).font(.caption)
                     }
                 } header: {

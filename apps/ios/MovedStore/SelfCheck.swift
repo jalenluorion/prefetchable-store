@@ -91,7 +91,13 @@ enum SelfCheck {
         ["text": r.text, "tokens": r.tokens, "reason": r.reason, "first_token_ms": r.firstTokenMs ?? -1, "ui_ttft_ms": r.uiTtftMs ?? -1,
          "tok_per_s": r.uiDecodeTokPerSec ?? r.meanTokPerSec, "mean_tok_per_s": r.meanTokPerSec, "prefill_kind": r.prefillKind ?? "",
          "prompt_tokens": r.promptTokens ?? -1, "memory_warnings": r.memoryWarnings, "error": r.error ?? "",
-         "thermal_start": thermal0, "thermal_end": thermal()]
+         "thermal_start": thermal0, "thermal_end": thermal(),
+         "rate_shown": r.split?["rate_shown"] ?? -1, "rate_engine": r.split?["rate_engine"] ?? -1, "rate_ok": rateOK(r)]
+    }
+    /// The shown tokens/s within 2% of the engine counters' (dm_counters: steps / time inside dm_step).
+    static func rateOK(_ r: ReplyRecord) -> Bool {
+        guard let s = r.split?["rate_shown"], let e = r.split?["rate_engine"], e > 0, r.tokens > 0 else { return r.tokens == 0 }
+        return abs(s - e) / e <= 0.02
     }
 
     /// The Diagnostics "Last reply in detail" rows after a reply (the engine's counters), as label: value, each logged.
@@ -644,6 +650,13 @@ enum SelfCheck {
         log("SELFCHECK DONE screen=\(out["first_screen"] ?? "?") profile=\(out["profile"] ?? "?") mode=\(out["mode_default"] ?? "?") "
             + "verify=\(v?["parts_ok"] ?? "?")/\(v?["parts"] ?? "?") exact_tokens=\(e?["tokens"] ?? "?") "
             + "chat_ttft_ms=\(c?["first_token_ms"] ?? "?") chat_tok_s=\(c?["tok_per_s"] ?? "?") -> \(url.lastPathComponent)")
+        // the shown speed must be the engine's: a chat reply whose shown tokens/s differs from the counters' by over 2% fails
+        let rateRows = ["chat", "chat_followup"].compactMap { out[$0] as? [String: Any] }
+        if rateRows.contains(where: { ($0["rate_ok"] as? Bool) == false }) {
+            log("SELFCHECK FAIL rate: shown tokens/s differs from the engine counters' by over 2%: "
+                + rateRows.map { "\($0["rate_shown"] ?? "?") vs \($0["rate_engine"] ?? "?")" }.joined(separator: ", "))
+            exit(3)
+        }
         exit(0)
     }
 }

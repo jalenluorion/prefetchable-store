@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // The contract between the chat UI and the engine (DmengChatEngine): one event per generated token carrying the
 // incremental detokenized piece and that token's stats, prefill progress before the first token, cancellation between
@@ -27,18 +30,86 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
 /// Stats for one generated token.
 struct TokenStats: Codable, Sendable, Equatable {
     var index: Int              // 0-based generated-token index
-    var ms: Double              // wall time of this token
-    var tokPerSec: Double       // 1000 / ms
+    var ms: Double              // the last decode step's time (GenClock), ms
+    var tokPerSec: Double       // 1000 / ms (the last step's rate; the reply's is speed.rate)
     var mbRead: Double          // bytes read from flash for this token, in MB (1e6 B)
     var inMemory: Double        // fraction of the token's experts already in memory (0...1)
     var expertsInMemory: Int    // expert records in the engine's cache right now
-    /// The engine's decode clock: seconds from the reply's first sample to the end of this token (prefill and the prefix
-    /// restore excluded). (index + 1) / decodeSeconds is the reply's decode rate so far, the engine's tokens / seconds.
-    var decodeSeconds: Double = 0
     /// MB (1e6 B) read from flash since the prefill ended (this reply's tokens so far).
     var mbTotal: Double = 0
     /// The token's place in the think block, by token id (ThinkPhase: "open", "thinking", "close", "answer").
     var phase: String? = nil
+    /// This round's generating so far (GenClock): its steps and their time.
+    var speed = GenSpeed()
+}
+
+/// The one tokens/s figure, computed here only: tokens generated / the time the engine spent generating them. `steps`
+/// are the engine's decode steps (one per generated token after the first, which the prompt produces; the step after the
+/// last token is the one that produced the stop), `seconds` their time on a monotonic clock with background time left
+/// out (GenClock). The live line, the message caption, the status line, Diagnostics and the Copy text all show `rate`
+/// of one value: a message made of several rounds (tool calls) adds its rounds' speeds (`+`), the tool time is in none.
+struct GenSpeed: Codable, Sendable, Equatable {
+    var steps = 0
+    var seconds = 0.0
+    var rate: Double { seconds > 0 ? Double(steps) / seconds : 0 }
+    static func + (a: GenSpeed, b: GenSpeed) -> GenSpeed { GenSpeed(steps: a.steps + b.steps, seconds: a.seconds + b.seconds) }
+    /// The Diagnostics "Speed" row.
+    var detail: String { String(format: "%.2f tokens/s (%d steps, %.1f s generating)", rate, steps, seconds) }
+}
+
+/// The engine's generating time: each decode step timed on a monotonic clock (CLOCK_UPTIME_RAW: it stops while the device
+/// sleeps), any part of a step the app spent in the background left out (AppClock). Time between steps (detokenising,
+/// the UI, a tool round, a stop request waiting) is not generating time; the prompt has its own "started in" figure.
+final class GenClock: @unchecked Sendable {
+    private(set) var speed = GenSpeed()
+    private(set) var last = 0.0
+    func begin() -> (Double, Double) { (AppClock.uptime, AppClock.background) }
+    /// A step finished (counted = it produced the next token's logits; a cancelled step is not counted).
+    func end(_ a: (Double, Double), counted: Bool = true) {
+        guard counted else { return }
+        let d = max(0, (AppClock.uptime - a.0) - (AppClock.background - a.1))
+        speed.seconds += d
+        speed.steps += 1
+        last = d
+    }
+}
+
+/// A monotonic clock and the app's time in the background so far (from its own didEnterBackground / willEnterForeground).
+enum AppClock {
+    static var uptime: Double { Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1e9 }
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var total = 0.0
+    nonisolated(unsafe) private static var since: Double? = nil
+    /// Background seconds since launch, an interval in progress included.
+    static var background: Double {
+        _ = observing
+        lock.lock(); defer { lock.unlock() }
+        return total + (since.map { uptime - $0 } ?? 0)
+    }
+    /// In the background now.
+    static var inBackground: Bool { _ = observing; lock.lock(); defer { lock.unlock() }; return since != nil }
+    static func entered() {
+        lock.lock(); let was = since == nil; if was { since = uptime }; lock.unlock()
+        if was { log("APPCLOCK background") }
+    }
+    static func left() {
+        lock.lock(); var d = -1.0; if let s = since { d = uptime - s; total += d; since = nil }; lock.unlock()
+        if d >= 0 { log(String(format: "APPCLOCK foreground after %.1f s in the background", d)) }
+    }
+    // the app's and its scenes' notifications alike (a scene-based app gets both; entered / left count each interval once)
+    private static let observing: Bool = {
+        #if canImport(UIKit)
+        let nc = NotificationCenter.default
+        for n in [UIApplication.didEnterBackgroundNotification, UIScene.didEnterBackgroundNotification] {
+            _ = nc.addObserver(forName: n, object: nil, queue: nil) { _ in entered() }
+        }
+        for n in [UIApplication.willEnterForegroundNotification, UIScene.willEnterForegroundNotification] {
+            _ = nc.addObserver(forName: n, object: nil, queue: nil) { _ in left() }
+        }
+        #endif
+        return true
+    }()
+    static func start() { _ = observing }
 }
 
 enum StopReason: String, Codable, Sendable { case eos, maxNew = "max_new", cancelled }
@@ -46,9 +117,10 @@ enum StopReason: String, Codable, Sendable { case eos, maxNew = "max_new", cance
 struct GenSummary: Codable, Sendable, Equatable {
     var reason: StopReason
     var tokens: Int
-    var seconds: Double
-    var meanTokPerSec: Double
+    var seconds: Double         // generating seconds (speed.seconds)
+    var meanTokPerSec: Double   // this round's speed.rate
     var meanMBPerToken: Double
+    var speed = GenSpeed()
 }
 
 /// The prompt prefill in progress: one before the first prefilled token and one after each.
