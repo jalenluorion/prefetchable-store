@@ -146,7 +146,7 @@ replies are searched without it. With drafting on, the slab is smaller by drafti
 ## Speed on an iPhone 15 Plus (6 GB)
 
 Measured on the device, profile `phone-small`. On an iPhone 17 Pro (12 GB), a user measured 11 tokens/s for
-Qwen3.6-35B-A3B and 4 tokens/s for Inkling 2 Mini on the published app, out of the box ([mode to confirm]).
+Qwen3.6-35B-A3B and 4 tokens/s for Inkling 2 Mini on the published app, out of the box.
 
 **Qwen3.6-35B-A3B** (calibrated 4-bit in-memory weights, about 2.9 GB of app memory)
 

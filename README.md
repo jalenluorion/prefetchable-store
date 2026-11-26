@@ -10,8 +10,8 @@ iPhone. That includes a 180B-parameter model whose weights are eight times the l
 | [Inkling 2 Mini](https://huggingface.co/jalenluorion/Inkling-2-Mini-prefetchable-store) | base M4 MacBook Pro, 16 GB | 9 to 11 GB | 17 to 20 tokens/s exact, about 21 fast |
 | Qwen3.6-35B-A3B | iPhone 15 Plus, 6 GB | 2.9 GB | 3.4 tokens/s exact, 4.1 fast |
 | Inkling 2 Mini | iPhone 15 Plus, 6 GB | 2.9 GB | 1.5 tokens/s exact, 2.4 fast |
-| Qwen3.6-35B-A3B | iPhone 17 Pro, 12 GB | | 11 tokens/s [mode to confirm] |
-| Inkling 2 Mini | iPhone 17 Pro, 12 GB | | 4 tokens/s [mode to confirm] |
+| Qwen3.6-35B-A3B | iPhone 17 Pro, 12 GB | | 11 tokens/s (published app, out of the box) |
+| Inkling 2 Mini | iPhone 17 Pro, 12 GB | | 4 tokens/s (published app, out of the box) |
 
 The engine makes released models **prefetchable**: the experts a layer will use are known before the layer runs,
 early enough for the SSD to deliver them while the model computes something else. The released weights are frozen. The
@@ -222,8 +222,8 @@ app.
 
 | | mode | decode, tokens/s |
 |---|---|---|
-| Qwen3.6-35B-A3B | [mode to confirm] | 11 |
-| Inkling 2 Mini | [mode to confirm] | 4 |
+| Qwen3.6-35B-A3B | published app, out of the box | 11 |
+| Inkling 2 Mini | published app, out of the box | 4 |
 
 The run records behind the tables of Qwen3.6-35B-A3B and Inkling 2 Mini on the Mac and the iPhone 15 Plus are in
 [results/headline](results/headline).
