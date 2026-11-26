@@ -1,33 +1,38 @@
 """Inkling's draft head (src/models/inkling2_loop/ink_draft.cpp): the port check, the exactness gate and the timing campaign.
-Every model process goes through the research tree's guard (one model process at a time); before each run the machine
-rules are checked: battery >= 30%, or >= 20% and charging; no other job's QUIET file fresher than 12 minutes; no
-PRIORITY file fresher than 30 minutes. Resumable: a run whose JSON exists is skipped.
+Every model process goes through a guard script (DM_GUARD: one model process at a time, bench/README.md); before each
+run the machine rules are checked: battery >= 30%, or >= 20% and charging; with DM_SLOT_DIR set, no QUIET file there
+fresher than 12 minutes and no PRIORITY file fresher than 30 minutes. Resumable: a run whose JSON exists is skipped.
 
   python3 bench/ink_draft/run.py port      # gate 1: C++ head vs the MLX reference on recorded features (pitt, code)
   python3 bench/ink_draft/run.py exact     # gate 2: ids with the head on = one-position decoding (pitt, code, edit, tool)
   python3 bench/ink_draft/run.py timing    # off / lookup / head / both, 6 and 7.8 GB, two runs per cell, interleaved
   python3 bench/ink_draft/run.py table     # results/ink_draft/ tables from the runs
 
-Paths (environment): MODEL (default ../../../inkling/model from the repo), DM_GUARD (../../../../engine/bench/guard.py),
-INK_PY (the MLX venv's python, ../../../inkling/.venv/bin/python), FEATS (recorded features and ids,
-../../../../engine/results/inkling_mtp; the port check only), BIN (build/dmeng). Prompts: bench/prompts/inkling2_loop/ (pitt,
+Paths (environment, required unless a default is given): MODEL (the Inkling 2 Mini folder), DM_GUARD (the guard
+script), INK_PY (a python with mlx and mlx-lm), FEATS (recorded features and ids: the port check only), BIN (default
+build/dmeng), DM_SLOT_DIR (optional: the folder of the QUIET / PRIORITY files). Prompts: bench/prompts/inkling2_loop/ (pitt,
 code) and results/ink_draft/prompts/ (edit, tool, newfile).
 """
 import glob, json, os, re, subprocess, sys, time
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 up = lambda *p: os.path.normpath(os.path.join(REPO, *p))
-MODEL = os.environ.get("MODEL", up("..", "..", "..", "inkling", "model"))
-GUARD = os.environ.get("DM_GUARD", up("..", "..", "..", "..", "engine", "bench", "guard.py"))
-ENG = os.path.dirname(os.path.dirname(GUARD))
-INK_PY = os.environ.get("INK_PY", up("..", "..", "..", "inkling", ".venv", "bin", "python"))
-FEATS = os.environ.get("FEATS", up("..", "..", "..", "..", "engine", "results", "inkling_mtp"))
+def need(k):
+    v = os.environ.get(k)
+    if not v:
+        sys.exit(f"{k} is not set (see the docstring: python3 bench/ink_draft/run.py needs MODEL, DM_GUARD, INK_PY, FEATS)")
+    return v
+
+
+MODEL, GUARD, INK_PY = need("MODEL"), need("DM_GUARD"), need("INK_PY")
+FEATS = os.environ.get("FEATS", "")
+SLOT = os.environ.get("DM_SLOT_DIR", "")
 BIN = os.environ.get("BIN", os.path.join(REPO, "build", "dmeng"))
 OUT = os.path.join(REPO, "results", "ink_draft")
 RUNS = os.path.join(OUT, "runs")
 SCR = os.environ.get("SCRATCH", os.path.join(REPO, "build", "ink_draft"))  # big outputs (logits), not committed
-QUIET = os.path.join(ENG, "bench", "QUIET")
-PRIORITY = os.path.join(ENG, "bench", "PRIORITY")
+QUIET = os.path.join(SLOT, "QUIET") if SLOT else ""
+PRIORITY = os.path.join(SLOT, "PRIORITY") if SLOT else ""
 for d in (RUNS, SCR):
     os.makedirs(d, exist_ok=True)
 
@@ -48,10 +53,10 @@ def wait_rules():
             time.sleep(60)
             continue
         now = time.time()
-        if os.path.exists(QUIET) and now - os.path.getmtime(QUIET) < 720:
+        if QUIET and os.path.exists(QUIET) and now - os.path.getmtime(QUIET) < 720:
             time.sleep(20)
             continue
-        if os.path.exists(PRIORITY) and now - os.path.getmtime(PRIORITY) < 1800:
+        if PRIORITY and os.path.exists(PRIORITY) and now - os.path.getmtime(PRIORITY) < 1800:
             time.sleep(30)
             continue
         return txt
@@ -91,6 +96,8 @@ TEXTS = {"pitt": ("taps_pitt_seq.bin", "pitt_seq_ids.txt", 9, "accept1_pitt_seq.
 
 
 def port():
+    if not FEATS:
+        sys.exit("FEATS is not set: the folder of the recorded features and ids (the port check)")
     for t, (taps, ids, start, acc) in TEXTS.items():
         args = ["--taps", os.path.join(FEATS, taps), "--ids", os.path.join(FEATS, ids), "--start", str(start)]
         guarded(f"port_{t}_ref", [INK_PY, os.path.join(REPO, "tests", "inkling2_loop", "draft_ref_mlx_run.py"), "--model", MODEL, *args,
@@ -110,7 +117,7 @@ def port():
 
 
 # ------------------------------------------------------------------------------------------------ decoding runs
-def prompt_file(p):  # pitt / code: the repo's standard prompts; edit / tool (engine/ink/make_draft_prompts.py) and newfile
+def prompt_file(p):  # pitt / code: the repo's standard prompts; edit / tool and newfile
     return {"pitt": os.path.join(REPO, "bench", "prompts", "inkling2_loop", "pitt.ids"),          # (make_prompts.py) copied here
             "code": os.path.join(REPO, "bench", "prompts", "inkling2_loop", "code.ids")}.get(p, os.path.join(OUT, "prompts", f"{p}_ids.txt"))
 

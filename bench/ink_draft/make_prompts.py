@@ -1,7 +1,7 @@
 """The draft head's extra timing prompt, in Inkling's chat template (results/ink_draft/prompts/):
   newfile_ids.txt  a tool-call turn that writes a NEW file of about 600 tokens (tools declared, nothing to copy from)
-The rewrite-a-file-in-the-conversation case is the existing tool prompt (engine/results/inkling_draft/tool_ids.txt:
-read_file result, then the model writes the whole updated file).
+The rewrite-a-file-in-the-conversation case is the tool prompt in results/ink_draft/prompts/ (a read_file result, then
+the model writes the whole updated file).
   INK_PY bench/ink_draft/make_prompts.py [--model MODEL]   (needs jinja2 and tokenizers)
 """
 import argparse, json, os
@@ -12,8 +12,10 @@ from tokenizers import Tokenizer
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ap = argparse.ArgumentParser()
-ap.add_argument("--model", default=os.environ.get("MODEL", os.path.normpath(os.path.join(REPO, "..", "..", "..", "inkling", "model"))))
+ap.add_argument("--model", default=os.environ.get("MODEL"), help="the Inkling 2 Mini folder (default: $MODEL)")
 a = ap.parse_args()
+if not a.model:
+    ap.error("--model MODEL (or $MODEL) is required")
 
 
 def render_chat(model_dir, messages, **kw):  # as the MLX reference implementation renders it: plain jinja2, no generation prompt

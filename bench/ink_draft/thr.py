@@ -5,7 +5,7 @@ sequences: the ids after the prompt are the model's own greedy tokens, so draft 
 
 Per threshold: share of positions with a draft, mean drafts used, mean accepted, and the tokens per unit of time of the
 rule "verify every draft whose probability is >= thr" with the measured step costs (one position = 1; 2..8 positions =
-the 6 GB table of the engine's verify, RESULTS-STAGE4-INKLING.md) and the head's cost added on every step.
+the 6 GB table of the engine's verify pass) and the head's cost added on every step.
 """
 import argparse
 

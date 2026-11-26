@@ -49,8 +49,8 @@ class Sim:
     def __init__(self, ri, rp, ti, slots, policy, names, mode="exact", w=0.13, mass=0.13, first=0, seed=0, caps=False,
                  name_touch=False, use_touch=True):
         # caps: the slots split evenly over the layers (a layer evicts only its own); name_touch: a name counts as a use in
-        # the keep-score's statistics (the near-future evidence a router gives); use_touch = False: picks do not (the old
-        # runner); mode prefetch: picks never read (the released top-k among the held: hits only)
+        # the keep-score's statistics (the near-future evidence a router gives); use_touch = False: picks do not (the MLX
+        # reference's slot rule); mode prefetch: picks never read (the released top-k among the held: hits only)
         self.caps, self.name_touch, self.use_touch = caps, name_touch, use_touch
         self.lheld = np.zeros(NL, np.int64)
         self.cur_L = 0
@@ -361,7 +361,7 @@ class Sim:
         return out
 
 
-def old_runner(ri, ti, first, slots=24, keep=3, m=10, lag=LAG):
+def mlx_slot_rule(ri, ti, first, slots=24, keep=3, m=10, lag=LAG):
     """The MLX reference implementation's slot rule (prefetch mode): per layer `slots` slots; the lag router's
     top m are named (steps < lag at the token's start, step s + lag at step s); a named expert not held is read into a free
     slot, else over the least recently NAMED one outside the keep window (named < t - keep), else over the least recently
@@ -411,7 +411,7 @@ def old_runner(ri, ti, first, slots=24, keep=3, m=10, lag=LAG):
             hits += sum(int(e) in H for e in ri[p, L, :K])
             asked += K
     T = npos - first
-    return {"old_runner": {"slots": slots, "keep": keep, "m": m}, "mb_per_token": reads * REC / 1e6 / T,
+    return {"mlx_slot_rule": {"slots": slots, "keep": keep, "m": m}, "mb_per_token": reads * REC / 1e6 / T,
             "records_per_token": reads / T, "top10_held": hits / asked}
 
 
@@ -479,7 +479,7 @@ if __name__ == "__main__":
     ap.add_argument("--caps", action="store_true")
     ap.add_argument("--name-touch", action="store_true")
     ap.add_argument("--no-use-touch", action="store_true")
-    ap.add_argument("--old", default=None, help="the old runner's rule: SLOTS,KEEP,M")
+    ap.add_argument("--mlx-slot-rule", default=None, help="the MLX reference implementation's slot rule: SLOTS,KEEP,M")
     ap.add_argument("--one", default=None, help="one run: GB,policy,names,mode[,mass]")
     ap.add_argument("--grid", default="names", help="names | policy | fast")
     a = ap.parse_args()
@@ -489,9 +489,9 @@ if __name__ == "__main__":
     if a.reuse:
         res["reuse"] = reuse(ri, first)
         print(json.dumps(res["reuse"]))
-    if a.old:
-        f = [int(x) for x in a.old.split(",")]
-        print(json.dumps(old_runner(ri, ti, first, *f)))
+    if a.mlx_slot_rule:
+        f = [int(x) for x in a.mlx_slot_rule.split(",")]
+        print(json.dumps(mlx_slot_rule(ri, ti, first, *f)))
     if a.one:
         f = a.one.split(",")
         gb, pol, nm, mode = float(f[0]), f[1], f[2], f[3]

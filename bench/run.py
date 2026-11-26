@@ -4,7 +4,7 @@ through a guard (one model process at a time, under /usr/bin/time -l), resumable
 
   python bench/run.py --model DIR --out DIR [--cells cache,routers,policy,approx] [--gb 4,6] [--prompts pitt,code]
                       [--routers F.dmr] [--evict-policy F.json] [--hazard] [--approx drop] [--reps 2]
-                      [--bin build/dmeng] [--count-bin build-counters/dmeng | --no-counts] [--guard engine/bench/guard.py]
+                      [--bin build/dmeng] [--count-bin build-counters/dmeng | --no-counts] [--guard GUARD]
                       [--dry-run] [--report]
 
 Each cell runs twice: the timed run with the default binary, then the counting run with the counting build
@@ -429,7 +429,7 @@ def main(argv):
     if not a.report:
         problems = []
         if not a.guard:
-            problems.append("no guard: give --guard or set DM_GUARD (e.g. the research tree's engine/bench/guard.py)")
+            problems.append("no guard: give --guard or set DM_GUARD (bench/README.md says what it must do)")
         if not os.path.exists(a.bin):
             problems.append(f"{a.bin}: not built (cmake --build build)")
         if not a.no_counts and not is_counting_build(a.count_bin):

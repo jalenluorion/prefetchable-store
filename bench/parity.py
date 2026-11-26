@@ -16,7 +16,7 @@ Prefill stages: cycles and instructions per position, ms per position (the stage
 the prefill's ms per position)."""
 import json, os, re, sys
 
-READ = 105.0  # GB/s, the machine at 8-10 threads (engine/RESULTS-STAGE4-Q36.md 0a)
+READ = 105.0  # GB/s, the base M4 at 8-10 threads
 
 # decode stages: (label, DMSTAGE names summed, timer keys summed)
 STAGES = [
@@ -32,7 +32,7 @@ STAGES = [
     ("output head", ["head"], ["head"]),
     ("other", ["other", "span_copies"], ["post_mlp"]),
 ]
-# weight MB per decode token and format, per model (35B: RESULTS-STAGE4-Q36.md 0a and results/q36_speed; Inkling:
+# weight MB per decode token and format, per model (35B: results/q36_speed; Inkling:
 # results/ink_speed/INK-SPEED.md "Bytes per token by stage"); "routers" adds the run's router_weight_mb_per_token
 BYTES = {
     "q36": {"attention projections": (1007, "AFF8"), "attention core (+ fused output projection)": (267 + 126, "AFF8 + fp32 state"),

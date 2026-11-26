@@ -46,8 +46,8 @@ python bench/run.py --model DIR --out DIR [--cells cache,routers,policy,approx] 
 - `--guard`: the guard script, called as `GUARD LOG TIMEOUT_S -- CMD...`. It must wait until no other model process is
   running, run the command under `/usr/bin/time -l` with its output in `LOG`, and print one line
   `GUARD {json}` with `rc`, `killed_by_guard`, `peak_footprint_gb_time`, `others_cpu_pct_mean` and the `before` /
-  `after` machine state (`power`, `battery`, `mem_free_pct`). The research tree's `engine/bench/guard.py` does all of
-  this. Give the guard with `--guard` or with `DM_GUARD`, and its interpreter with `--guard-python` or `DM_GUARD_PYTHON`.
+  `after` machine state (`power`, `battery`, `mem_free_pct`). The guard is your own script (none ships with this
+  repository). Give the guard with `--guard` or with `DM_GUARD`, and its interpreter with `--guard-python` or `DM_GUARD_PYTHON`.
 - `--dry-run`: prints every command, with `# done, skipped:` in front of the runs that already have a JSON. It runs
   nothing.
 - `--report`: rebuilds `results.jsonl`, `results.csv` and the table from `OUT/runs/` without running anything.
@@ -119,7 +119,7 @@ The wall-clock columns follow. A wall-clock figure is marked `!` when the others
 ## Example
 
 ```sh
-export DM_GUARD=<research tree>/engine/bench/guard.py
+export DM_GUARD=<your guard script>
 python bench/run.py --model <model dir> --out <out dir> --gb 3.3,5 --reps 2 \
     --routers <model dir>/routers/<router>.dmr --router-args "--m 12" --hazard --dry-run
 ```
