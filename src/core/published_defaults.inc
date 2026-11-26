@@ -52,6 +52,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    }
   },
   "prefill": {
+   "apart": 1,
    "chunk": 256,
    "dn_rows": 64,
    "gpu_min": 64,
@@ -169,6 +170,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    }
   },
   "prefill": {
+   "apart": 1,
    "chunk": 512,
    "dn_rows": 64,
    "gpu_min": 64,
