@@ -98,7 +98,18 @@ static uint64_t fnv(const int* p, int n) {
 
 PrefixCache::PrefixCache(LM& m, const SessionOptions& o) : m_(m), o_(o) {
   live_logits_.resize(m.info().vocab);
-  if (!o_.disk_dir.empty()) mkdir(o_.disk_dir.c_str(), 0755);
+  if (!o_.disk_dir.empty()) {
+    mkdir(o_.disk_dir.c_str(), 0755);
+    // a write that a process ended in (killed, exit() without the destructor, a full drive) leaves its *.tmp behind:
+    // the folder has one user at a time, so any *.tmp here at open is such a leftover and is removed
+    if (DIR* d = opendir(o_.disk_dir.c_str())) {
+      while (dirent* e = readdir(d)) {
+        const std::string nm = e->d_name;
+        if (nm.size() > 4 && nm.compare(nm.size() - 4, 4, ".tmp") == 0) unlink((o_.disk_dir + "/" + nm).c_str());
+      }
+      closedir(d);
+    }
+  }
 }
 PrefixCache::~PrefixCache() {
   if (pend_fd_ >= 0) {

@@ -58,7 +58,8 @@ struct dm_engine {
   std::unique_ptr<ModelLM> lm;
   std::unique_ptr<PrefixCache> pc;
   std::string err, stats, routers_path, res_file, last_prefill = "{}";  // the caller's strings are not kept (only copies)
-  std::string cache_why = "null";  // the automatic cache rule's numbers (memwatch.h auto_cache_gb), as dmeng and dmserve print them
+  std::string cache_why = "null";
+  int64_t rs_steps_loop = 0;  // decode steps at the last stats call (the loop / background counters' denominator)  // the automatic cache rule's numbers (memwatch.h auto_cache_gb), as dmeng and dmserve print them
   dm_open_opts o{};
   qos_class_t qos = QOS_CLASS_USER_INTERACTIVE;
   uint64_t rs_urgent = 0, rs_pf = 0, rs_pf_n = 0, rs_unused = 0, rs_busy = 0, rs_bytes = 0, rs_steps = 0;  // reads at the last stats call
@@ -227,6 +228,26 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.run_ahead_max != 0) F("--run-ahead-max", std::to_string(std::max(0, o.run_ahead_max)));
   if (o.run_ahead_sat_skip != 0) F("--run-ahead-sat-skip", o.run_ahead_sat_skip > 0 ? "1" : "0");
   if (o.readers > 0) F("--readers", std::to_string(o.readers));
+  // model_options entries "run:FLAG=VALUE" (or run:--FLAG=VALUE): any dmeng run flag (presets.h run_flag), read after the fields above (so a
+  // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode fast-eps, --rd-prio)
+  std::string model_opts;
+  {
+    const std::string mo = o.model_options ? o.model_options : "";
+    for (size_t i = 0; i < mo.size();) {
+      size_t j = mo.find(';', i);
+      if (j == std::string::npos) j = mo.size();
+      const std::string kv = mo.substr(i, j - i);
+      if (kv.rfind("run:", 0) == 0) {
+        const size_t q = kv.find('=');
+        std::string flag = kv.substr(4, q == std::string::npos ? std::string::npos : q - 4);
+        if (flag.rfind("--", 0) != 0) flag = "--" + flag;  // run:bg-ranks=8 as run:--bg-ranks=8
+        F(flag.c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
+      } else if (!kv.empty()) {
+        model_opts += (model_opts.empty() ? "" : ";") + kv;
+      }
+      i = j + 1;
+    }
+  }
   if (!err.empty()) {
     g_err = "options: " + err;
     return nullptr;
@@ -245,10 +266,6 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (ro.drafts > 0) {  // (no drafting in the C API: a manifest default cannot turn on what this front end does not do)
     ro.notes.push_back("drafts: the C API has no drafting, off");
     ro.drafts = 0;
-  }
-  if (ro.bg_ranks > 0) {
-    ro.notes.push_back("background reads: not in the C API, off");
-    ro.bg_ranks = 0;
   }
   // the prompt's sub-chunk is the model's own here (the C API does not set it; dmeng and dmserve use 512): printed as 0
   ro.prefill_chunk = 0;
@@ -384,6 +401,16 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     if (ro.tau > 0) e->R->tau = ro.tau;
     e->R->cand = ro.cand;
     e->C->hook = e->R.get();
+    if (ro.bg_ranks > 0) {  // background reads: the routers' next ranks for the drive's idle time (as dmeng; its defaults)
+      e->R->bg_ranks = ro.bg_ranks;
+      e->R->bg_queue = 2;
+      e->C->cache.rd.bg_spec_gate = std::max(0, ro.bg_gate);
+      e->C->cache.bg_split = 2;
+      e->C->cache.rd.max_bg = 1;
+    }
+  } else if (ro.bg_ranks > 0) {
+    fprintf(stderr, "dmeng: background reads need the routers: off\n");
+    ro.bg_ranks = 0;
   }
   const std::string xtok = ro.xtok;
   if (!xtok.empty()) {  // cross-token routers: the next token's first steps, from a late step of this one
@@ -441,7 +468,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (pt > 0 && pt != e->C->o.threads) e->prefill_pool.reset(new Pool(pt, -1, (int)e->qos));
   {  // the model's own options ("name=value;..."); iOS default: free the batched prefill's scratch after each prompt
      // (P2: a 357-token prompt left ~0.35 GB of footprint behind for the rest of the session)
-    std::string mo = o.model_options ? o.model_options : "";
+    std::string mo = model_opts;  // (the run: entries were read above)
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
     if (mo.find("prefill_release") == std::string::npos) mo = "prefill_release=1" + std::string(mo.empty() ? "" : ";") + mo;
 #endif
@@ -789,6 +816,17 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"weight_left_out_per_token_p90\":" << (w.empty() ? 0.0 : (double)w[std::min(w.size() - 1, (size_t)(0.9 * w.size()))])
       << ",\"steps_with_a_drop_share\":" << N.steps_replaced / std::max(1.0, N.steps) << ",\"picks_left_out_per_token\":" << N.n_replaced / nt
       << ",\"picks_read_and_waited_per_token\":" << (N.n_read_now + N.n_late_waited) / nt << "}";
+  }
+  {  // looped layers (Inkling's passes) and background reads, per decode token since the last stats call
+    const CacheStats& S = e->C->cache.st;
+    const double nt = std::max(1.0, (double)(e->steps - e->rs_steps_loop));
+    const double rec = (double)e->C->cache.P[0].rec;
+    s << ",\"loop\":{\"looped_picks_per_token\":" << S.n_pick_r[0] / nt << ",\"hit_rate_looped\":" << (double)S.n_hit_r[0] / std::max<uint64_t>(1, S.n_pick_r[0])
+      << ",\"hit_rate_other\":" << (double)S.n_hit_r[1] / std::max<uint64_t>(1, S.n_pick_r[1]) << ",\"picks_used_by_an_earlier_pass_per_token\":" << S.n_reuse_hit / nt
+      << ",\"reread_within_token_per_token\":" << S.n_reuse_reread / nt << ",\"reread_mb_per_token_approx\":" << S.n_reuse_reread * rec / 1e6 / nt
+      << "},\"background_reads\":{\"issued_per_token\":" << S.n_bg_issued / nt << ",\"refused_per_token\":" << S.n_bg_refused / nt
+      << ",\"used_per_token\":" << S.n_bg_used / nt << ",\"mb_per_token\":" << S.bytes_bg / 1e6 / nt << ",\"caps_active\":" << !e->C->cache.lcap.empty() << "}";
+    e->rs_steps_loop = e->steps;
   }
   if (e->C->run_ahead) s << ",\"run_ahead\":" << e->C->ra_json();  // cumulative since open (dmeng's counters)
   {  // the readers' wall time by reads in flight since the last stats call (per token: dmeng's read_queue counters)
