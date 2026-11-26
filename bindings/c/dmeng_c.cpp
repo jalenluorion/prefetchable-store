@@ -233,7 +233,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.readers > 0) F("--readers", std::to_string(o.readers));
   if (o.ctx > 0) g.ctx = o.ctx;
   // model_options entries "run:FLAG=VALUE" (or run:--FLAG=VALUE): any dmeng run flag (presets.h run_flag), read after the fields above (so a
-  // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode fast-eps, --rd-prio)
+  // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode approx:drop:w=0.12, --rd-prio)
   std::string model_opts;
   {
     const std::string mo = o.model_options ? o.model_options : "";

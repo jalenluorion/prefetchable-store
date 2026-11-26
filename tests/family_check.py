@@ -546,9 +546,9 @@ if wanted("presets"):
                     bad.append(f"{prof} prefill {fe}: {g} != {want}")
             ncell += 1
         # a profile's own mode declaration (profiles.<p>.modes.fast) over the model-level modes.fast, in a temporary
-        # manifest: that profile resolves to its string, every other profile to the folder's own declaration (the 35B's
-        # phone-small: approx:drop:w=0.08) or the model-level one, in all three front ends ("preset": engine_mode,
-        # engine_mode_from; "resolved": mode); an explicit engine string is kept as given
+        # manifest: that profile resolves to its string, every other profile to the folder's own declaration if it has one
+        # (none of the published manifests does: the model-level mode, modes.fast), in all three front ends ("preset":
+        # engine_mode, engine_mode_from; "resolved": mode); an explicit engine string is kept as given
         OVER = "approx:drop:w=0.15:mass=0.15:late=-1"
         op = "phone" if "phone" in man["profiles"] else next(iter(man["profiles"]))
 
