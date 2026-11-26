@@ -907,6 +907,12 @@ int main(int argc, char** argv) {
       for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per(C.wait_step[s]);
       js << "],\"misses_by_step\":[";
       for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per((double)C.miss_step[s]);
+      // the part of each step's wait the run-ahead had not named (a chain's first miss; run_ahead.wait_not_named_ms by
+      // step) and how often such a step waited, per token
+      js << "],\"wait_not_named_ms_by_step\":[";
+      for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per(C.wait_unnamed_step[s]);
+      js << "],\"waits_not_named_by_step\":[";
+      for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per((double)C.nwait_unnamed_step[s]);
       js << "]";
     }
     {

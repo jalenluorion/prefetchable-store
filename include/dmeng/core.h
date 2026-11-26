@@ -169,6 +169,10 @@ class Core {
   std::vector<float> pw, uw;
   std::vector<double> wait_step;      // [steps] wait ms (decode statistics)
   std::vector<uint64_t> miss_step;    // [steps] picks read on the spot
+  // [steps] the wait of steps the run-ahead had not named (a chain's first miss: wait_not_named_ms split by step) and
+  // how many such steps waited (decode statistics; without run-ahead every waiting step is one)
+  std::vector<double> wait_unnamed_step;
+  std::vector<uint64_t> nwait_unnamed_step;
   std::vector<int> next_same;         // [steps] the next step of the same physical layer in the token, -1 if none
   const int16_t* force = nullptr;     // forced routing [npos, steps, K] (timing with skipped reads)
   int force_n = 0;
@@ -355,7 +359,7 @@ class Core {
   void lossless(int step, const float* x, float* y, const MoeView& v);
   // run-ahead from a step about to wait for the read whose pending count is `watch`
   void ra_predict(int step, const MoeView& v, const bool* done, const float* w, const std::atomic<int>* watch);
-  void ra_where(double wait_ms);  // where this step's wait sits
+  void ra_where(int step, double wait_ms);  // where this step's wait sits
   void ra_score(int step, const int32_t* pk);                                     // the real picks of a predicted step
   void approx(int step, const float* x, float* y, const MoeView& v);
   int take_slot(int L, int e, int step);  // a slot for a miss read now (urgent): pins it
