@@ -88,6 +88,70 @@ void Readers::stop() {
   cv_.notify_all();
   for (auto& t : th_) t.join();
   th_.clear();
+  if (drop_th_.joinable()) {
+    {
+      std::lock_guard<std::mutex> lk(drop_mu_);
+      drop_stop_ = true;
+    }
+    drop_cv_.notify_all();
+    drop_th_.join();
+  }
+}
+
+void Readers::drops_start(std::atomic<uint8_t>* state) {
+  drop_state_ = state;
+  drop_stop_ = false;
+  drop_th_ = std::thread([this] { drop_loop(); });
+}
+
+void Readers::drop_pages(int key, const uint8_t* p, size_t n) {
+  if (!drop_state_) {  // (no drop thread: at once)
+    msync((void*)p, n, MS_INVALIDATE);
+    return;
+  }
+  drop_state_[key].store(1, std::memory_order_release);
+  {
+    std::lock_guard<std::mutex> lk(drop_mu_);
+    drops_.push_back({key, p, n});
+  }
+  drop_cv_.notify_one();
+}
+
+void Readers::drops_flush() {
+  std::unique_lock<std::mutex> lk(drop_mu_);
+  drop_cv_.wait(lk, [&] { return (drops_.empty() && !drop_busy_) || !drop_th_.joinable(); });
+}
+
+void Readers::drop_loop() {
+  pthread_set_qos_class_self_np(QOS_CLASS_UTILITY, 0);  // kernel work on clean pages, off the compute's and readers' way
+  for (;;) {
+    Drop d;
+    {
+      std::unique_lock<std::mutex> lk(drop_mu_);
+      drop_busy_ = false;
+      drop_cv_.notify_all();  // (drops_flush)
+      drop_cv_.wait(lk, [&] { return drop_stop_ || !drops_.empty(); });
+      if (drops_.empty()) return;  // stopping, nothing left
+      d = drops_.front();
+      drops_.pop_front();
+      drop_busy_ = true;
+    }
+    uint8_t want = 1;
+    if (drop_state_[d.key].compare_exchange_strong(want, 2, std::memory_order_acq_rel)) {
+      msync((void*)d.p, d.n, MS_INVALIDATE);
+      drop_state_[d.key].store(0, std::memory_order_release);
+      drops_done.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+}
+
+void Readers::settle_drop(int key) {
+  uint8_t want = 1;
+  if (drop_state_[key].compare_exchange_strong(want, 0, std::memory_order_acq_rel)) {
+    drops_cancelled.fetch_add(1, std::memory_order_relaxed);
+    return;
+  }
+  while (drop_state_[key].load(std::memory_order_acquire) == 2) __builtin_arm_yield();
 }
 
 void Readers::tick_(int64_t t) {
@@ -267,18 +331,17 @@ void Readers::loop() {
     static const int spec_us = getenv("DMENG_TEST_SPEC_READ_US") ? atoi(getenv("DMENG_TEST_SPEC_READ_US")) : 0;
     if (spec_us > 0 && cls != 0) std::this_thread::sleep_for(std::chrono::microseconds(spec_us));
     bool skip_piece = skip_;
+    if (j.key >= 0 && drop_state_) settle_drop(j.key);  // the spare tier: a drop of this record's pages is not wanted now
     if (!skip_piece && !j.dst && file_skip_resident && all_resident(j.view, j.n)) {
       skip_piece = true;
       file_resident_skips.fetch_add(1, std::memory_order_relaxed);
       file_bytes_skipped.fetch_add(j.n, std::memory_order_relaxed);
-    }
-    // spare memory under the slab: a piece whose pages the file cache holds is copied from it (the buffered pread
-    // below), not read from the drive; counted as served by the file cache, not in `bytes`
-    bool from_cache = false;
-    if (!skip_piece && j.dst && j.view && file_skip_resident && spare_on.load(std::memory_order_relaxed) && all_resident(j.view, j.n)) {
-      from_cache = true;
-      file_resident_skips.fetch_add(1, std::memory_order_relaxed);
-      file_bytes_skipped.fetch_add(j.n, std::memory_order_relaxed);
+      if (j.prob && file_prefault) {  // a probation read found resident: its pages mapped here, not in the compute threads
+        const size_t pg = (size_t)getpagesize();
+        uint64_t acc = 0;
+        for (size_t o = 0; o < j.n; o += pg) acc += ((const volatile uint8_t*)j.view)[o];
+        (void)acc;
+      }
     }
     if (!skip_piece) {
       uint8_t* dst = j.dst;
@@ -287,7 +350,7 @@ void Readers::loop() {
         dst = scratch.data();
       }
       int64_t slot_end = 0;  // drive_bps (bench only): this read's slot on the slower drive's clock
-      if (drive_bps > 0 && !from_cache) {
+      if (drive_bps > 0) {
         std::lock_guard<std::mutex> g(drive_mu_);
         slot_end = std::max(now_ns(), drive_t_) + (int64_t)((double)j.n * 1e9 / drive_bps);
         drive_t_ = slot_end;
@@ -305,17 +368,17 @@ void Readers::loop() {
         const int64_t left = slot_end - now_ns();
         if (left > 0) std::this_thread::sleep_for(std::chrono::nanoseconds(left));
       }
-      if (!from_cache) {
-        bytes.fetch_add(j.n, std::memory_order_relaxed);
-        bytes_cls[cls].fetch_add(j.n, std::memory_order_relaxed);
-        if (j.pool >= 0 && j.pool < 4) bytes_pool[j.pool].fetch_add(j.n, std::memory_order_relaxed);
-      }
+      bytes.fetch_add(j.n, std::memory_order_relaxed);
+      bytes_cls[cls].fetch_add(j.n, std::memory_order_relaxed);
+      if (j.pool >= 0 && j.pool < 4) bytes_pool[j.pool].fetch_add(j.n, std::memory_order_relaxed);
       if (!j.dst && file_prefault) {  // map the cached pages here (soft faults), not in the compute threads
         const size_t pg = (size_t)getpagesize();
         uint64_t acc = 0;
         for (size_t o = 0; o < j.n; o += pg) acc += ((const volatile uint8_t*)j.view)[o];
         (void)acc;
       }
+      // a slab read with the spare tier on: the slab holds the record, so the file cache does not (one place)
+      if (j.dst && j.drop_view && j.view) msync((void*)j.view, j.n, MS_INVALIDATE);
     }
     const int64_t t1 = now_ns();
     busy_ns.fetch_add((uint64_t)(t1 - t0), std::memory_order_relaxed);
@@ -354,6 +417,9 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
   split = std::max(1, split_);
   skip_reads = skip;
   share_ = share;
+  if (mode == Mem::FILE) file_under = false;  // (the whole cache is the file tier already)
+  const bool tier = file_under && prob_bytes > 0;  // the spare tier: probation slots past each pool's slab
+  prob_slots_ = 0;
   for (int p = 0; p < npools; p++) {
     int nl = 0;
     for (int L = 0; L < NL; L++) nl += layer_pool[L] == p;
@@ -385,11 +451,18 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
       S.locked.assign(S.n, mode == Mem::MLOCK && !defer_lock ? 1 : 0);  // (alloc_region locked the whole slab, or failed)
       if (mode == Mem::MLOCK && !defer_lock) locked_bytes += (int64_t)S.slab_bytes;
     }
-    S.s.assign(S.n, Slot());
-    S.pending.reset(new std::atomic<int>[std::max(1, S.n)]);
-    for (int i = 0; i < S.n; i++) S.pending[i].store(0);
+    // probation: as many slots as the pool's share of the budget holds records (at most the pool's records), no memory
+    S.np = tier && nl ? (int)std::min<int64_t>((int64_t)std::floor((double)prob_bytes * share[p] / (double)S.rec), (int64_t)nl * NE - S.n) : 0;
+    S.np = std::max(0, S.np);
+    prob_slots_ += S.np;
+    S.s.assign(S.n + S.np, Slot());
+    S.pending.reset(new std::atomic<int>[std::max(1, S.n + S.np)]);
+    for (int i = 0; i < S.n + S.np; i++) S.pending[i].store(0);
     S.free_.clear();
     for (int i = S.n - 1; i >= 0; i--) S.free_.push_back(i);
+    S.pfree.clear();
+    S.pfifo.clear();
+    for (int i = S.n + S.np - 1; i >= S.n; i--) S.pfree.push_back(i);
     S.cap = S.n;
     // the pools' run-time floor, one rule for every family: one step's pins (2K + 2). Every multi-position MoE runs through
     // Core::moe_chunk, which runs a union larger than the free slots in batches, and early names are only asked for
@@ -409,7 +482,7 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
       err = "cannot open " + p;
       return false;
     }
-    const bool under = file_under && mode != Mem::FILE;  // spare memory under the slab: buffered reads, mapped for mincore
+    const bool under = prob_slots_ > 0;  // the spare tier: buffered reads, the file mapped (probation records are read there)
     if (mode != Mem::FILE && !under) fcntl(fd, F_NOCACHE, 1);  // FILE: buffered reads, the file cache is the tier
     fcntl(fd, F_RDAHEAD, 0);
     fds.push_back(fd);
@@ -424,17 +497,209 @@ bool Cache::init(int NL_, int NE_, int K_, const std::vector<int>& step_layer_, 
       fmap_bytes.push_back((size_t)sz);
     }
   }
-  if (mode == Mem::FILE) file_under = false;
-  rd.spare_on.store(file_under, std::memory_order_relaxed);
+  file_under = prob_slots_ > 0;  // (the tier is on only with probation slots)
+  pageins_at_init = task_pageins();
   for (int p = 0; p < npools; p++) pend_[p] = P[p].pending.get();
+  if (file_under) {
+    drop_state_.reset(new std::atomic<uint8_t>[(size_t)NL * NE]);
+    for (size_t k = 0; k < (size_t)NL * NE; k++) drop_state_[k].store(0);
+    rd.drops_start(drop_state_.get());
+  }
   rd.start(readers, pend_, skip);
   return true;
 }
 
 void Cache::spare_pause() {
   if (!file_under || spare_paused.exchange(true)) return;
-  rd.spare_on.store(false, std::memory_order_relaxed);
-  for (int fd : fds) fcntl(fd, F_NOCACHE, 1);  // reads stop leaving pages in the file cache (the pages there stay the OS's)
+  for (int fd : fds) fcntl(fd, F_NOCACHE, 1);  // reads stop leaving pages in the file cache
+  // the probation records' pages go at the compute thread's next step boundary (tier_drain): it knows what is in use
+}
+
+// ---------------------------------------------------------------------------------------------- the spare tier
+uint64_t Cache::task_pageins() {
+  task_events_info_data_t e;
+  mach_msg_type_number_t c = TASK_EVENTS_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_EVENTS_INFO, (task_info_t)&e, &c) != KERN_SUCCESS) return 0;
+  return (uint64_t)e.pageins;
+}
+
+int Cache::prob_held(int p) const {
+  int k = 0;
+  for (int i = P[p].n; i < P[p].n + P[p].np; i++) k += P[p].s[i].layer >= 0;
+  return k;
+}
+
+uint64_t Cache::prob_held_bytes() const {
+  uint64_t b = 0;
+  for (int p = 0; p < npools; p++) b += (uint64_t)prob_held(p) * P[p].rec;
+  return b;
+}
+
+void Cache::free_slot(int p, int slot) {
+  SlotPool& S = P[p];
+  if (slot >= S.n) S.pfree.push_back(slot);
+  else if (slot < S.cap) S.free_.push_back(slot);
+}
+
+// a slot for a read into probation: a free one, else the oldest read whose record is not pinned and has landed (its pages
+// dropped: the budget); -1 when every probation record is pinned or in flight (the read then goes to the slab)
+int Cache::prob_take(int L) {
+  const int p = layer_pool[L];
+  SlotPool& S = P[p];
+  if (!S.pfree.empty()) {
+    const int v = S.pfree.back();
+    S.pfree.pop_back();
+    return v;
+  }
+  for (auto it = S.pfifo.begin(); it != S.pfifo.end();) {
+    const int s = it->first;
+    const Slot& x = S.s[s];
+    if (x.layer < 0 || x.pseq != it->second) {  // promoted, dropped or read again since
+      it = S.pfifo.erase(it);
+      continue;
+    }
+    if (x.pins > 0 || S.pending[s].load(std::memory_order_relaxed) != 0) {
+      ++it;
+      continue;
+    }
+    S.pfifo.erase(it);
+    drop(L, s, true);  // (its pages invalidated)
+    st.n_prob_budget_drops++;
+    return s;
+  }
+  return -1;
+}
+
+int Cache::prob_check(int L, int slot) {
+  SlotPool& S = pool(L);
+  Slot& x = S.s[slot];
+  if (S.pending[slot].load(std::memory_order_acquire) != 0 || skip_reads) return slot;  // in flight: the reader maps it
+  const uint8_t* v = fmap[L] + (size_t)x.e * S.rec;
+  if (all_resident(v, S.rec)) return slot;
+  st.n_prob_reclaimed++;  // the OS took (part of) it before this use
+  if (x.pins == 0) {      // a miss like any other
+    drop(L, slot, true);
+    free_slot(layer_pool[L], slot);
+    return -1;
+  }
+  // pinned (a name's, a loop hold's): read again into the same slot now, urgent (pins and statistics unchanged)
+  const size_t R = S.rec, piece = ((R / split) + 16383) & ~size_t(16383);
+  const int parts = (int)((R + piece - 1) / piece);
+  S.pending[slot].store(parts, std::memory_order_release);
+  for (int i = 0; i < parts; i++) {
+    size_t o = (size_t)i * piece, len = std::min(piece, R - o);
+    Readers::Job j{fds[L], (long)((size_t)x.e * R + o), nullptr, len, layer_pool[L], slot};
+    j.view = v + o;
+    j.prob = true;
+    j.key = L * NE + x.e;
+    rd.submit(j, true);
+  }
+  return slot;
+}
+
+void Cache::tier_drain() {
+  bool left = false;
+  for (int p = 0; p < npools; p++) {
+    SlotPool& S = P[p];
+    for (int i = S.n; i < S.n + S.np; i++) {
+      Slot& x = S.s[i];
+      if (x.layer < 0) continue;
+      if (x.pins > 0 || S.pending[i].load(std::memory_order_acquire) != 0) {
+        left = true;
+        continue;
+      }
+      drop(x.layer, i, false);
+      S.pfree.push_back(i);
+    }
+    S.pfifo.clear();  // (rebuilt by nothing: no read lands in probation any more)
+  }
+  prom_q_.clear();
+  prob_drained_ = !left;
+}
+
+void Cache::tier_step() {
+  if (spare_paused.load(std::memory_order_relaxed)) {
+    if (!prob_drained_) tier_drain();
+    prom_q_.clear();
+    return;
+  }
+  if (prom_q_.empty() || apart_on) return;  // (a prompt apart: its records move after it)
+  const auto t0 = clk::now();
+  size_t w = 0;
+  for (size_t i = 0; i < prom_q_.size(); i++) {
+    const int k = prom_q_[i], L = k / NE;
+    const int s = tab[(size_t)k];
+    if (s < 0 || !is_prob(L, s) || !pool(L).s[s].promote) continue;  // gone meanwhile (the budget, the OS)
+    if (pool(L).s[s].pins > 0 || pool(L).pending[s].load(std::memory_order_acquire) != 0) {
+      prom_q_[w++] = k;  // in use (a hold, a name): at a later boundary
+      continue;
+    }
+    promote_one(L, s);
+  }
+  prom_q_.resize(w);
+  st.promote_ms += std::chrono::duration<double, std::milli>(clk::now() - t0).count();
+}
+
+// probation slot -> the slab slot a miss would have taken (victim: a free slot first, else the lowest keep score; caps
+// kept, never borrowed past), copied from the mapping at memory speed; its file pages dropped after the copy
+void Cache::promote_one(int L, int s) {
+  SlotPool& S = pool(L);
+  Slot& x = S.s[s];
+  const int e = x.e;
+  const uint8_t* src = fmap[L] + (size_t)e * S.rec;
+  if (!all_resident(src, S.rec)) {  // the OS took it: no copy from the drive on the compute thread (a later use misses)
+    st.n_prob_reclaimed++;
+    drop(L, s, true);
+    free_slot(layer_pool[L], s);
+    return;
+  }
+  prob_bypass_ = true;
+  const int v = victim(L, 1);  // (reserve 1: a capped layer gives its own record, as a name's request; no borrowing)
+  prob_bypass_ = false;
+  if (v < 0) {  // no slab slot to give now: stays in probation, tried again at its next reuse
+    x.promote = false;
+    st.n_promote_refused++;
+    return;
+  }
+  if (mem == Mem::PURGEABLE) touch_nonvolatile(L, v);
+  std::memcpy(S.row(v), src, S.rec);
+  rd.drop_pages(L * NE + e, src, S.rec);  // one place: the slab (the pages dropped by the readers' drop thread)
+  Slot& y = S.s[v];
+  y = x;
+  y.pins = y.pf_pins = 0;
+  y.pf_unused = y.apart = y.promote = false;
+  y.ptok = -1;
+  y.puses = 0;
+  y.pseq = 0;
+  tab[(size_t)L * NE + e] = v;
+  if (!lheld.empty()) lheld[L]++;
+  hz_enter(L, v, e);
+  x = Slot();
+  S.pfree.push_back(s);
+  st.n_promoted++;
+}
+
+void Cache::hz_enter(int L, int slot, int e) {
+  SlotPool& S = pool(L);
+  if (hazard_evict && hzm_ok[L] && slot < S.cap) {  // the layer's minimum, with the new record
+    const double v = keep_score(L, e, tok_now);
+    const int id = L * NE + e;
+    if (hzm_slot[L] < 0 || v < hzm_v[L] || (v == hzm_v[L] && id < hzm_id[L])) {
+      hzm_v[L] = v;
+      hzm_id[L] = id;
+      hzm_slot[L] = slot;
+    }
+    if (rk.on) {  // and in the ranker's ordered list (an older entry of the same record goes)
+      auto& h = hzs[L];
+      for (size_t i = 0; i < h.size(); i++)
+        if (h[i].id == id) {
+          h.erase(h.begin() + i);
+          break;
+        }
+      const HzE x2{v, id, slot};
+      h.insert(std::lower_bound(h.begin(), h.end(), x2, [](const HzE& a, const HzE& b) { return a.v < b.v || (a.v == b.v && a.id < b.id); }), x2);
+    }
+  }
 }
 
 Cache::~Cache() {
@@ -452,19 +717,19 @@ void Cache::drop(int L, int slot, bool count_pf_unused) {
   Slot& b = pool(L).s[slot];
   if (b.layer >= 0) {
     const size_t k = (size_t)b.layer * NE + b.e;
+    const bool pr = slot >= pool(L).n;  // a probation record (the spare tier)
     tab[k] = -1;
     hz_gone(b.layer, slot);
-    if (!lheld.empty()) lheld[b.layer]--;
+    if (!lheld.empty() && !pr) lheld[b.layer]--;
     ev_step[k] = now_step;
     ev_pf[k] = evict_pf_ctx;
     if (count_pf_unused && b.pf_unused) st.n_pf_unused_evicted++;
     if (b.bg_unused) st.n_bg_unused_evicted++;
     if (!floor_until.empty()) floor_until[k] = -1;  // (a later read of the record has no floor)
-    // (the hints also apply under the slab with spare memory: 2 = the evicted record's pages leave the file cache, so
-    // the tier holds nothing, the case of an OS that keeps no spare pages)
-    const bool fm = mem == Mem::FILE || (file_under && !fmap.empty());
-    if (fm && file_evict_hint == 1) madvise(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MADV_DONTNEED);
-    else if (fm && file_evict_hint == 2) msync(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MS_INVALIDATE);
+    // a probation record's pages always leave the file cache with it (the budget is the engine's); Mem::FILE: the hint
+    if (pr) rd.drop_pages((int)k, fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec);
+    else if (mem == Mem::FILE && file_evict_hint == 1) madvise(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MADV_DONTNEED);
+    else if (mem == Mem::FILE && file_evict_hint == 2) msync(fmap[b.layer] + (size_t)b.e * pool(L).rec, pool(L).rec, MS_INVALIDATE);
   }
   b = Slot();
 }
@@ -486,6 +751,10 @@ void Cache::pre_use(int L, const int32_t* picks, int n, long t) {
 
 int Cache::victim(int L, int reserve, int fit_names) {
   PolicyTimer pt(st.policy_ms);
+  if (prob_slots_ && !prob_bypass_ && prob_on()) {  // the spare tier: every read lands in probation (the slab untouched)
+    const int v = prob_take(L);
+    if (v >= 0) return v;
+  }
   const bool capped = !lcap.empty() && lheld[L] >= lcap[L];  // per-layer caps: at its cap a layer evicts its own
   const bool for_name = reserve > 0;
   if (capped && for_name && cap_fit && fit_names >= 0)
@@ -739,28 +1008,18 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
   x.e = e;
   x.key = -1e300;
   x.last = -1;
-  x.apart = apart_on && !bg_issue;
+  const bool pr = slot >= S.n;  // into probation (the spare tier): not a slab slot, not counted in a layer's cap
+  x.apart = !pr && apart_on && !bg_issue;
   if (x.apart) apart_q[layer_pool[L]].push_back(slot);
   tab[(size_t)L * NE + e] = slot;
-  if (!lheld.empty()) lheld[L]++;
-  if (hazard_evict && hzm_ok[L] && slot < S.cap) {  // the layer's minimum, with the new record
-    const double v = keep_score(L, e, tok_now);
-    const int id = L * NE + e;
-    if (hzm_slot[L] < 0 || v < hzm_v[L] || (v == hzm_v[L] && id < hzm_id[L])) {
-      hzm_v[L] = v;
-      hzm_id[L] = id;
-      hzm_slot[L] = slot;
-    }
-    if (rk.on) {  // and in the ranker's ordered list (an older entry of the same record goes)
-      auto& h = hzs[L];
-      for (size_t i = 0; i < h.size(); i++)
-        if (h[i].id == id) {
-          h.erase(h.begin() + i);
-          break;
-        }
-      const HzE x2{v, id, slot};
-      h.insert(std::lower_bound(h.begin(), h.end(), x2, [](const HzE& a, const HzE& b) { return a.v < b.v || (a.v == b.v && a.id < b.id); }), x2);
-    }
+  if (!lheld.empty() && !pr) lheld[L]++;
+  hz_enter(L, slot, e);
+  if (pr) {
+    x.ptok = -1;
+    x.puses = 0;
+    x.promote = false;
+    x.pseq = ++prob_seq_;
+    S.pfifo.push_back({slot, x.pseq});
   }
   (urgent ? st.bytes_urgent : st.bytes_pf) += S.rec;
   n_reads[(size_t)L * NE + e]++;
@@ -770,12 +1029,17 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
   const size_t R = S.rec, piece = ((R / sp) + 16383) & ~size_t(16383);
   const int parts = (int)((R + piece - 1) / piece);
   S.pending[slot].store(parts, std::memory_order_release);
-  uint8_t* dst = mem == Mem::FILE ? nullptr : S.row(slot);
-  const uint8_t* view = !fmap.empty() ? fmap[L] + (size_t)e * R : nullptr;  // (FILE, or spare memory under the slab: mincore)
+  uint8_t* dst = mem == Mem::FILE || pr ? nullptr : S.row(slot);
+  const uint8_t* view = !fmap.empty() ? fmap[L] + (size_t)e * R : nullptr;  // (FILE, or the spare tier's mapping)
+  // a slab read while the spare tier is on (probation full of pins): its buffered pread's pages dropped after it
+  const bool drop_view = dst && view && prob_slots_ && !spare_paused.load(std::memory_order_relaxed);
   for (int i = 0; i < parts; i++) {
     size_t o = (size_t)i * piece, len = std::min(piece, R - o);
     Readers::Job j{fds[L], (long)((size_t)e * R + o), dst ? dst + o : nullptr, len, layer_pool[L], slot};
     if (view) j.view = view + o;
+    j.drop_view = drop_view;
+    j.prob = pr;
+    j.key = prob_slots_ ? L * NE + e : -1;
     j.step = urgent ? 0 : step;
     j.pp = pp;
     rd.submit_cls(j, urgent ? 0 : read_bg || bg_issue ? 2 : 1);
@@ -837,6 +1101,19 @@ void Cache::use(int L, int slot, long t_use, long step) {
     x.bg_unused = false;
     st.n_bg_used++;
   }
+  if (slot >= pool(L).n && x.layer >= 0) {  // a probation record: served from the file cache after its first use;
+    if (x.puses++ > 0) {                    // a use at a later token than its first (the statistics' clock) promotes it
+      st.n_prob_hit++;
+      st.bytes_prob_hit += pool(L).rec;
+    }
+    if (!apart_on) {
+      if (x.ptok < 0) x.ptok = t;
+      else if (t > x.ptok && !x.promote && prob_on()) {
+        x.promote = true;
+        prom_q_.push_back(x.layer * NE + x.e);
+      }
+    }
+  }
 }
 
 int Cache::name(int L, int e, long step, int reserve, int fit_names) {
@@ -879,8 +1156,10 @@ bool Cache::read_bg_value(int L, int e, double value, long until) {
   // per-layer caps: a layer at its cap takes a background read's slot from its own records, as a name does (the same
   // reserve, the same value test); below its cap the pool's choice, as without caps
   const bool capped = !lcap.empty() && lheld[L] >= lcap[L];
-  int v;
-  if (!capped && !S.free_.empty()) {
+  int v = -1;
+  if (prob_on()) v = prob_take(L);  // the spare tier: into probation (no slab record displaced: no value test)
+  if (v >= 0) {
+  } else if (!capped && !S.free_.empty()) {
     v = S.free_.back();
     S.free_.pop_back();
   } else {
@@ -951,12 +1230,12 @@ bool Cache::cancel(int L, int slot) {
   if (b.layer >= 0) {
     tab[(size_t)b.layer * NE + b.e] = -1;
     n_reads[(size_t)b.layer * NE + b.e]--;  // (cancelled before it ran: not a read)
-    if (!lheld.empty()) lheld[b.layer]--;
+    if (!lheld.empty() && slot < S.n) lheld[b.layer]--;
     hz_gone(b.layer, slot);
   }
   b = Slot();
   S.pending[slot].store(0, std::memory_order_release);
-  if (slot < S.cap) S.free_.push_back(slot);
+  free_slot(layer_pool[L], slot);
   st.bytes_pf -= S.rec;
   st.n_pf_cancelled++;
   return true;
@@ -972,12 +1251,12 @@ int Cache::cancel_stale(long step) {
     if (b.layer >= 0) {
       tab[(size_t)b.layer * NE + b.e] = -1;
       n_reads[(size_t)b.layer * NE + b.e]--;
-      if (!lheld.empty()) lheld[b.layer]--;
+      if (!lheld.empty() && ps.second < S.n) lheld[b.layer]--;
       hz_gone(b.layer, ps.second);
     }
     b = Slot();
     S.pending[ps.second].store(0, std::memory_order_release);
-    if (ps.second < S.cap) S.free_.push_back(ps.second);
+    free_slot(ps.first, ps.second);
     st.bytes_pf -= S.rec;
     st.n_pf_cancelled++;
   }
@@ -1024,7 +1303,7 @@ void Cache::refresh_use_tab() {
 
 void Cache::touch_nonvolatile(int L, int slot) {
   SlotPool& S = pool(L);
-  if (S.preg.empty() || S.nonvol[slot]) return;
+  if (S.preg.empty() || slot >= S.n || S.nonvol[slot]) return;  // (probation slots have no memory of their own)
   int state = VM_PURGABLE_NONVOLATILE;
   vm_purgable_control(mach_task_self(), (vm_address_t)S.preg[slot], VM_PURGABLE_SET_STATE, &state);
   S.nonvol[slot] = 1;
@@ -1055,9 +1334,9 @@ void Cache::token_end_volatile(long t) {
   }
 }
 
-int Cache::held(int p) const {
+int Cache::held(int p) const {  // the slab's records (probation: prob_held)
   int k = 0;
-  for (auto& x : P[p].s) k += x.layer >= 0;
+  for (int i = 0; i < P[p].n; i++) k += P[p].s[i].layer >= 0;
   return k;
 }
 
@@ -1521,8 +1800,8 @@ void Cache::caps_resume() {
   lcap_saved.clear();
   lheld.assign(NL, 0);
   for (int p = 0; p < npools; p++)
-    for (auto& x : P[p].s)
-      if (x.layer >= 0) lheld[x.layer]++;
+    for (int i = 0; i < P[p].n; i++)  // (the slab's: probation is not under the caps)
+      if (P[p].s[i].layer >= 0) lheld[P[p].s[i].layer]++;
 }
 
 void Cache::uniform_layer_caps() {
@@ -1537,8 +1816,8 @@ void Cache::uniform_layer_caps() {
     for (int i = 0; i < nl; i++) lcap[ls[i]] = q + (i < r ? 1 : 0);
   }
   for (int p = 0; p < npools; p++)  // records already held (normally none: called before the first token)
-    for (auto& x : P[p].s)
-      if (x.layer >= 0) lheld[x.layer]++;
+    for (int i = 0; i < P[p].n; i++)
+      if (P[p].s[i].layer >= 0) lheld[P[p].s[i].layer]++;
 }
 
 void Cache::apart_begin() {

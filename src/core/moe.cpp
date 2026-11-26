@@ -113,6 +113,7 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
   if (share.empty()) share.assign(rec.size(), 1.0 / rec.size());
   cache.layer_paths = mi.layer_paths;
   cache.file_under = o.spare_mem && o.mem != Mem::FILE;
+  cache.prob_bytes = cache.file_under ? (int64_t)((o.spare_gb > 0 ? o.spare_gb : SPARE_GB_DEFAULT) * 1e9) : 0;
   cache.defer_lock = o.cache_start_gb > 0 && o.cache_start_gb < o.cache_gb && o.mem == Mem::MLOCK;
   if (!cache.init(mi.layers, NE, K, mi.step_layer, mi.layer_fmt, rec, share, dir, mi.layer_file, o.cache_gb * 1e9, o.readers,
                   o.split, o.mem, o.skip_reads, err))
@@ -764,6 +765,7 @@ void Core::moe_step(int step, const float* x, float* y, const MoeView& v) {
     ra_tok_events = 0;
   }
   cache.tok_now = tok_clock;
+  if (cache.tier_due()) cache.tier_step();  // the spare tier: promotions due, the drain after a pause
   if (hook) {
     auto tp = clk::now();
     stage_mark(ST_PREFETCH);
@@ -828,7 +830,7 @@ void Core::lossless(int step, const float* x, float* y, const MoeView& v) {
   auto& S = cache.st;
   for (int j = 0; j < K; j++) {
     const int e = pk[j];
-    int s = cache.slot_of(L, e);
+    int s = cache.slot_for_use(L, e);
     S.n_pick_r[reg]++;
     const bool reused = pass > 0 && std::find(ut.begin(), ut.end(), e) != ut.end();
     if (reused) S.n_reuse_hit++;
@@ -1148,7 +1150,7 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
   for (int j = 0; j < K; j++) {
     const int e = pk[j];
     frac[j] = pwl[j] / wscale;
-    int s = cache.slot_of(L, e);
+    int s = cache.slot_for_use(L, e);
     S.n_pick_r[reg]++;
     if (s >= 0 && cache.mem == Mem::PURGEABLE) {
       cache.touch_nonvolatile(L, s);

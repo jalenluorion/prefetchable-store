@@ -214,6 +214,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
   const long now_s = (tok_clock + off) * steps + step;  // = now(step) for a chunk that starts the span
   cache.now_step = now_s;
   if (!cache.floor_keys.empty()) cache.expire_floors();
+  if (cache.tier_due()) cache.tier_step();  // the spare tier: promotions due, the drain after a pause
   step_t0 = clk::now();
   if (cancel_stale) cache.cancel_stale(now_s - 1);
   Hook* nh = chunk_named ? hook : nullptr;  // names inside this verify
@@ -315,7 +316,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       bool must[MAXK] = {false}, miss[MAXK] = {false};
       double mass = 0;
       for (int j = 0; j < K; j++) {
-        if (cache.slot_of(L, pk[j]) >= 0) continue;
+        if (cache.slot_for_use(L, pk[j]) >= 0) continue;
         miss[j] = true;
         const double f = w[j] / wscale;
         if (f > ns.read_w) must[j] = true;
@@ -390,7 +391,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
         C.ent.emplace_back();
         Chunk::Ent& E = C.ent.back();
         E.e = e;
-        int s = cache.slot_of(L, e);
+        int s = cache.slot_for_use(L, e);
         if (s >= 0 && cache.mem == Mem::PURGEABLE) {
           cache.touch_nonvolatile(L, s);
           s = cache.slot_of(L, e);
@@ -825,7 +826,7 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       for (int q = 0; q < (int)C.ent.size(); q++) {
         Chunk::Ent& E = C.ent[q];
         if (E.slot != -2) continue;
-        int s = cache.slot_of(L, E.e);  // read meanwhile by a name (or still held)
+        int s = cache.slot_for_use(L, E.e);  // read meanwhile by a name (or still held)
         if (s >= 0) {
           cache.slot(L, s).pins++;
         } else {
