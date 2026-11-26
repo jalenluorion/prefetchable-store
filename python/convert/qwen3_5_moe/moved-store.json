@@ -1376,6 +1376,42 @@
     "projections": 0.4,
     "experts": 0.4
    },
+   "prefill": {
+    "apart": 0,
+    "calibration": {
+     "measured": "base M4 16 GB, AC, the merged build (next), mac profile; 400 tokens after the model's code prompt, cache 6.6 GB; MB read per token, the published engine's beside",
+     "rows": [
+      {
+       "setting": "apart 1 (the model-level value)",
+       "mb_per_token": {
+        "exact": 89.1,
+        "fast": 68.6
+       },
+       "best_tok_s": {
+        "exact": 13.7
+       }
+      },
+      {
+       "setting": "apart 0 (this)",
+       "mb_per_token": {
+        "exact": 83.3,
+        "fast": 51.9
+       },
+       "best_tok_s": {
+        "exact": 16.34
+       }
+      },
+      {
+       "setting": "the published engine",
+       "mb_per_token": {
+        "exact": 94.4,
+        "fast": 65.8
+       }
+      }
+     ],
+     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value until measured on the iPhone"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1

@@ -981,7 +981,7 @@ int main(int argc, char** argv) {
             r.bg_ranks = rts.bg_ranks;
             r.cache = a.cache_auto ? r.cache : "fixed";
             return r.resolved(a.cache_gb).json();
-          }() << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
+          }() << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
        << "\",\"m\":" << (a.prefetch == "router" ? a.m : 0) << ",\"cache_gb\":" << a.cache_gb << ",\"slots\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.slots(p);

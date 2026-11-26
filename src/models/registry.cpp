@@ -47,7 +47,7 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   if (!exists(dir + "/moved-store.json")) {  // no manifest: the resident file says everything
     lo.resident = resident.empty() ? dir + "/dmeng_resident.bin" : resident;
     family = detect_family(lo.resident, err);
-    lo.prefill = declared_prefill(dir, family);  // the family's published values
+    lo.prefill = declared_prefill(dir, family, profile);  // the family's published values (and its profile's)
     return !family.empty();
   }
   ms::Manifest m;
@@ -67,7 +67,7 @@ bool resolve_model(const std::string& dir, const std::string& resident, Mem res_
   }
   family = m.family;
   if (!m.engine_cfg(lo.cfg, err)) return false;
-  lo.prefill = declared_prefill(dir, family);  // the manifest's "prefill", else the family's published values
+  lo.prefill = declared_prefill(dir, family, profile);  // the manifest's "prefill" (else the published), the profile's over it
   if (!resident.empty()) {
     lo.resident = resident;
     return true;

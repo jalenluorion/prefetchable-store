@@ -527,7 +527,8 @@ int main(int argc, char** argv) {
   LoadOpts lo;
   std::string family;
   std::unique_ptr<Model> M;
-  if (resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err)) M = make_model(a.family.empty() ? family : a.family, err);
+  // the profile as in dmeng and the C API: its own record files and its prompt-path values
+  if (resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", "", profiled ? P.profile : "")) M = make_model(a.family.empty() ? family : a.family, err);
   if (M && (a.chunk <= 0 || a.span <= 0)) {  // the model's declared sub-chunk and span (resolve_model's lo.prefill)
     for (auto& kv : lo.prefill) {
       if (kv.first == "chunk" && a.chunk <= 0) a.chunk = std::stoi(kv.second);
@@ -754,7 +755,7 @@ int main(int argc, char** argv) {
            r.cache = a.cache_auto ? r.cache : "fixed";
            return r.resolved(a.cache_gb).json();
          }()
-      << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << ",\"routers_file_mb\":" << [&] {
+      << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"screened_head\":" << (screened ? "true" : "false") << ",\"mem\":" << lm.mem_json() << ",\"routers_file_mb\":" << [&] {
            struct stat rs;
            return !a.routers.empty() && stat(a.routers.c_str(), &rs) == 0 ? rs.st_size / 1e6 : 0.0;
          }() << "}";

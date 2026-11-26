@@ -463,6 +463,24 @@ if wanted("presets"):
         if not (r.returncode != 0 and "the C API has no drafting" in r.stderr):
             bad.append(f"capi --drafts 1 not refused (rc {r.returncode})")
         ncell += 2
+        # the prompt path's values under each profile: the profile's own prefill block over the model-level one, the same
+        # in all three front ends (their "prefill_declared")
+        for prof in man["profiles"]:
+            want = {**{k: v for k, v in man.get("prefill", {}).items() if isinstance(v, (int, float, str, bool))},
+                    **{k: v for k, v in man["profiles"][prof].get("prefill", {}).items() if isinstance(v, (int, float, str, bool))}}
+            want = {k: str(int(v)) if isinstance(v, bool) else (f"{v:.17g}" if isinstance(v, (int, float)) else v) for k, v in want.items()}
+            got = {}
+            r = run([DMENG, "--model", M, "--profile", prof, "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
+            got["dmeng"] = json.load(open(j)).get("prefill_declared") if r.returncode == 0 else r.stderr[-200:]
+            r = run([DMGATE, "--model", M, "--profile", prof, "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j])
+            got["capi"] = json.load(open(j))["stats"].get("prefill_declared") if r.returncode == 0 else r.stderr[-200:]
+            r = run([DMSERVE, "--model", M, "--profile", prof, "--threads", "2"], inp="", timeout=120)
+            ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+            got["dmserve"] = json.loads(ready[0][6:]).get("prefill_declared") if ready else r.stderr[-200:]
+            for fe, g in got.items():
+                if g != want:
+                    bad.append(f"{prof} prefill {fe}: {g} != {want}")
+            ncell += 1
         detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])})"
         verdict("presets", "FAIL" if bad or cross else "PASS", detail + ("" if not bad else " | precedence: " + " || ".join(bad[:6]))
                 + ("" if not cross else " | front ends differ: " + " || ".join(cross[:6])))

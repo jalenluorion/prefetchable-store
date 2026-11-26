@@ -169,8 +169,13 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
                  RunOpts& r, std::string& err);
 
 // The batched prompt path's values a model folder declares (its manifest's "prefill" key, else the family's published
-// manifest's; family "" = the folder's manifest's), as key -> value strings for prefill_declared (dmeng/prefill.h)
-std::vector<std::pair<std::string, std::string>> declared_prefill(const std::string& dir, const std::string& family);
+// manifest's; family "" = the folder's manifest's), then the profile's own "prefill" block over them key by key (the
+// folder's profile, else the published one; "" / "none": none), as key -> value strings for prefill_declared
+// (dmeng/prefill.h)
+std::vector<std::pair<std::string, std::string>> declared_prefill(const std::string& dir, const std::string& family,
+                                                                  const std::string& profile = "");
+// those values as a JSON object (every front end's JSON: "prefill_declared")
+std::string prefill_json(const std::vector<std::pair<std::string, std::string>>& kv);
 
 // The drafting controller's prior the model's manifest declares (drafting.cost_prior.pass_ms_over_step_ms with its
 // provenance, "measured" or "estimated"): the cost of a pass of 0..8 positions over one step; empty when the folder has

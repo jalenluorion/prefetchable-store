@@ -402,25 +402,43 @@ std::string Resolved::json() const {
   return o.str();
 }
 
-std::vector<std::pair<std::string, std::string>> declared_prefill(const std::string& dir, const std::string& family) {
+std::vector<std::pair<std::string, std::string>> declared_prefill(const std::string& dir, const std::string& family, const std::string& profile) {
   std::vector<std::pair<std::string, std::string>> out;
   ms::Manifest m;
   std::string err;
   const bool has = exists(dir + "/moved-store.json") && m.load(dir, err);
+  const Json* pub = published(has ? m.family : family);
+  auto take = [&](const Json* pf) {  // the block's values, each key replacing an earlier one
+    if (!pf || pf->kind != Json::OBJ) return;
+    for (auto& kv : pf->obj) {
+      const Json& v = kv.second;
+      if (kv.first == "notes" || kv.first == "note") continue;
+      char b[64];
+      if (v.kind == Json::NUM) snprintf(b, sizeof b, "%.17g", v.f(0));
+      else if (v.kind == Json::BOOL) snprintf(b, sizeof b, "%d", v.b ? 1 : 0);
+      else if (v.kind == Json::STR) snprintf(b, sizeof b, "%s", v.s().c_str());
+      else continue;  // notes, calibrations and the like
+      bool found = false;
+      for (auto& o : out)
+        if (o.first == kv.first) o.second = b, found = true;
+      if (!found) out.push_back({kv.first, b});
+    }
+  };
+  // the model's: the folder manifest's "prefill", else the family's published one
   const Json* pf = has ? member(&m.raw, "prefill") : nullptr;
-  if (!pf) pf = member(published(has ? m.family : family), "prefill");
-  if (!pf || pf->kind != Json::OBJ) return out;
-  for (auto& kv : pf->obj) {
-    const Json& v = kv.second;
-    if (kv.first == "notes" || kv.first == "note") continue;
-    char b[64];
-    if (v.kind == Json::NUM) snprintf(b, sizeof b, "%.17g", v.f(0));
-    else if (v.kind == Json::BOOL) snprintf(b, sizeof b, "%d", v.b ? 1 : 0);
-    else if (v.kind == Json::STR) snprintf(b, sizeof b, "%s", v.s().c_str());
-    else continue;  // notes and the like
-    out.push_back({kv.first, b});
+  take(pf ? pf : member(pub, "prefill"));
+  // then the profile's own "prefill" block (measured per device), the folder's profile, else the published one
+  if (!profile.empty() && profile != "none") {
+    const Json* pp = has ? member(member(member(&m.raw, "profiles"), profile), "prefill") : nullptr;
+    take(pp ? pp : member(member(member(pub, "profiles"), profile), "prefill"));
   }
   return out;
+}
+
+std::string prefill_json(const std::vector<std::pair<std::string, std::string>>& kv) {
+  std::string o = "{";
+  for (size_t i = 0; i < kv.size(); i++) o += (i ? ",\"" : "\"") + kv[i].first + "\":" + q(kv[i].second);
+  return o + "}";
 }
 
 std::vector<double> draft_cost_prior(const std::string& dir) {
