@@ -156,6 +156,18 @@ Both models are bound by the phone's storage read rate, 0.8 to 0.9 GB/s measured
 Add `'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) SELFCHECK'` to the `xcodebuild` command (normal builds contain none of this), install, then run `xcrun devicectl device process launch --console --device <id> <bundle id> -- -selfcheck`.
 It hashes the selected model's files against the Hub manifest, sends one chat message (then deletes that chat), decodes 400 tokens greedily in Exact, writes `Documents/selfcheck.json`, logs `SELFCHECK DONE` and exits.
 
+## Checking the chat's scrolling
+
+A Simulator build with `'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) UITEST'` (and `-sdk iphonesimulator ARCHS=arm64`;
+normal builds contain none of this) runs scripted replies through the chat instead of a model
+(`MovedStore/UITest.swift`). Launch it with `-uitest <scenario>`: `follow` (two replies at the bottom: thinking, tool
+rounds, sources), `keyboard` (the keyboard and a growing draft during a reply), `hold` (a long chat; drag up during the
+reply and let go), `history` (scroll up through a long chat) or `open` (chats opened and switched). The app records the
+chat's scroll view every frame to `Documents/uitest-<scenario>.json`; `python3 apps/ios/tests/scroll_check.py <file>`
+checks it: at the bottom within 1 pt while following, a held position within 1 pt while the reply below changes,
+content moving with the finger. `hold` and `history` wait for touches from the Simulator (`UITEST TOUCH NOW` in the
+console).
+
 ## Troubleshooting
 
 - **"Failed to register bundle identifier" or "No profiles for ... were found".** The bundle identifier is taken or
