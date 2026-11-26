@@ -254,12 +254,6 @@ struct DraftOpts {
   double margin = 0.05;       // a draft runs only when its estimated time per token beats a plain step's by this share
   bool copy_free = true;      // copy drafts (the lookup) are not rationed once they are being kept (Drafter::step)
   double copy_keep = 0.75;    // ... share of its recent drafts kept from which they count as being kept
-  // read-ahead (0: off): a pass of copied tokens (the lookup) names, before it runs, the experts of the next `ahead`
-  // positions past it (the copy's next tokens, known in advance) from the routers on their embeddings and the last
-  // committed position's state (Hook::name_ahead), so their reads run while this pass computes; held until those
-  // positions run, dropped (queued reads cancelled) when the draft no longer proposes them
-  int ahead = 0;
-  bool ahead_bg = true;       // those reads in the readers' background class (only while no urgent or named read waits)
 };
 
 // Per-pass counters for passes of one width (n positions; n = 1: plain steps). The controller's estimate of a pass of n
@@ -282,8 +276,7 @@ class Drafter {
   SkeletonSource skeleton;
   std::vector<DraftSource*> extra;  // more sources (a draft head), asked after the two above
   DraftCtl ctl;
-  Core* core = nullptr;                  // for early names and the read-ahead (null: none)
-  std::function<bool(int32_t, float*)> remb;  // a token's router embedding (Model::router_emb_row), for the read-ahead
+  Core* core = nullptr;                  // for early names (null: none)
   Core* reads = nullptr;                 // the read counters per kind of step (null: not kept)
   // the token the model produces from a position's logits; i = its index among this step's outputs (0 .. accepted).
   // Unset: greedy (argmax). Sampling: the release sampler with that token's own draw (sample_at), so a draft is kept
@@ -305,9 +298,6 @@ class Drafter {
   long steps = 0, tokens = 0, verifies = 0, drafted = 0, acc_total = 0;
   long by_n[DraftCtl::DMAX + 1] = {0}, by_src_steps[4] = {0}, by_src_acc[4] = {0};
   long early_names = 0, early_cancelled = 0, prenamed = 0, explored = 0, probes_held = 0, copy_free_runs = 0;
-  // read-ahead: positions named, names held (pins), positions dropped (no longer proposed) and their reads cancelled,
-  // names of positions that ran and how many of them their released picks used
-  long ah_pos = 0, ah_names = 0, ah_dropped = 0, ah_cancelled = 0, ah_spent = 0, ah_used = 0;
   // reads by kind of step, [0] plain steps, [1] verify passes: steps, tokens produced, on-the-spot reads (misses), picks
   // late (named, still in flight), bytes read on the spot / by names
   double rd_steps[2] = {0, 0}, rd_tok[2] = {0, 0}, rd_miss[2] = {0, 0}, rd_late[2] = {0, 0}, rd_urg[2] = {0, 0}, rd_pf[2] = {0, 0},
@@ -340,9 +330,6 @@ class Drafter {
   std::vector<DraftSource*> srcs_;
   std::map<std::pair<long, long>, std::vector<std::array<int, 3>>> ea_held_;
   void early(const Draft& d, int L, long p);
-  std::map<long, std::pair<int32_t, std::vector<std::array<int, 3>>>> ah_held_;  // position -> (token, (layer, slot, expert))
-  void read_ahead(const Draft& d, int L, long p, int budget);
-  void ahead_spend(long upto);  // positions < upto have run: their names are spent
   double rho0_[DraftCtl::DMAX + 1] = {0};  // the family's prior compute ratios
   std::string family_;
   double cp_n_ = 0, cp_k_ = 0;  // the copy source's drafts verified / kept (decayed per pass)

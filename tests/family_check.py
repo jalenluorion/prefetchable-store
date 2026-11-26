@@ -266,13 +266,6 @@ if wanted("drafting"):
                         out, js = greedy("dd", "--cache-gb", f"{FEW_GB:.6f}", *S, "--draft", d, "--draft-max", dm, "--skeleton", frag, n=100, prompt=40)
                         nv = js.get("draft", {}).get("verifies", 0)
                         (okd if out == plain and (nv > 0 or d == "lookup") else bad).append(f"{sm} --draft {d} --draft-max {dm} ({nv} passes)")
-                if RT:  # the read-ahead: the drafts' next positions named before their pass (routers), dropped when the draft changes
-                    frag2 = os.path.join(T, "frag_whole.txt")  # plain decoding's own output unchanged: long drafts kept, so named positions run
-                    open(frag2, "w").write(" ".join([str(x) for x in ids[40][-6:]] + g))
-                    out, js = greedy("da", "--cache-gb", f"{FEW_GB:.6f}", *S, *RT, "--draft", "fixed", "--draft-max", "7", "--draft-ahead", "8", "--skeleton", frag2, n=100, prompt=40)
-                    ra = js.get("draft", {}).get("read_ahead", {})
-                    (okd if out == plain and ra.get("positions", 0) > 0 and ra.get("names_spent", 0) > 0 else bad).append(
-                        f"{sm} --draft-ahead 8 ({ra.get('positions', 0)} positions named ahead, {ra.get('positions_dropped', 0)} dropped)")
             # --drafts 1 means the same in every front end (dmserve: --draft lookup), also in a folder holding a
             # model's draft head file (dmeng used to switch to --draft both there, by the model's name)
             F = os.path.join(T, "drafts1")

@@ -517,7 +517,6 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   // picks 4 positions ahead read 40-70 MB per token more than plain decoding and cancelled the passes' gain (early 0: fewer
   // MB per token than plain decoding at the same tokens per step); --early N still sets it
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
-  if (g.draft_ahead) r.draft_ahead = *g.draft_ahead;
   return true;
 }
 
@@ -571,7 +570,6 @@ const RunFlag RUN_FLAGS[] = {
     {"--drafts", nullptr, RF_INT(drafts)},
     {"--draft", nullptr, RF_STR(draft)},
     {"--early", nullptr, RF_INT(early)},
-    {"--draft-ahead", nullptr, RF_INT(draft_ahead)},
 };
 #undef RF_INT
 #undef RF_DBL

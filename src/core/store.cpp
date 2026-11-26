@@ -97,7 +97,6 @@ void Readers::tick_(int64_t t) {
   const int s = inf > 0 ? 1 + std::min(inf, 4) : (urgent_.empty() && normal_.empty() && bg_.empty() ? 0 : 1);
   if (s >= 2 && dt_state_ < 2) dt_ns_[6]++;
   dt_state_ = s;
-  bg_n_.store((int)bg_.size(), std::memory_order_relaxed);
 }
 
 void Readers::depth_times(uint64_t out[7]) {
@@ -149,27 +148,6 @@ bool Readers::promote(int pool, int slot) {
     }
   if (moved) tick_(now_ns());
   if (moved) cv_.notify_all();  // an urgent job may start even where the speculative limits hold readers back
-  return moved;
-}
-
-bool Readers::raise(int pool, int slot) {
-  if (bg_n_.load(std::memory_order_relaxed) == 0) return false;
-  std::lock_guard<std::mutex> lk(mu_);
-  bool moved = false;
-  for (auto it = bg_.begin(); it != bg_.end();) {
-    if (it->pool == pool && it->slot == slot) {
-      normal_.push_back(*it);
-      it = bg_.erase(it);
-      moved = true;
-    } else {
-      ++it;
-    }
-  }
-  if (moved) {
-    bg_raised.fetch_add(1, std::memory_order_relaxed);
-    tick_(now_ns());
-    cv_.notify_all();
-  }
   return moved;
 }
 
@@ -695,19 +673,7 @@ int Cache::steal(int L) {
     if (x.pins == 0 || x.pins != x.pf_pins || S.pending[i].load(std::memory_order_relaxed) != 0) continue;
     if (best < 0 || x.key < S.s[best].key || (x.key == S.s[best].key && x.last < S.s[best].last)) best = i;
   }
-  if (best < 0) {
-    // none landed: a slot held only by names whose read has not started (a background read waiting for the drive's idle
-    // time, a read-ahead): its read is cancelled and the slot goes to the miss (names only: outputs cannot change)
-    for (int i = 0; i < S.cap; i++) {
-      const Slot& x = S.s[i];
-      if (x.pins == 0 || x.pins != x.pf_pins || S.pending[i].load(std::memory_order_relaxed) == 0) continue;
-      if (!cancel(L, i)) continue;
-      if (!S.free_.empty() && S.free_.back() == i) S.free_.pop_back();
-      st.n_pf_stolen++;
-      return i;
-    }
-    return -1;
-  }
+  if (best < 0) return -1;
   drop(L, best, false);
   st.n_pf_stolen++;
   return best;
@@ -828,7 +794,6 @@ int Cache::name(int L, int e, long step, int reserve, int fit_names) {
   if (sl >= 0) {
     S.s[sl].pins++;
     S.s[sl].pf_pins++;
-    if (!read_bg && !ready(L, sl)) rd.raise(layer_pool[L], sl);  // a background read named now: a name's priority
     return sl;
   }
   if (name_gate && !skip_reads && rd.urgent_backlog()) {

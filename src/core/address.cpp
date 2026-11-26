@@ -336,26 +336,9 @@ void Routers::finish(Core& c, int t, bool with_lag) {
 }
 
 void Routers::finish_z(Core& c, int t, const float* pre, const float* lagr, int p, long deadline, int* n, float* q16, int* b16) {
-  score_z(c, t, pre, lagr, deadline < 0, n, q16, b16);  // (deadline < 0: a one-position step)
-  if (!active) return;
-  per_step = tau < 0 ? std::min(m, std::min(16, NE)) : std::min(cand, std::min(16, NE));
-  for (int j = 0; j < std::min(16, NE); j++) {
-    if (tau >= 0 && j >= cand) break;
-    if (take(j, b16, q16)) name(c, p, t, n[j], deadline);
-  }
-}
-
-bool Routers::take(int j, const int* b16, const float* q16) const {
-  if (tau < 0) return j < m;
-  if (j >= cand) return false;
-  const int b = b16[j];
-  const double p0 = std::min(0.95, 8.0 * q16[j]);
-  return (cal_h[j][b] + 2.0 * p0) / (cal_n[j][b] + 2.0) >= tau;
-}
-
-void Routers::score_z(Core& c, int t, const float* pre, const float* lagr, bool single, int* n, float* q16, int* b16) {
   // z = pre + lag part + biases; first NE rows: lin, next hid rows: mlp.0 -> gelu -> mlp.2
   const Lay& y = lay[t];
+  const bool single = deadline < 0;  // a one-position step (the keep-score's features and the heavy head go with it)
   static thread_local std::vector<float> z, z2, zz, hv;
   static thread_local std::vector<int> idx;
   z.resize(rows);
@@ -406,6 +389,20 @@ void Routers::score_z(Core& c, int t, const float* pre, const float* lagr, bool 
       q16[j] = q;
       b16[j] = std::min(15, std::max(0, (int)std::floor(-std::log2(std::max(q, 1e-12f)) * 1.5f)));
     }
+  }
+  if (!active) return;
+  per_step = tau < 0 ? std::min(m, keep) : std::min(cand, keep);
+  for (int j = 0; j < keep; j++) {
+    bool take;
+    if (tau < 0) {
+      take = j < m;
+    } else {
+      if (j >= cand) break;
+      const int b = b16[j];
+      const double p0 = std::min(0.95, 8.0 * q16[j]);
+      take = (cal_h[j][b] + 2.0 * p0) / (cal_n[j][b] + 2.0) >= tau;
+    }
+    if (take) name(c, p, t, n[j], deadline);
   }
 }
 
@@ -472,60 +469,6 @@ void Routers::chunk_start(Core& c, int n, const int32_t*, const float* const* em
       finish_z(c, t, cpre.data() + o * rows, nullptr, c.pos + i, c.now(t), cnm.data() + o * 16, cnq.data() + o * 16, cbin.data() + o * 16);
     }
   t_ms += ms_since(t0);
-}
-
-void Routers::name_ahead(Core& c, int n, const float* const* embs, const int* off, std::vector<std::array<int, 3>>& out, int* per_pos) {
-  for (int i = 0; i < n; i++) per_pos[i] = 0;
-  if (split || !active || n <= 0) return;
-  auto t0 = clk::now();
-  n = std::min(n, 16);
-  if ((int)cx.size() < n * nt) {
-    const size_t o = cx.size();
-    cx.resize((size_t)n * nt);
-    for (size_t k = o; k < cx.size(); k++) cx[k].init(2 * H, c.o.prec);
-  }
-  if (cpre.size() < (size_t)n * nt * rows) cpre.resize((size_t)n * nt * rows);
-  CPreCtx C;
-  C.P = this;
-  C.n = n;
-  C.embs = embs;
-  c.pool->run(phase_cpre_x, &C);
-  // the targets whose whole input exists before the pass: those under the lag (no lagged state). Measured on the 35B's
-  // file rewrite, the lagged targets' rows without their lag block named experts its positions used 8% of the time
-  // (3% at random): no names for them here (the pass names them two steps ahead from its own states)
-  const int nT = std::min(lag, nt);
-  if (nT <= 0) return;
-  std::vector<JobN> jb(nT);
-  std::vector<const XQ*> xq((size_t)n * nT);
-  std::vector<float*> po((size_t)n * nT);
-  for (int t = 0; t < nT; t++)
-    for (int i = 0; i < n; i++) {
-      xq[(size_t)t * n + i] = &cx[(size_t)i * nt + t].q;
-      po[(size_t)t * n + i] = cpre.data() + ((size_t)i * nt + t) * rows;
-    }
-  for (int t = 0; t < nT; t++) jb[t] = {&lay[t].pre, n, xq.data() + (size_t)t * n, nullptr, po.data() + (size_t)t * n};
-  run_rows_n(*c.pool, jb.data(), nT, 32);
-  int n16[16], b16[16];
-  float q16[16];
-  for (int i = 0; i < n; i++) {
-    const size_t o0 = out.size();
-    for (int t = 0; t < nT; t++) {
-      score_z(c, t, cpre.data() + ((size_t)i * nt + t) * rows, nullptr, false, n16, q16, b16);
-      const int L = c.mi.step_layer[t];
-      const long dl = (c.tok_clock + off[i]) * c.steps + t;
-      for (int j = 0; j < std::min(16, NE); j++) {
-        if (tau >= 0 && j >= cand) break;
-        if (!take(j, b16, q16)) continue;
-        const int sl = c.cache.name(L, n16[j], dl, -1, per_step);
-        ahead_names += 1;
-        if (sl >= 0) out.push_back({L, sl, n16[j]});
-      }
-    }
-    per_pos[i] = (int)(out.size() - o0);
-  }
-  ahead_calls += 1;
-  ahead_pos += n;
-  ahead_ms += ms_since(t0);
 }
 
 void Routers::chunk_rows(Core& c, int step, int n, const XQ* const* xq, const float* const* x, std::vector<JobN>& jobs) {
@@ -697,7 +640,6 @@ void Routers::reset_stats() {
   std::memset(ccnt, 0, sizeof ccnt);
   std::memset(ccalls, 0, sizeof ccalls);
   lead_ms[0] = lead_ms[1] = lead_n[0] = lead_n[1] = 0;
-  ahead_calls = ahead_pos = ahead_names = ahead_ms = 0;
 }
 
 std::string Routers::stats_json(Core& c, int ntok) {
@@ -726,8 +668,7 @@ std::string Routers::stats_json(Core& c, int ntok) {
   for (int i = 0; i < 8; i++) o << (i ? "," : "") << ccnt[i][2] / std::max(1.0, ccalls[i] * K);
   o << "],\"verify_steps_by_position\":[";
   for (int i = 0; i < 8; i++) o << (i ? "," : "") << ccalls[i];
-  o << "],\"read_ahead\":{\"calls\":" << ahead_calls << ",\"positions\":" << ahead_pos << ",\"names\":" << ahead_names
-    << ",\"ms\":" << ahead_ms << "}}";
+  o << "]}";
   return o.str();
 }
 

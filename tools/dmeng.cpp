@@ -179,10 +179,6 @@ outputs
   --early N              with --draft: before each step, name the released picks recorded at the lookup match's source
                          positions for the step's own positions and N positions past them, so their reads start before
                          the step (0 = off, the default); names only schedule reads, the ids do not change
-  --draft-ahead N        with --draft lookup and routers: a pass of copied drafts names the experts of the copy's next N
-                         positions past it (routers on their embeddings and the committed position's state), read in the
-                         readers' background class while the pass computes (--draft-ahead-bg 0: as names); dropped when
-                         the draft changes (0 = off, the default); names only, the ids do not change
   --verify-names 0|1     with --draft and an early-address hook: inside a verify pass, the hook names every position's
                          experts of later steps as one-position steps do (routers: the first two blocks per position at
                          the pass's start, the lag rows in each step's router fork-join; oracle: the recorded picks); names
@@ -246,7 +242,7 @@ struct Args {
   bool skip_reads = false, router_stats = false, loop_hold = true, state_check = false;
   // the user-facing surface (include/dmeng/presets.h)
   std::string profile = "auto", prompt_text, reasoning_effort;
-  int drafts = -1, draft_ahead = 0, draft_ahead_bg = 1;
+  int drafts = -1;
   bool cache_auto = false, print_defaults = false, chat = false;
   MemRule mr;
   std::vector<std::pair<std::string, std::string>> model_opts;  // --model-opt NAME=VALUE (Model::set_option, then the engine's)
@@ -481,7 +477,6 @@ int main(int argc, char** argv) {
     }
     else if (k == "--probe-every") a.probe_every = std::stoi(v());
     else if (k == "--verify-names") a.verify_names = std::stoi(v());
-    else if (k == "--draft-ahead-bg") a.draft_ahead_bg = std::stoi(v());
     else if (k == "--draft-gate") a.draft_gate = std::stoi(v());
     else if (k == "--verify-old") a.verify_old = std::stoi(v());
     else if (k == "--copy-free") a.copy_free = std::stoi(v());
@@ -547,7 +542,6 @@ int main(int argc, char** argv) {
   a.prefill_gpu_frac = ro.gpu_frac, a.prefill_gpu_experts = ro.gpu_experts, a.prefill_chunk = ro.prefill_chunk;
   a.run_ahead = ro.run_ahead, a.run_ahead_depth = ro.run_ahead_depth, a.ra_budget = ro.ra_budget, a.ra_max = ro.ra_max_tok, a.ra_sat = ro.ra_sat_skip;
   a.readers = ro.readers, a.bg_ranks = ro.bg_ranks, a.bg_gate = ro.bg_gate, a.drafts = ro.drafts, a.draft = ro.draft, a.early = ro.early;
-  a.draft_ahead = ro.draft_ahead;
   LoadOpts lo;
   std::string family;
   if (!resolve_model(a.model, a.resident, mem_of(a.res_mem), lo, family, err, "", a.embeddings, profiled ? P.profile : ""))
@@ -1158,9 +1152,6 @@ int main(int argc, char** argv) {
     dr.o.gate = a.draft_gate != 0;
     dr.o.margin = a.draft_margin;
     dr.o.early = a.early;
-    dr.o.ahead = a.draft == "none" ? 0 : std::max(0, a.draft_ahead);
-    dr.o.ahead_bg = a.draft_ahead_bg != 0;
-    dr.remb = [&](int32_t t, float* o) { return M->router_emb_row(t, o); };
     const bool head_src = a.draft == "head" || a.draft == "both";
     LightHeadSource lh;
     int light_li = -1;  // the last committed position's index in the last pass (-1: a single step)
@@ -1186,7 +1177,7 @@ int main(int argc, char** argv) {
       dr.extra.push_back(&hs);
     }
     dr.o.copy_free = a.copy_free != 0;
-    dr.init(family, a.early > 0 || dr.o.ahead > 0 ? &C : nullptr, draft_cost_prior(a.model));
+    dr.init(family, a.early > 0 ? &C : nullptr, draft_cost_prior(a.model));
     dr.reads = &C;
     if (!a.draft_cost.empty() && a.draft != "none") {  // a cost file: the prior an earlier run measured (absent: the family's)
       struct stat sb;

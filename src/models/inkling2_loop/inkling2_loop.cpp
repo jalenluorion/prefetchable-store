@@ -245,13 +245,6 @@ struct Inkling : Model {
     rows.row(tok, out);
     return true;
   }
-  bool router_emb_row(int32_t tok, float* out) const override {  // the normed embedding (step: embn)
-    if (tok < 0 || tok >= c.VU) return false;
-    std::vector<float> e(c.H);
-    rows.row(tok, e.data());
-    rmsnorm(e.data(), embed_norm, c.H, c.eps, out);
-    return true;
-  }
   int head_argmax(const float* hn, float* conf) override;
   std::vector<float> vhn;  // the last verify's post-norm final hidden per position
   XBuf dh_x;
