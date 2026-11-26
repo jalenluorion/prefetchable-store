@@ -20,7 +20,5 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-This license covers the files in this repository except qwen4_exp/, which is
-vendored from a community MLX port distributed under the Qwen Community
-License 1.0 (LICENSE-QWEN) and contains helper functions from mlx-vlm (MIT).
-The model weights are under the Qwen Community License 1.0.
+This license covers the files in this repository. The model weights are not
+part of it: each model is under its upstream licence.

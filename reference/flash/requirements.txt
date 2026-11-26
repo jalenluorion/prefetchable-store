@@ -1,7 +1,0 @@
-# Running the store on Apple Silicon (mlx_run.py, the demo server)
-mlx>=0.32.4
-mlx-vlm==0.7.12        # pinned: the runner uses its qwen3_5 model pieces directly
-tokenizers>=0.23
-jinja2
-numpy
-huggingface_hub

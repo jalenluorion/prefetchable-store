@@ -20,7 +20,7 @@ setup before auto). Hit rate = picks held when their step runs (the engine's hit
 **The replay is the engine in named mode too**: the 35B at 5 GB with `--prefetch router --routers <k2> --m 8` (hazard,
 single-step prompt) measured hit + late 0.891, 205.6 MB/token (61.9 urgent + 143.7 named, 81.2 names read per token),
 ids identical; arm (c) at 5 GB replays 0.891 / 206 (62 + 144). The timing campaign's run of the same turn at 5 GB
-(build `moved-store-verify-names`, `--prefill-chunk 512`) read 406 MB/token (98 + 308, 174 names read per token): twice
+(build `verify-names`, `--prefill-chunk 512`) read 406 MB/token (98 + 308, 174 names read per token): twice
 the names this branch's engine reads on the same ids. That difference is in that build or its batched prefill, not in
 the routing; it should be checked before the 406 is used.
 

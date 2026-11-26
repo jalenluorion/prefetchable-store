@@ -206,7 +206,7 @@ heads_<variant>.safetensors`. Gate `tests/draft_light_check.py TINY_MODEL TINY_R
 trainer's export format on the tiny 35B): the bf16 head's drafts equal a numpy reference of the convention on all 78
 runs (confidence within 7e-7), ids with the head on equal plain decoding for the low-rank and full variants with q8 on
 and off; the 8-bit head's first draft equals the bf16 one on 77 / 78 (low rank) and 76 / 78 (full). The trained file
-(`deep-memory/local/q36/draft/`) had not landed at the time of writing.
+had not landed at the time of writing.
 
 ## Reproduce
 

@@ -1,6 +1,6 @@
-"""A synthetic Qwen3.8-Flash-Next release for testing the converter and the runner without the 360 GB download.
+"""A synthetic Qwen3.8-Flash-Next release for testing the converter and the engine without the 360 GB download.
 
-  .venv/bin/python make_tiny.py OUT_DIR
+  python tests/qwen4_exp/tiny_release.py OUT_DIR      (normally run by tests/qwen4_exp/make_tiny.py)
 
 Writes a random qwen4_exp model with the real checkpoint's structure at tiny sizes, laid out as a Hugging Face release:
 config.json (multimodal wrapper with text_config, the real field names), model-0000K-of-00004.safetensors with
@@ -172,7 +172,7 @@ shards[2].update({f"{p}.key_proj.weight": lin(HC * H, H), f"{p}.value_proj.weigh
                   f"{p}.ple_embedding.ngram_heads_offsets": torch.tensor(offs, dtype=torch.int64)})
 for K in range(PARTS):
     shards[2][f"{p}.ple_embedding.ngram_embedding.shard_{K}.weight"] = rnd(SHARD_ROWS, NGD)
-# dummies the converter and the runner must skip: an MTP layer with its own experts, a vision block
+# dummies the converter and the engine must skip: an MTP layer with its own experts, a vision block
 shards[3].update({"mtp.fc_hidden.weight": lin(H, 2 * H), "mtp.layers.0.mlp.experts.gate_up_proj": rnd(NE, 2 * I, H),
                   "mtp.layers.0.mlp.experts.down_proj": rnd(NE, H, I), "mtp.pre_fc_norm_hidden.weight": rnd(H, std=0.1),
                   "model.visual.blocks.0.attn.qkv.weight": lin(96, 32), "model.visual.blocks.0.attn.qkv.bias": rnd(96),

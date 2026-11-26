@@ -1,6 +1,6 @@
 """Frontier table of the router design program (2026-11-21): reads every result JSON that exists and prints one row per
 (design cell, replacement rule), grouped by model and cache budget, marking the Pareto set within each group.
-  python3 jobs/babel/design_table.py [--dir ~/deep-memory/out_babel] [--md]      (babel login node; plain python3, no numpy)
+  python3 jobs/babel/design_table.py [--dir ~/out_babel] [--md]      (babel login node; plain python3, no numpy)
 Sources: q36 runs (out_babel/q36/*.json, key "design_cells", from q36_router.py DCELLS) and Inkling runs
 (out_babel/inkling/*.json, keys "design_cells" from ink_router.py DCELLS and "engine_cells" from ENG_CELLS).
 Columns: stall reads/token (picks read on the spot: the waits the engine pays), MB/token (all reads: names, on-the-spot,
@@ -13,7 +13,7 @@ better on one. Lossless rows have KL 0 by construction."""
 import glob, json, os, sys
 
 args = sys.argv[1:]
-root = os.path.expanduser(args[args.index("--dir") + 1] if "--dir" in args else "~/deep-memory/out_babel")
+root = os.path.expanduser(args[args.index("--dir") + 1] if "--dir" in args else "~/out_babel")
 md = "--md" in args
 rows = []
 

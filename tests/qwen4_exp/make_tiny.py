@@ -1,5 +1,5 @@
 """The tiny random Qwen3.8-Flash-Next of the engine's checks, built the way the real weight repo was: a synthetic release
-(reference/flash/make_tiny.py, the release's tensor names and layouts), the published converter (reference/flash/convert.py:
+(tests/qwen4_exp/tiny_release.py, the release's tensor names and layouts), the published converter (python/convert/qwen4_exp/convert.py:
 4-bit expert records, int8 n-gram rows in part files, resident.safetensors), a random lag-4 router set in the trainer's npz
 layout (routers_k4.npz, flash_router3 keys, float32), and the manifest (tests/tiny_manifest.py, from the weight repo's
 python/convert/qwen4_exp/moved-store.json).
@@ -34,9 +34,9 @@ def run(cmd, **kw):
 if os.path.exists(OUT):
     shutil.rmtree(OUT)
 os.makedirs(OUT)
-info = run([sys.executable, os.path.join(REPO, "reference/flash/make_tiny.py"), REL], env=env)
+info = run([sys.executable, os.path.join(HERE, "tiny_release.py"), REL], env=env)
 ng = json.loads(info.strip().splitlines()[-1])
-run([sys.executable, os.path.join(REPO, "reference/flash/convert.py")],
+run([sys.executable, os.path.join(REPO, "python/convert/qwen4_exp/convert.py")],
     env={**env, "REPO": REL, "OUT": MOD, "STATE_DIR": ST, "NG_SHARD_ROWS": str(ng["NG_SHARD_ROWS"]), "NG_DIM": str(ng["NG_DIM"]),
          "NG_PART_ROWS": "1000", "THREADS": "2"})
 for f in ("_marker", "model.safetensors.index.json"):

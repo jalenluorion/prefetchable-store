@@ -1,14 +1,13 @@
 #!/bin/zsh
-# The old Flash-Next demo's bug-fix task (reference/flash/demo: intervals.py has a one-line bug, check.py fails on it) in
+# A bug-fix task for Qwen3.8-Flash-Next (bench/serving/demo_task: intervals.py has a one-line bug, check.py fails on it) in
 # stock OpenCode against this engine's server, timed from the prompt to the end of OpenCode's run, then check.py run
-# again here. Run under engine/bench/guard.py (it starts and stops the server).
+# again here. Run one model process at a time (it starts and stops the server).
 #   demo_task.sh MODEL_DIR OUT_DIR [worker args...]      (e.g. -- --cache-gb 3.0)
-# The task folder holds the demo's files (README.md, check.py, intervals.py, demo.sh, opencode.json with this server's
-# port) as a git repository at OUT_DIR/demo, the path OpenCode's system prompt names. As in the old demo: the server
-# runs with --demo (fast mode, effort low, canned titles, warm-up), OpenCode with its stock prompt and tools and the
-# three clean-install variables. A first request ("hi") in the folder plays the part of the demo's snapshot of the day
-# (a new thread then finds the system prompt); the task is the next thread, 65 s later (OpenCode 1.19.0 can stall when
-# started again within a minute). OC_MCP_OFF="name ...": MCP servers of the machine's global OpenCode config to switch off.
+# The task folder holds the task's files (check.py, intervals.py, opencode.json with this server's port) as a git
+# repository at OUT_DIR/demo, the path OpenCode's system prompt names. The server runs with --demo (fast mode, effort
+# low, canned titles, warm-up), OpenCode with its stock prompt and tools and the three clean-install variables. A first
+# request ("hi") in the folder saves the system prompt (a new thread then finds it); the task is the next thread, 65 s
+# later (OpenCode 1.19.0 can stall when started again within a minute). OC_MCP_OFF="name ...": MCP servers of the machine's global OpenCode config to switch off.
 set -u
 cd ${0:A:h}/../..
 MODEL=${1:A}; O=${2:A}; shift 2
@@ -18,10 +17,10 @@ PORT=${PORT:-8098}
 OC=${OC:-$HOME/.opencode/bin/opencode}
 D=$O/demo
 mkdir -p $O && rm -rf $D $O/pfx && mkdir -p $D $O/pfx
-cp reference/flash/demo/{README.md,check.py,intervals.py,demo.sh} $D/
+cp bench/serving/demo_task/{check.py,intervals.py} $D/
 $PY - $D/opencode.json $PORT ${=OC_MCP_OFF:-} <<'PY'
 import json, sys
-c = json.load(open("reference/flash/demo/opencode.json"))
+c = json.load(open("bench/serving/demo_task/opencode.json"))
 c["provider"]["store"]["options"]["baseURL"] = f"http://127.0.0.1:{sys.argv[2]}/v1"
 for name in sys.argv[3:]:  # MCP servers of this machine's global OpenCode config, switched off (they add tools to the prompt)
     c.setdefault("mcp", {})[name] = {"type": "local", "command": ["true"], "enabled": False}

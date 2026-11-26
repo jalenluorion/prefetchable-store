@@ -657,7 +657,7 @@ def simulate(T, slots, spec, sem="engine", caps=None, keep=None, pf=None, tier2=
     for t in range(T.T):
         counted = t >= start
         pol.token_start(t)
-        if keep is not None:  # the keep-window drop (Store.swift drop(), mlx_run.py bookkeeping)
+        if keep is not None:  # the keep-window drop (Store.swift drop(), the MLX reference implementation's bookkeeping)
             d = np.flatnonzero(held & (ltok < t - keep) & (pins == 0))
             for v in d.tolist():
                 held[v] = False

@@ -10,7 +10,7 @@
   "license_file": "LICENSE"
  },
  "converter": {
-  "code": "reference/flash/convert.py (the store, the n-gram parts and resident.safetensors as published)",
+  "code": "python/convert/qwen4_exp/convert.py (the store, the n-gram parts and resident.safetensors as published)",
   "commit": null,
   "sha256": "f12fbac64d14218caeb727fcfb09f701ab71c60e05439a7195ce0d4adfe8aaf7",
   "date": null
@@ -674,7 +674,7 @@
   "file": "resident.safetensors",
   "precision": "bf16",
   "q8_rule": {
-   "matrices": "every 2-D linear with >= 64 outputs and inputs % 64 == 0, except the released router (reference/flash/mlx_run.py qpred)",
+   "matrices": "every 2-D linear with >= 64 outputs and inputs % 64 == 0, except the released router",
    "quantiser": "mlx_affine",
    "bits": 8,
    "group": 64,
