@@ -600,6 +600,7 @@ struct RowsNCtx {
   int n, chunk;
   bool ref;
   int* start;
+  const size_t* ld;  // [n] a job's output stride when its outputs are one strided matrix (out[k] = out[0] + k ld), else 0
   alignas(128) std::atomic<int> next{0};
 };
 void phase_rows_n(void* p, int, int) {
@@ -615,6 +616,14 @@ void phase_rows_n(void* p, int, int) {
     const int r0 = J.r0 + (ch - C.start[i]) * C.chunk, r1 = std::min(J.r1 < 0 ? w.rows : J.r1, r0 + C.chunk);
     if (!C.ref && J.xb && (w.kind == Weight::AFF8 || w.kind == Weight::AFF8S || w.kind == Weight::AFF4) && !(r0 & 3) && !(r1 & 3) &&
         w.cols % XB == 0) {
+      const size_t ld = C.ld[i];
+      if (ld && w.kind != Weight::AFF8S) {  // the outputs in place (the same kernel and bits; no staged copy)
+        if (w.kind == Weight::AFF4)
+          gemm_aff4_i16(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *J.xb, 0, J.n, J.out[0] + r0, ld);
+        else
+          gemm_aff8_i16(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *J.xb, 0, J.n, J.out[0] + r0, ld);
+        continue;
+      }
       tmp.resize((size_t)J.n * C.chunk);
       if (w.kind == Weight::AFF8S) {  // the rows' AFF8 bytes rebuilt, then the same gemm
         static thread_local std::vector<uint8_t> buf;
@@ -626,6 +635,7 @@ void phase_rows_n(void* p, int, int) {
         gemm_aff8_i16(w.c, (const _Float16*)w.s, (const _Float16*)w.b, w.cols, r0, r1, *J.xb, 0, J.n, tmp.data(), C.chunk);
       }
       for (int k = 0; k < J.n; k++) std::memcpy(J.out[k] + r0, tmp.data() + (size_t)k * C.chunk, sizeof(float) * (r1 - r0));
+      DM_WC("rows_n.staged_bytes", (uint64_t)J.n * (r1 - r0) * 4);
       continue;
     }
     ys.resize(J.n);
@@ -642,9 +652,19 @@ void run_rows_n(Pool& pool, const JobN* jobs, int nj, int chunk, bool ref, doubl
   C.chunk = chunk;
   C.ref = ref;
   std::vector<int> start(nj + 1);
+  std::vector<size_t> ld(nj, 0);
   C.start = start.data();
+  C.ld = ld.data();
   C.start[0] = 0;
   for (int i = 0; i < nj; i++) {
+    const JobN& J = jobs[i];
+    if (J.n == 1) ld[i] = (size_t)J.w->rows;  // (one position: the stride is never used)
+    else if (J.n >= 2 && J.out[1] > J.out[0]) {  // one strided output matrix (a prefill's projections, a verify's positions)
+      const size_t d = (size_t)(J.out[1] - J.out[0]);
+      bool same = d >= (size_t)J.w->rows;
+      for (int k = 2; k < J.n && same; k++) same = J.out[k] == J.out[0] + (size_t)k * d;
+      if (same) ld[i] = d;
+    }
     C.start[i + 1] = C.start[i] + (std::max(0, (jobs[i].r1 < 0 ? jobs[i].w->rows : jobs[i].r1) - jobs[i].r0) + chunk - 1) / chunk;
     if (bytes) *bytes += (double)jobs[i].w->bytes();
   }

@@ -49,6 +49,7 @@
 #include <thread>
 #include <vector>
 
+#include "dmeng/workcount.h"
 #include "dmeng/address.h"
 #include "dmeng/draft.h"
 #include "dmeng/model_lm.h"
@@ -906,6 +907,10 @@ int main(int argc, char** argv) {
         << "\",\"lcp_live\":" << sr.lcp_live << ",\"live_len\":" << sr.live_len << ",\"lcp_disk\":" << sr.lcp_disk << ",\"ms_restore\":" << sr.ms_restore << ",\"ms_preload\":" << sr.ms_preload << ",\"preloaded\":" << sr.preloaded << ",\"ms_prefill\":" << sr.ms_prefill
         << ",\"ms_ready\":" << ttp << ",\"ms_wait_worker\":" << std::chrono::duration<double, std::milli>(t0 - r.t_arrive).count() << ",\"prefill\":" << (sr.pf.json.empty() ? "{}" : sr.pf.json) << "}";
       out(s.str());
+    }
+    if (wc::on()) {  // measurement (DMENG_WORKCOUNT): the prompt's work counters, then zeroed for the decode
+      fprintf(stderr, "WORK %ld %s\n", r.rid, wc::json().c_str());
+      wc::reset();
     }
     if (sr.cancelled) {
       out("E " + std::to_string(r.rid) + " cancel {}");

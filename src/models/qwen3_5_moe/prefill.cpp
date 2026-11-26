@@ -16,11 +16,29 @@
 #include "../../core/gpu_split.h"
 #include "dmeng/kernels_batch.h"
 #include "qwen3_5_moe.h"
+#include "dmeng/workcount.h"
+#include <string>
 #include "../common/gated_attn.h"
 #include "../../core/gpu_half.h"
 
 namespace dm {
 namespace qwen35 {
+
+// measurement (DMENG_WORKCOUNT): the work counters' growth over one stage, under "STAGE.KEY"
+struct WcSpan {
+  static constexpr int NK = 7;
+  const char* keys[NK] = {"pool.forkjoins", "gemm_aff8.calls", "gemm_aff8.row_pos", "gemm_aff8.weight_bytes", "xqb.quantise_pos", "rows_n.staged_bytes", "gpu.add_rows"};
+  uint64_t v0[NK] = {0};
+  WcSpan() {
+    if (::dm::wc::on())
+      for (int i = 0; i < NK; i++) v0[i] = ::dm::wc::slot(keys[i]).load();
+  }
+  void end(const char* pre) {
+    if (!::dm::wc::on()) return;
+    for (int i = 0; i < NK; i++) ::dm::wc::slot((std::string(pre) + keys[i]).c_str()).fetch_add(::dm::wc::slot(keys[i]).load() - v0[i]);
+    ::dm::wc::slot((std::string(pre) + "calls").c_str()).fetch_add(1);
+  }
+};
 namespace {
 
 inline double msd(clk::time_point a) { return std::chrono::duration<double, std::milli>(clk::now() - a).count(); }
@@ -261,6 +279,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
     // ---- attention input
     auto ta = clk::now();
     stage_mark(ST_ATTN_PROJ);
+    WcSpan wc_attn;
     qa.reserve(H, n);
     pfor(pool, n, [&](int i) {
       rmsnorm(Xb + (size_t)i * H, W.ln_in, H, c.eps, Hn.data() + (size_t)i * H);
@@ -278,6 +297,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       auto tb = clk::now();
       stage_mark(ST_CONV);
       k.ms_attn_proj += std::chrono::duration<double, std::milli>(tb - ta).count();
+      wc_attn.end("attn_proj.");
       // conv: channel by channel, positions in order (phase_conv per position)
       const int CK = c.CK;
       float* st = Sst.ls[L].conv.data();
@@ -322,6 +342,7 @@ bool Prefill::forward_chunk(const int* ids, int n_all, bool want_logits) {
       auto tb = clk::now();
       stage_mark(ST_ATTN_CORE);
       k.ms_attn_proj += std::chrono::duration<double, std::milli>(tb - ta).count();
+      wc_attn.end("attn_proj.");
       LState& S = Sst.ls[L];
       // K (normed, rotated) and V into the cache at their positions (attn_full)
       pfor(pool, n, [&](int i) {
