@@ -660,6 +660,7 @@ void dm_close(dm_engine* e) {
   {
     std::lock_guard<std::mutex> lk(e->busy);  // a call in flight finishes (within one layer) first
     draft_end(e);
+    if (e->dr && e->dr->core) e->C->pick_log = nullptr;  // (the drafter's log goes before the core)
   }
   delete e;
 }
