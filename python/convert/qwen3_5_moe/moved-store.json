@@ -1379,7 +1379,7 @@
   },
   "phone": {
    "when": "iOS with at least 5.0 GB available at open",
-   "mode": "exact",
+   "mode": "fast",
    "resident": "resident_q8",
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",

@@ -103,7 +103,7 @@ enum DmengLaunch {
         return false
         #endif
     }
-    /// The user's choice (Settings: Exact / Fast), else the profile's default: Fast on phone-small, Exact elsewhere.
+    /// The user's choice (Settings: Exact / Fast), else the profile's default: Fast on phone and phone-small, Exact elsewhere.
     static var userMode: String {
         get {
             #if SELFCHECK

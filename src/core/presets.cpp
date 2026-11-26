@@ -28,16 +28,16 @@ using ms::Json;
 // defaults, drafting); what is left here is a property of the device class each profile stands for, measured with the
 // models of the weight repos (results/ios/p3-gpu/GPU-PREFILL.md: the Mac's GPU share of the prefill;
 // results/parity/PARITY.md: run-ahead at depth 1; the phones: 8 readers, run-ahead limited to 0.2 of the token's compute,
-// off while the readers are saturated, exact mode only; phone-small: the 4-bit resident in fast mode with the confidence
-// names rule, results/ios). The run-ahead names a step's top_k picks ("top_k": the manifest's experts.top_k) unless a
-// profile says otherwise.
+// off while the readers are saturated, exact mode only; both phones default to fast mode (exact on request);
+// phone-small: the 4-bit resident with the confidence names rule, results/ios). The run-ahead names a step's top_k
+// picks ("top_k": the manifest's experts.top_k) unless a profile says otherwise.
 #include "published_defaults.inc"
 static const char* BUILTIN = R"({
  "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
  "profiles": {
   "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
           "run_ahead": {"picks": "top_k", "depth": 1}},
-  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+  "phone": {"mode": "fast", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
             "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
   "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
                   "readers": 8, "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},

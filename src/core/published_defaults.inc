@@ -89,7 +89,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "phone": {
     "cache": "slab",
     "min_available_gb": 5.0,
-    "mode": "exact",
+    "mode": "fast",
     "names": {
      "candidates": 16,
      "rule": "confidence",
@@ -209,7 +209,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
    "phone": {
     "cache": "slab",
     "min_available_gb": 5.0,
-    "mode": "exact",
+    "mode": "fast",
     "names": {
      "candidates": 16,
      "rule": "confidence",

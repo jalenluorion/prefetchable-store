@@ -38,7 +38,7 @@ each user turn so the warmed system prompt stays the same across days.
 
 The app picks the profile from the memory iOS makes available to it when it opens:
 
-- **`phone`**: at least 5.0 GB available to the app. 8-bit in-memory weights, Exact by default.
+- **`phone`**: at least 5.0 GB available to the app. 8-bit in-memory weights, Fast by default.
 - **`phone-small`**: the 6 GB class (iPhone 14 Pro, iPhone 15, iPhone 15 Plus). Calibrated 4-bit in-memory weights,
   Fast by default.
 
@@ -105,8 +105,9 @@ profile (the table above) and starts when you tap **Download**.
 
 ## Using the app
 
-**Exact and Fast** are under Settings › Model › Mode, one setting per model. The default is Fast on `phone-small` and
-Exact on `phone`. A change applies the next time you open the app (or when you switch models).
+**Exact and Fast** are under Settings › Model › Mode, one setting per model. The default is Fast on both profiles
+(`phone` and `phone-small`) for both models; Exact stays your choice. A change applies the next time you open the app
+(or when you switch models).
 
 **The other model.** Settings › Model files shows one model's files at a time: choose the other model in its picker
 and tap **Download**. Once both are on the phone, a **Model** picker appears in Settings; choosing a model closes the open

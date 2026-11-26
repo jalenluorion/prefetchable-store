@@ -109,8 +109,8 @@ Names and run-ahead only schedule reads. What the model computes is decided by i
 
 - **`exact` (default on the Mac).** Every chosen expert is used; one that is not in memory yet is waited for. The
   tokens never depend on the cache, the routers or timing.
-- **`fast`.** A chosen expert that is not in memory is waited for only if its routing weight is above a threshold;
-  otherwise the layer goes on without it. Faster on small caches and slow drives, with a small measured change in
+- **`fast` (default on the iPhone).** A chosen expert that is not in memory is waited for only if its routing weight
+  is above a threshold; otherwise the layer goes on without it. Faster on small caches and slow drives, with a small measured change in
   output (see Quality). For Inkling 2 Mini and Qwen3.8-Flash-Next (whose router picks 10 experts per layer) the
   missing picks are read heaviest first until at most 0.13 of the routing weight would be left out, and the rest are
   left out; the 35B keeps the threshold, measured faster on the iPhone.

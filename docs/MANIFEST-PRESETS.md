@@ -93,7 +93,7 @@ pick in flight is waited for; < 0 never, >= 1000 always) and `bg` (0 | 1: backgr
   "phone": {
     "when": "iOS with at least 5.0 GB available at open",
     "min_available_gb": 5.0,
-    "mode": "exact", "resident": "resident_q8", "precision": "8-bit", "cache": "slab",
+    "mode": "fast", "resident": "resident_q8", "precision": "8-bit", "cache": "slab",
     "parts": [], "bytes": 0
   },
   "phone-small": {
@@ -109,7 +109,7 @@ Read by the engine, per profile:
 
 | key | type | meaning | built-in |
 |---|---|---|---|
-| `mode` | `"exact"` or `"fast"` | the profile's default mode | mac `exact`, phone `exact`, phone-small `fast` |
+| `mode` | `"exact"` or `"fast"` | the profile's default mode (a front end's `--mode` / the app's setting overrides it) | mac `exact`, phone `fast`, phone-small `fast` (both models on both phones) |
 | `resident` | derived id | the in-memory weights: `resident_q8` or `resident_q4` | `resident_q8`; phone-small on the 35B: `resident_q4` when that file is present, else `resident_q8` |
 | `cache` | `"auto"` or `"slab"` | expert cache sizing: `auto` = from free memory at start, then follow memory pressure (Mac); `slab` = one locked slab sized at open from the memory the app has (iOS) | mac `auto`, phones `slab` |
 | `cache_start` | object | the automatic cache's start rule: `{"rule": "headroom", "headroom_gb": G}` leaves G GB of what is free once the model's memory still to come is in (the 35B's and Inkling's published sizes; the memory watcher shrinks below a 20% free level), or `{"rule": "free_level", "floor_pct": P}` keeps the kernel's free level at P% (measured on Flash-Next only; the watcher shrinks below P - 2). Either is capped by the ceiling (physical memory - 5.5 GB - the process's other memory) and by what the system will lock (`vm.global_user_wire_limit` - wired now - 0.5 GB); a lock the OS still refuses stops the budget there. dmeng, dmserve and the C API compute it the same way, each from the positions and checkpoints it plans for | headroom 3 GB; Flash-Next's mac: free_level 14 |
