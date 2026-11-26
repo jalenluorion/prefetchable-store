@@ -92,6 +92,11 @@ struct Readers {
                                    // the soft faults that map the cached pages, not the compute threads)
   int qos = -1;                    // QoS class of the reader threads (qos_class_t); -1: user-initiated
   bool io_low = false;             // the readers' disk I/O one tier below the threads' own (IOPOL_STANDARD); CoreOpts::reader_io_low
+  // bench only (CoreOpts::drive_gbs, --drive-gbs): the readers' combined drive rate held to this many bytes per second, a
+  // slower drive's stand-in. Every read counted in `bytes` takes a slot of n / drive_bps on one clock shared by all reader
+  // threads (no credit builds up while idle) and finishes no earlier than its slot's end: a read's time, and the step's wait
+  // on it, are those of the slower drive. 0 = off (the default)
+  double drive_bps = 0;
   // statistics (written by the readers)
   std::atomic<uint64_t> bytes{0}, jobs{0}, busy_ns{0};
   std::atomic<uint64_t> bytes_cls[3] = {{0}, {0}, {0}};  // bytes read by class: urgent, speculative, background
@@ -121,6 +126,8 @@ struct Readers {
   uint64_t busy_wall_ns_ = 0;
   int64_t dt_last_ = 0;
   int dt_state_ = 0;
+  std::mutex drive_mu_;
+  int64_t drive_t_ = 0;  // drive_bps: the end of the last slot handed out (ns, steady clock)
   uint64_t dt_ns_[7] = {0};
   void tick_(int64_t t);  // (mu_ held) after a change of the in-flight count or the queues
 };

@@ -375,6 +375,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
   co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;  // model_options "run:spare-mem=1"
   ro.spare_mem = co.spare_mem;
+  co.drive_gbs = ro.drive_gbs;  // model_options "run:drive-gbs=X" (bench only)
   e->C = std::make_unique<Core>();
   if (!e->C->init(e->M->info(), co, model_dir, err) || !e->M->bind(*e->C, err)) {
     g_err = "core: " + err;

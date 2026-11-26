@@ -415,6 +415,7 @@ std::string Resolved::json() const {
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   if (spare_mem) o << ",\"spare_memory\":true";
+  if (drive_gbs > 0) o << ",\"drive_gbs\":" << drive_gbs;
   o << "}";
   return o.str();
 }
@@ -504,6 +505,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.rd_prio = rd_prio;
   x.prefill_chunk = prefill_chunk;
   x.spare_mem = spare_mem;
+  x.drive_gbs = drive_gbs;
   return x;
 }
 
@@ -571,6 +573,7 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   // MB per token than plain decoding at the same tokens per step); --early N still sets it
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
   r.spare_mem = g.spare_mem ? *g.spare_mem : pf ? P.spare_mem : r.spare_mem;
+  r.drive_gbs = g.drive_gbs && *g.drive_gbs > 0 ? *g.drive_gbs : 0;  // bench only: never from a profile or a manifest
   return true;
 }
 
@@ -625,6 +628,7 @@ const RunFlag RUN_FLAGS[] = {
     {"--draft", nullptr, RF_STR(draft)},
     {"--early", nullptr, RF_INT(early)},
     {"--spare-mem", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.spare_mem = x != 0), true); }},
+    {"--drive-gbs", nullptr, [](const std::string& v, Given& g) { double x; return num(v, x) && x >= 0 && ((g.drive_gbs = x), true); }},
 };
 #undef RF_INT
 #undef RF_DBL

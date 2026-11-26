@@ -134,6 +134,7 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
   }
   cache.rd.qos = o.reader_qos;
   cache.rd.io_low = o.reader_io_low;
+  cache.rd.drive_bps = o.drive_gbs > 0 ? o.drive_gbs * 1e9 : 0;
   std::vector<size_t> rec;
   for (auto& f : mi.formats) rec.push_back(f.rec);
   std::vector<double> share = o.pool_share.empty() ? mi.pool_share : o.pool_share;

@@ -145,6 +145,9 @@ outputs
   --json F --out-ids F --steps-out F --record F --dump-names F
   --teacher F --dump-logits F --dump-from P --nll-out F --ref-nll F --qual-out F --ref-qual F --taps-out F
   --skip-reads --force-routing F   timing without reads, with a recorded routing forced
+  --drive-gbs X          bench only: the readers' combined drive rate capped at X GB/s (one clock across the reader
+                         threads, prompt and decode reads alike; the wait counts as a slow read's), a slower drive's
+                         stand-in; off by default and in every profile (C API: model_options "run:drive-gbs=X")
   --state-check          after the decode, restore the state saved after the prompt (fixed + positional parts) and
                          decode again: the ids must be the same
   --prefill-chunk N      the prompt through the model's batched prefill in chunks of N (1: single steps); exact
@@ -561,6 +564,7 @@ int main(int argc, char** argv) {
   co.half_life = a.half_life;
   co.mem = mem_of(a.mem);
   co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;
+  co.drive_gbs = ro.drive_gbs;
   co.skip_reads = a.skip_reads;
   co.loop_hold = a.loop_hold;
   co.evict = a.evict;

@@ -515,6 +515,10 @@ int main(int argc, char** argv) {
     fprintf(stderr, "dmserve: the profile's background reads (ranks %d) are not implemented in the server: off\n", ro.bg_ranks);
     ro.bg_ranks = 0;
   }
+  if (ro.drive_gbs > 0) {  // the drive cap is a bench option of dmeng and the C API only
+    fprintf(stderr, "dmserve: --drive-gbs is a dmeng / C API bench option, not applied in the server: off\n");
+    ro.drive_gbs = 0;
+  }
   if (profiled) {  // the server's own files, in the engine's cache folder
     if (!has("--disk")) a.s.disk_dir = P.cache_dir + "/prefix";
     if (!has("--hotset")) a.hotset = P.cache_dir + "/hotset.bin";
