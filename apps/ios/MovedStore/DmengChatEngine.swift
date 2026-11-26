@@ -156,6 +156,37 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         set { lock.withLock { _thinking = newValue } }
     }
     var lastDetail: ReplyDetail? { lock.withLock { _last } }
+    private var _replyRows: [(String, String)] = []
+    /// The last finished reply from the engine's counters (dm_counters deltas over the reply's decode), plain words.
+    var replyRows: [(String, String)] { lock.withLock { _replyRows } }
+
+    /// Rows for one reply: the counters at the decode's start and end, its tokens and seconds.
+    static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, seconds: Double) -> [(String, String)] {
+        let n = Double(max(1, tokens))
+        let ms = 1000 * seconds / n
+        let wait = (c1.wait_ms - c0.wait_ms) / n
+        let read = Double(c1.bytes_read &- c0.bytes_read)
+        let spare = Double(c1.bytes_spare &- c0.bytes_spare)
+        let busy = Double(c1.read_busy_ns &- c0.read_busy_ns) / 1e9
+        let picks = Double(c1.picks &- c0.picks)
+        let vm = MemProbe.vmInfo()
+        var r: [(String, String)] = [
+            ("Speed", String(format: "%.2f tokens/s (%d tokens in %.1f s)", Double(tokens) / max(1e-9, seconds), tokens, seconds)),
+            ("Read from storage", String(format: "%.1f MB per token", read / 1e6 / n)),
+        ]
+        if c1.spare_memory != 0 {
+            r.append(("From spare memory", String(format: "%.1f MB per token", spare / 1e6 / n)))
+        }
+        r += [
+            ("Waiting on storage", String(format: "%.0f ms per token (%.0f%% of each token)", wait, ms > 0 ? 100 * wait / ms : 0)),
+            ("Experts found in memory", picks > 0 ? String(format: "%.1f%% of picks", 100 * Double(c1.hits &- c0.hits) / picks) : "-"),
+            ("Storage read speed", busy > 0 ? String(format: "%.2f GB/s while reading", read / 1e9 / busy) : "-"),
+            ("Expert cache in use", String(format: "%.2f GB of %.2f GB", Double(c1.held_bytes) / 1e9, Double(c1.budget_bytes) / 1e9)),
+            ("Peak memory use", String(format: "%.2f GB", Double(vm?.ledger_phys_footprint_peak ?? 0) / 1e9)),
+            ("Device temperature at end", thermalName(ProcessInfo.processInfo.thermalState)),
+        ]
+        return r
+    }
 
     var settings: [(String, String)] {
         let m = lock.withLock { model }
@@ -227,7 +258,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         #endif
         let m = lock.withLock { () -> DmengModel? in
             let m = model
-            model = nil; codec = nil; _last = nil; headCache = [:]; taHeadKey = ""; taHead = []
+            model = nil; codec = nil; _last = nil; _replyRows = []; headCache = [:]; taHeadKey = ""; taHead = []
             observers = []; budgetNow = 0; openBytes = 0; loadedKind = nil
             info.detail = "not loaded"
             return m
@@ -813,7 +844,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                             heldExpertsMean: Double(cEnd.held_bytes) / rec, syncReads: Int(cEnd.misses &- c0.misses), split: split,
                             prefillStats: ["prefill_s": sr.msPrefill / 1000, "prefill_mb_read": sr.mbRead,
                                            "prefill_reused": Double(sr.reused), "prefill_computed": Double(sr.computed)])
-        lock.withLock { _last = d }
+        let rows = Self.replyRows(c0, cEnd, tokens: new.count, seconds: dt)
+        lock.withLock { _last = d; _replyRows = rows }
         log("DMENG REPLY ids " + new.map(String.init).joined(separator: ","))
         if ink { log("DMENG REPLY raw " + (lead + c.decode(new)).debugDescription + " (stop: \(reason.rawValue)\(stopId.map { ", token \($0)" } ?? ""))") }
         log(String(format: "DMENG REPLY done: %d tokens (%@), %.2f tok/s, %.1f MB read/token, hit %.3f, refaults %.0f, budget %.2f GB", new.count,
