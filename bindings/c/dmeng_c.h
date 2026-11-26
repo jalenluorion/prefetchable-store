@@ -205,7 +205,12 @@ typedef struct dm_sync_result {
  * else cold), and write the logits after ids[n-1] (vocab floats). logits NULL = state only (an idle-time prefix the next
  * call extends: a saved state at n itself is restored whole, no position recomputed; dm_step must not follow until a
  * dm_sync with logits). marks[0..nmarks): positions (1..n) where a message ends (checkpoint candidates; the first >=
- * disk_min is the disk prefix, its file pinned). dm_persist(pos) at the live end (after decode) checkpoints it first. Returns DM_ECANCELLED if
+ * disk_min is the disk prefix, its file pinned). Pass the system prompt's boundary first, the same in every call: that
+ * checkpoint is pinned in memory (never evicted). At most one checkpoint is pinned: a call whose first mark differs
+ * (a typing position, say) pins its own and releases the previous one, which then counts against ckpt_gb like any other
+ * checkpoint; dm_stats_json's prefix_cache reports pinned_checkpoints, pinned_mb, pins_released, pins_over_budget (a
+ * pin larger than the whole budget: kept, and counted) and checkpoint_mb against checkpoint_budget_mb.
+ * dm_persist(pos) at the live end (after decode) checkpoints it first. Returns DM_ECANCELLED if
  * dm_cancel stopped it (within one layer); the state is then consistent at dm_info's pos. */
 int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int nmarks, float* logits,
             dm_progress_fn progress, void* user, dm_sync_result* res);

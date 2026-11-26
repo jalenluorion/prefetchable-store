@@ -25,6 +25,7 @@ struct PrefixCache::Ckpt {  // (state blobs in pages from the system: a dropped 
   PageVec<uint8_t> fixed;
   uint64_t used = 0;
   bool pinned = false;
+  uint64_t pin_seq = 0;  // the order it was pinned in (the newest pin is the one kept)
 };
 struct PrefixCache::Parked {
   std::vector<int> toks;
@@ -121,15 +122,33 @@ PrefixCache::~PrefixCache() {
 void PrefixCache::add_checkpoint(std::unique_ptr<Ckpt> c) {
   for (auto& x : ck_)
     if (x->pos == c->pos) {
-      x->pinned |= c->pinned;
+      if (c->pinned && !x->pinned) x->pinned = true, x->pin_seq = ++pin_clock_, n_pins_over_budget_ += x->fixed.size() > ckpt_cap();
       x->used = ++clock_;
       x->fixed.swap(c->fixed);
+      one_pin();
       return;
     }
   c->used = ++clock_;
+  if (c->pinned) c->pin_seq = ++pin_clock_, n_pins_over_budget_ += c->fixed.size() > ckpt_cap();  // kept, and reported
   ck_.push_back(std::move(c));
   std::sort(ck_.begin(), ck_.end(), [](auto& a, auto& b) { return a->pos < b->pos; });
+  one_pin();
   trim_checkpoints();
+}
+
+size_t PrefixCache::ckpt_cap() const {
+  const size_t each = m_.info().fixed_bytes;
+  return std::max((size_t)(o_.ckpt_gb * 1e9), (size_t)std::max(0, o_.ckpt_min) * each);
+}
+
+// At most one pinned checkpoint on the live sequence: a newer pin releases the older ones, which become ordinary
+// checkpoints under the budget and its eviction. A caller passing the same system boundary first pins it once.
+void PrefixCache::one_pin() {
+  Ckpt* keep = nullptr;
+  for (auto& c : ck_)
+    if (c->pinned && (!keep || c->pin_seq > keep->pin_seq)) keep = c.get();
+  for (auto& c : ck_)
+    if (c->pinned && c.get() != keep) c->pinned = false, n_pins_released_++;
 }
 
 void PrefixCache::checkpoint(int p, bool pinned) {
@@ -142,7 +161,7 @@ void PrefixCache::checkpoint(int p, bool pinned) {
 }
 
 void PrefixCache::trim_checkpoints() {
-  const size_t each = m_.info().fixed_bytes, cap = std::max((size_t)(o_.ckpt_gb * 1e9), (size_t)std::max(0, o_.ckpt_min) * each);
+  const size_t each = m_.info().fixed_bytes, cap = ckpt_cap();
   while (ck_.size() * each > cap && !ck_.empty()) {
     int best = -1;  // least recently used unpinned, never the newest position (the end of the last prompt)
     for (int i = 0; i < (int)ck_.size(); i++) {
@@ -508,6 +527,7 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
     for (auto& c : p.ck)
       if (c->pos <= u) ck_.push_back(std::move(c));
     std::sort(ck_.begin(), ck_.end(), [](auto& a, auto& b) { return a->pos < b->pos; });
+    one_pin();
     if (ck_.empty() || ck_.back()->pos != u) checkpoint(u, false);
     start = u_park;
     R.source = "parked";
@@ -579,9 +599,12 @@ SyncResult PrefixCache::sync(const std::vector<int>& ids, const std::vector<int>
     };
     std::vector<Sim> sim;
     for (auto& c : ck_) sim.push_back({c->pos, c->pinned, c->used, false});
-    const size_t each = m_.info().fixed_bytes, cap = std::max((size_t)(o_.ckpt_gb * 1e9), (size_t)std::max(0, o_.ckpt_min) * each);
+    const size_t each = m_.info().fixed_bytes, cap = ckpt_cap();
     uint64_t clk = clock_;
     for (auto& kv : mem) {
+      if (kv.second->pinned)  // (one pin: the new one releases the others, as add_checkpoint does)
+        for (auto& s : sim)
+          if (s.pos != kv.first) s.pinned = false;
       sim.push_back({kv.first, kv.second->pinned, ++clk, true});
       std::sort(sim.begin(), sim.end(), [](const Sim& a, const Sim& b) { return a.pos < b.pos; });
       while (sim.size() * each > cap && !sim.empty()) {
@@ -684,7 +707,11 @@ std::string PrefixCache::stats_json() const {
   s << "{\"requests\":" << n_req_ << ",\"reused_positions\":" << n_reused_ << ",\"computed_positions\":" << n_computed_ << ",\"live\":" << live_.size()
     << ",\"checkpoints\":[";
   for (size_t i = 0; i < ck_.size(); i++) s << (i ? "," : "") << ck_[i]->pos;
-  s << "],\"checkpoint_mb\":" << ck_.size() * m_.info().fixed_bytes / 1e6 << ",\"parked\":" << parked_.size() << ",\"parked_mb\":" << pb / 1e6
+  size_t npin = 0;
+  for (auto& c : ck_) npin += c->pinned;
+  s << "],\"checkpoint_mb\":" << ck_.size() * m_.info().fixed_bytes / 1e6 << ",\"checkpoint_budget_mb\":" << ckpt_cap() / 1e6
+    << ",\"pinned_checkpoints\":" << npin << ",\"pinned_mb\":" << npin * m_.info().fixed_bytes / 1e6 << ",\"pins_released\":" << n_pins_released_
+    << ",\"pins_over_budget\":" << n_pins_over_budget_ << ",\"parked\":" << parked_.size() << ",\"parked_mb\":" << pb / 1e6
     << ",\"parks\":" << n_parks_ << ",\"unparks\":" << n_unparks_ << ",\"disk_loads\":" << n_disk_loads_ << ",\"disk_writes\":" << n_disk_writes_
     << ",\"ahead\":{\"runs\":" << n_ahead_ << ",\"positions\":" << n_ahead_pos_ << ",\"hits\":" << n_ahead_hits_ << ",\"parks\":" << n_ahead_parks_
     << ",\"pending_len\":" << ahead_ids_.size() << "}}";

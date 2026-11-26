@@ -102,8 +102,11 @@ class PrefixCache {
   uint64_t clock_ = 0;
   // counters
   uint64_t n_req_ = 0, n_reused_ = 0, n_computed_ = 0, n_parks_ = 0, n_unparks_ = 0, n_disk_loads_ = 0, n_disk_writes_ = 0;
+  uint64_t pin_clock_ = 0, n_pins_released_ = 0, n_pins_over_budget_ = 0;
   void checkpoint(int p, bool pinned);
   void add_checkpoint(std::unique_ptr<Ckpt> c);
+  void one_pin();          // at most one pinned checkpoint: the newest pin is kept, older pins are released
+  size_t ckpt_cap() const;  // the checkpoints' memory budget: max(ckpt_gb, ckpt_min fixed states)
   std::string disk_path(const std::vector<int>& ids, int p, bool pin = false) const;
   std::string disk_existing(const std::vector<int>& ids, int p) const;  // either name, "" if none
   void begin_disk(const std::vector<int>& ids, int p, int start);

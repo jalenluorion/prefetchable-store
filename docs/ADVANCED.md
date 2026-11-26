@@ -37,6 +37,12 @@ resolve to, as JSON, without loading the model.
   `--disk-gb`, `--disk-every`, `--preload`), idle-time prefill (`--ahead-span`, `--ahead-park`; the front end's
   `--ahead 0|1`), the saved hot set (`--hotset F|none`), the memory watcher (`--mem-watch`, `--mem-low-pct`,
   `--mem-high-pct`, `--mem-grow-after-s`, `--mem-retry-s`, `--cache-min-gb`, `--headroom-gb`) (dmserve).
+  A request's marks (dmserve) or dm_sync's (the C API) are the positions where its messages end; the first one at or
+  past `disk_min` is taken as the system prompt's boundary, and its checkpoint is pinned in memory (never evicted)
+  and, with a disk folder, written to disk. One checkpoint is pinned at a time: a request whose first mark moves (a typing position, say)
+  pins its own and releases the previous one, which then counts against `--ckpt-gb` like any other. The session's
+  statistics (dmserve's request log `session`, dm_stats_json's `prefix_cache`) report `pinned_checkpoints`,
+  `pinned_mb`, `pins_released`, `pins_over_budget` and `checkpoint_mb` against `checkpoint_budget_mb`.
 - **Draft and verify** (greedy and sampled; the tokens are plain decoding's; see Drafting below): `--draft lookup|fixed|head|both`,
   `--draft-max`, `--draft-thr`, `--head-backoff`, `--early`, `--verify-names`, `--skeleton`, `--probe-every`,
   `--copy-free`, `--draft-cost`, `--verify-old` (the previous verify pass, for A/B measurements).

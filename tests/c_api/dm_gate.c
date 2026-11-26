@@ -40,6 +40,11 @@
  * same prompt again R - 1 times in the same engine (dm_sync of the prompt, then n tokens), each compared with the first
  * generation's ids, its tokens per call and "draft" block under "repeats" (a regenerated reply: the lookup drafts copy
  * the session's earlier one).
+ *
+ * --moving-marks N (not with --arms): N dm_syncs of a growing prefix of the prompt (8 ids apart, ending at its end), each
+ * with its own end as the first mark (a caller passing its typing position first), and --json F gets every call's
+ * dm_stats_json under "moving" (prefix_cache: pinned_checkpoints, checkpoint_mb, checkpoint_budget_mb); --ckpt-gb G sets
+ * the open options' ckpt_gb.
  */
 #include <dirent.h>
 #include <fcntl.h>
@@ -382,6 +387,8 @@ int main(int argc, char** argv) {
   int draft_max = 0;                           /* --draft-max N (run:draft-max=N) */
   double drive_gbs = 0;                        /* --drive-gbs X (run:drive-gbs=X) */
   int repeat = 1;                              /* --repeat R */
+  int moving = 0;                              /* --moving-marks N */
+  double ckpt_gb = 0;                          /* --ckpt-gb G */
   dm_sampler_default(&g_s);
   for (int i = 1; i < argc; i++)  /* --gpu-check [SECONDS]: the GPU kernels' self-test (no model), then exit */
     if (!strcmp(argv[i], "--gpu-check")) {
@@ -450,6 +457,8 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--skeleton")) skeleton = v, i++;
     else if (!strcmp(k, "--drive-gbs")) drive_gbs = atof(v), i++;
     else if (!strcmp(k, "--repeat")) repeat = atoi(v), i++;
+    else if (!strcmp(k, "--moving-marks")) moving = atoi(v), i++;
+    else if (!strcmp(k, "--ckpt-gb")) ckpt_gb = atof(v), i++;
     else {
       fprintf(stderr, "unknown flag %s\n", k);
       return 2;
@@ -528,6 +537,7 @@ int main(int argc, char** argv) {
   o.prefill_gpu_min_wave = gpu_wave;
   o.prefill_threads = prefill_threads;
   o.file_evict_hint = file_hint;
+  if (ckpt_gb > 0) o.ckpt_gb = ckpt_gb;
   if (arms) {  /* the arms in one process (header comment) */
     FILE* jf = json ? fopen(json, "w") : NULL;
     /* the ids compared within each mode: the first arm of a mode is that mode's reference */
@@ -607,6 +617,23 @@ int main(int argc, char** argv) {
           inf.routers[0] ? inf.routers : "none", load_ms / 1e3);
   float* lg = malloc(sizeof(float) * inf.vocab);
   if (g_nfrag) dm_set_draft_fragments(e, g_frag, g_flen, g_nfrag);
+  if (moving > 0) {  /* a first mark that moves with every call (header comment) */
+    FILE* jf = json ? fopen(json, "w") : NULL;
+    if (jf) fprintf(jf, "{\"moving\":[");
+    int rc = DM_OK, done = 0;
+    for (int i = 0; i < moving && rc == DM_OK; i++) {
+      const int len = np - (moving - 1 - i) * 8;
+      if (len < 1) continue;
+      const int32_t mk = len;
+      dm_sync_result sr;
+      rc = dm_sync(e, ids, len, &mk, 1, lg, NULL, NULL, &sr);
+      if (jf) fprintf(jf, "%s%s", done++ ? "," : "", dm_stats_json(e));
+    }
+    if (jf) fprintf(jf, "]}\n"), fclose(jf);
+    fprintf(stderr, "moving marks: %d syncs, rc %d\n", done, rc);
+    dm_close(e);
+    return rc == DM_OK ? 0 : 1;
+  }
   int cancel_ok = -1;
   if (cancel_test) {  // stop a cold prefill of the prompt 300 ms in; the state must be consistent
     pthread_t th;

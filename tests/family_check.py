@@ -217,8 +217,21 @@ if wanted("checkpoint"):
         for pc in ("1", "64"):
             j = dmeng("--prompt-file", os.path.join(T, "ids1100.txt"), "--n", "24", "--state-check", "--prefill-chunk", pc, "--cache-gb", f"{ALL_GB:.6f}")
             sc.append(j.get("state_check", {}).get("same_ids") is True)
-        ok = bool(js["passed"]) and all(sc)
-        verdict("checkpoint", "PASS" if ok else "FAIL", f"dmserve --check-ckpt {'passed' if js['passed'] else 'FAILED'} ({rows}); dmeng --state-check same ids: {sc}")
+        # a caller whose first mark moves with every call (a typing position): through the C API, 10 syncs of a growing
+        # prefix, each marked first at its own end; one pinned checkpoint at a time (each new pin releases the last) and
+        # the checkpoints' memory within the budget (ckpt_gb tiny: the budget is ckpt_min fixed states)
+        jm = os.path.join(T, "moving_marks.json")
+        r = run([DMGATE, "--model", M, "--profile", "none", "--prompt-ids", os.path.join(T, "ids1100.txt"), "--moving-marks", "10", "--ckpt-gb", "1e-9",
+                 "--cache-gb", f"{ALL_GB:.6f}", "--mem", "plain", "--ctx", "2048", "--threads", "2", "--json", jm])
+        mv = [x["prefix_cache"] for x in json.load(open(jm))["moving"]] if r.returncode == 0 else []
+        pins = [x["pinned_checkpoints"] for x in mv]
+        within = all(x["checkpoint_mb"] <= x["checkpoint_budget_mb"] + 1e-9 for x in mv)
+        moving_ok = len(mv) == 10 and pins == [1] * 10 and within and mv[-1]["pins_released"] == 9
+        mrow = (f"moving first mark through the C API: pinned {pins[-1] if pins else '-'} after {len(mv)} syncs (max {max(pins) if pins else '-'}), "
+                f"released {mv[-1]['pins_released'] if mv else '-'}, checkpoints {mv[-1]['checkpoint_mb'] if mv else '-'} of "
+                f"{mv[-1]['checkpoint_budget_mb'] if mv else '-'} MB" if mv else f"moving first mark: {r.stderr[-200:]}")
+        ok = bool(js["passed"]) and all(sc) and moving_ok
+        verdict("checkpoint", "PASS" if ok else "FAIL", f"dmserve --check-ckpt {'passed' if js['passed'] else 'FAILED'} ({rows}); dmeng --state-check same ids: {sc}; {mrow}")
     except Exception as e:
         verdict("checkpoint", "FAIL", str(e)[-400:])
 
