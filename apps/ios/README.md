@@ -115,11 +115,6 @@ files (off by default) keeps recently used parts of the model in memory the syst
 storage; it pauses for the rest of the session after a memory warning. **Copy diagnostics** in the same
 screen copies the last reply's numbers and the engine's settings as text.
 
-**Spare memory.** On a phone with at least 11 GB of memory, Settings › Diagnostics › Use spare memory for the model's
-files (off by default) keeps recently used parts of the model in memory the system has spare, so fewer are read from
-storage; it pauses for the rest of the session after a memory warning. **Copy diagnostics** in the same
-screen copies the last reply's numbers and the engine's settings as text.
-
 **The other model.** Settings › Model files shows one model's files at a time: choose the other model in its picker
 and tap **Download**. Once both are on the phone, a **Model** picker appears in Settings; choosing a model closes the open
 one and opens the other with a new chat. A chat made with one model opens read-only while the other is selected.
