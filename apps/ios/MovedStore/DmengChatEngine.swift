@@ -148,6 +148,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     private var observers: [NSObjectProtocol] = []
     /// The model this engine opened (nil before the first load and after unload).
     private(set) var loadedKind: ModelKind?
+    /// The engine's settings after precedence, read once at open (dm_stats_json "resolved"): the Diagnostics rows.
+    private var resolvedAtOpen: [String: Any] = [:]
     var prefixCacheEnabled = true  // the engine's prefix cache is always on (in memory; disk for the system prompt)
 
     var thinking: Bool {
@@ -166,13 +168,31 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                                      ("in-memory weights", "\(DmengLaunch.residentBits(dir: DmengLaunch.modelDir.path))-bit"),
                                      ("model dir", DmengLaunch.modelDir.path)]
         if let m {
+            // every engine row from what the engine RESOLVED at open (dm_stats_json "resolved"), never from the app's own
+            // guess of the profile, so this screen cannot disagree with the engine
             let i = m.info
-            let mode = ["plain", "mlock", "purgeable", "file"][Int(max(0, min(3, i.memory_mode)))]
+            let r = lock.withLock { resolvedAtOpen }
+            func d(_ k: String) -> [String: Any] { r[k] as? [String: Any] ?? [:] }
+            func num(_ x: Any?) -> Double { (x as? NSNumber)?.doubleValue ?? 0 }
+            func file(_ x: Any?) -> String { ((x as? String) ?? "").isEmpty ? "none" : (((x as? String) ?? "") as NSString).lastPathComponent }
+            let mem = ["plain", "mlock", "purgeable", "file"][Int(max(0, min(3, i.memory_mode)))]
             let io = DmengLaunch.isPhone ? "below the app's" : "the app's"
-            let ra = DmengLaunch.kind == .qwen36 && DmengLaunch.engineMode == nil ? 8 : 0
-            s += [("threads", "\(i.threads) compute, \(i.readers) readers (disk I/O: \(io)), run-ahead \(ra > 0 ? "\(ra) names" : "off")"),
-                  ("expert cache", String(format: "%@, %.2f GB budget", mode, Double(i.cache_bytes) / 1e9)),
-                  ("routers", m.routersFile.isEmpty ? "none (cache only)" : "\((m.routersFile as NSString).lastPathComponent), \(i.router_m) named per step"),
+            let nm = d("names"), ra = d("run_ahead"), gpu = d("prefill_gpu"), bg = d("background")
+            let names = (nm["rule"] as? String) == "confidence"
+                ? String(format: "confidence rule: p >= %.2f over the top %d", num(nm["tau"]), Int(num(nm["candidates"])))
+                : "top \(Int(num(nm["m"])))"
+            let picks = Int(num(ra["picks"]))
+            s += [("engine mode", (r["mode"] as? String) ?? "?"),
+                  ("threads", "\(i.threads) compute, \(Int(num(r["readers"]))) readers (disk I/O: \(io))"),
+                  ("run-ahead", picks > 0 ? String(format: "%d names, depth %d, budget %.2f x compute", picks, Int(num(ra["depth"])), num(ra["budget"])) : "off"),
+                  ("expert cache", String(format: "%@, %.2f GB (resolved %.2f GB), eviction %@%@", mem, Double(i.cache_bytes) / 1e9, num(r["cache_gb"]),
+                                          (r["eviction"] as? String) ?? "?", ((r["layer_caps"] as? String) ?? "").isEmpty ? "" : ", caps \((r["layer_caps"] as? String)!)")),
+                  ("routers", "\(file(r["routers"])), \(names)"),
+                  ("cross-token routers", file(r["cross_token"]) == "none" ? "none" : String(format: "%@ (tau %.2f), priority reads %@", file(r["cross_token"]),
+                                                                                             num(r["cross_token_tau"]), num(r["priority_reads"]) > 0 ? "on" : "off")),
+                  ("prompt GPU share", num(gpu["projections"]) > 0 || num(gpu["experts"]) > 0
+                      ? String(format: "projections %.2f, experts %.2f", num(gpu["projections"]), num(gpu["experts"])) : "off"),
+                  ("background reads", Int(num(bg["ranks"])) > 0 ? "ranks to \(Int(num(bg["ranks"])))" : "off"),
                   ("context", "\(i.max_ctx) positions")]
         }
         s += [("sampling", GenSettings.current(defaults: lock.withLock { codec }?.generationDefaults ?? .modelDefault).label),
@@ -361,6 +381,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         // the settings the engine applied after precedence (explicit option > profile > manifest > built-in)
         let st = m.statsJSON()
         if let r = st.range(of: "\"resolved\":") { log("DMENG RESOLVED " + String(st[r.upperBound...].dropLast())) }
+        let res = ((try? JSONSerialization.jsonObject(with: Data(st.utf8))) as? [String: Any])?["resolved"] as? [String: Any] ?? [:]
+        lock.withLock { resolvedAtOpen = res }
         progress("ready: " + info.detail)
         observeMemory()
     }
