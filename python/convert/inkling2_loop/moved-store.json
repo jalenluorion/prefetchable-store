@@ -1894,7 +1894,9 @@
   "join": 0.25,
   "gpu_min": 64,
   "short_names": "router",
-  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, else (a span of one sub-chunk) its released router's picks on this application's MoE inputs (short_names, as the 35B and Flash-Next), the last span joined under a quarter span, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256); the experts all at once once landed (no waves)"
+  "scratch_mb": 768,
+  "lend": 1,
+  "notes": "the batched prompt path (dmeng/prefill.h): application-major spans of 8192 in sub-chunks of 256 (at most 512), the next application named whole in spans of several sub-chunks, else (a span of one sub-chunk) its released router's picks on this application's MoE inputs (short_names, as the 35B and Flash-Next), the last span joined under a quarter span, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256); the experts all at once once landed (no waves); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next"
  },
  "drafting": {
   "cost_prior": {

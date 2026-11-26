@@ -121,6 +121,40 @@ bool prefill_declared(const std::vector<std::pair<std::string, std::string>>& kv
   return true;
 }
 
+PromptPlan prompt_plan(const PrefillOpts& o, int n, const PromptBytes& b) {
+  PromptPlan p;
+  const double B = o.scratch_mb * 1e6;
+  const bool bound = B > 0;
+  n = std::max(1, n);
+  const int sub_cap = bound && b.sub > 0 ? std::max(64, (int)(B / 4 / b.sub) / 64 * 64) : INT32_MAX;
+  p.chunk = std::max(1, std::min(o.chunk, sub_cap));
+  if (b.moe > 0) p.moe_block = std::min(n, o.moe_block > 0 ? o.moe_block : bound ? std::max(256, (int)(B / 4 / b.moe)) : n);
+  const double rest = B - p.chunk * b.sub - p.moe_block * b.moe;
+  const int span_cap = !bound || b.span <= 0 ? INT32_MAX : std::max(p.chunk, (int)std::min(2e9, rest / b.span));
+  int span = std::min(std::max(p.chunk, o.span), span_cap);
+  if (n > span) {
+    int k = (n + span - 1) / span;
+    // a short rest joins the span before (prefill_spans' rule) when the joined spans fit the bound
+    const int tail = n - (k - 1) * span;
+    if (k > 1 && tail < std::max(64, (int)(o.join * span)) && (n + k - 2) / (k - 1) <= span_cap) k--;
+    span = (n + k - 1) / k;  // equal spans
+  }
+  p.span = span;
+  if (o.lend && o.release) {
+    const int sl = std::min(n, span);
+    const double est = sl * b.span + std::min(p.chunk, sl) * b.sub + std::min(sl, p.moe_block) * b.moe + (sl > p.chunk ? b.snap : 0.0) - b.held;
+    p.lend = (int64_t)std::max(0.0, est);
+  }
+  return p;
+}
+
+PromptLoan::PromptLoan(Core& core, int64_t b) : c(core), bytes(b) {
+  if (bytes > 0) c.cache.lend(bytes);
+}
+PromptLoan::~PromptLoan() {
+  if (bytes > 0) c.cache.lend(0);
+}
+
 bool prefill_spans(Core& core, int n, const std::vector<int>& capture, const std::atomic<bool>* cancel, const PrefillOpts& o,
                    const std::function<bool(int, int, bool, const std::vector<int>&)>& span, PrefillStats* st, int* spans_out) {
   struct NsOff {  // fast mode's rule off for the prompt (the batched pass is lossless; its state is exact mode's), except a

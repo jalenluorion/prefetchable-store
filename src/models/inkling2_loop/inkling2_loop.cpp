@@ -21,6 +21,7 @@
 
 #include "dmeng/screen_head.h"
 #include "dmeng/model.h"
+#include "dmeng/pagevec.h"
 #include "dmeng/prefill.h"
 #include "dmeng/sampler.h"
 #include "ink_draft.h"
@@ -262,7 +263,7 @@ struct Inkling : Model {
   std::vector<std::unique_ptr<PP>> pp;
   // per span position: the residual, its value at the loop's start, the block states, the message sources (the previous
   // pass's blocks after its first, then its bank); the block count is the same for every position
-  std::vector<float> sp_h, sp_hpre, sp_blk, sp_msrc;
+  PageVec<float> sp_h, sp_hpre, sp_blk, sp_msrc;  // (PageVec: given back to the system when freed, prefill_release)
   int sp_n = 0, sp_nblk = 0, NBMAX = 0, NMS = 0;
   float* sph(int i) { return sp_h.data() + (size_t)i * c.H; }
   float* spblk(int i) { return sp_blk.data() + (size_t)i * NBMAX * c.H; }
@@ -274,7 +275,8 @@ struct Inkling : Model {
   GpuShare gpu;
   GpuSplitAcct gacct;
   long n_chunks = 0;
-  std::vector<uint8_t> span_snap, ring_tmp;  // the fixed state at a span's start (a cancel inside it); a ring slice
+  PageVec<uint8_t> span_snap;
+  std::vector<uint8_t> ring_tmp;  // the fixed state at a span's start (a cancel inside it); a ring slice
   struct SpanRun {                            // what a prefill span reports and watches
     const std::vector<int>* capture = nullptr;  // positions relative to the span start, in (0, n], whose state goes to sink
     const LM::StateSink* sink = nullptr;
@@ -285,6 +287,20 @@ struct Inkling : Model {
   void chunk_alloc(int n);
   void span_alloc(int n);
   void release_scratch();
+  void span_blocks();  // NBMAX, NMS
+  // the prompt's bytes per position (prompt_plan): a sub-chunk's scratch (chunk_alloc's per-position buffers and the
+  // packed inputs), the span's arrays (span_alloc's, the taps); what the scratch holds now
+  double sub_bytes_per_pos() const {
+    const int QD = c.NH * c.HD, mk = std::max({c.H, QD, 2 * c.H});
+    return 4.0 * (28.0 * c.H + 4.0 * QD + 256) + 4.0 * xq_bytes(mk) + 3.0 * xq_bytes(c.H) + xq_bytes(QD);
+  }
+  double span_bytes_per_pos() const { return 4.0 * c.H * (2 + NBMAX + NMS) + (dh ? 16.0 * c.H : 0.0); }
+  double scratch_held() const {
+    double b = 0;
+    for (auto& p : pp) b += 4.0 * (p->tmp.capacity() + p->m4.capacity()) + 4.0 * p->xa.cap;
+    b += 4.0 * ((double)sp_h.capacity() + sp_hpre.capacity() + sp_blk.capacity() + sp_msrc.capacity() + ctaps.capacity()) + span_snap.capacity();
+    return b + xqb_a.cap + xqb_b.cap + xqb_c.cap + xqb_e.cap;
+  }
   long n_scratch_releases = 0;
   void layer_chunk(int v, int i0, int n, bool msgs);
   // false: cancelled inside the span (the state is back at its start)
@@ -654,7 +670,7 @@ ModelMem Inkling::mem(const State& s0) const {
   for (auto& st : s.vs)
     if (!st.ring) m.kv_reserved += 2 * st.bytes;
   m.recurrent = fixed_bytes(s0);  // the convolution states and the sliding layers' rings
-  auto add = [&](const std::vector<float>& v) { m.prefill_scratch += v.capacity() * sizeof(float); };
+  auto add = [&](const auto& v) { m.prefill_scratch += v.capacity() * sizeof(v[0]); };
   for (auto& p : pp) {
     add(p->tmp); add(p->m4);
   }
@@ -1533,10 +1549,11 @@ void Inkling::chunk_alloc(int n) {
 // real model), the sub-chunk scratch past what a verify pass uses, the packed inputs and the draft-head taps. The next
 // prefill or pass allocates what it needs again; nothing computed depends on it.
 void Inkling::release_scratch() {
-  std::vector<float>().swap(sp_h);
-  std::vector<float>().swap(sp_hpre);
-  std::vector<float>().swap(sp_blk);
-  std::vector<float>().swap(sp_msrc);
+  PageVec<float>().swap(sp_h);
+  PageVec<float>().swap(sp_hpre);
+  PageVec<float>().swap(sp_blk);
+  PageVec<float>().swap(sp_msrc);
+  PageVec<uint8_t>().swap(span_snap);
   std::vector<float>().swap(ctaps);
   sp_n = 0;
   if (pp.size() > (size_t)RING_SLACK + 1) pp.resize(RING_SLACK + 1);
@@ -1548,7 +1565,7 @@ void Inkling::release_scratch() {
   n_scratch_releases++;
 }
 
-void Inkling::span_alloc(int n) {
+void Inkling::span_blocks() {
   if (!NBMAX) {
     for (int L = 0; L < c.NL; L++) NBMAX += L % c.BLOCK == 0;
     for (int L = c.CS; L < c.CE; L++) NMS += L % c.BLOCK == 0;  // the pass's blocks after its first, plus the bank
@@ -1557,6 +1574,10 @@ void Inkling::span_alloc(int n) {
       abort();
     }
   }
+}
+
+void Inkling::span_alloc(int n) {
+  span_blocks();
   if (n <= sp_n) return;
   sp_h.resize((size_t)n * c.H);
   sp_hpre.resize((size_t)n * c.H);
@@ -2252,6 +2273,7 @@ bool Inkling::forward_chunk(const int32_t* ids, int n, bool want_last, bool all_
   for (int v = 0; v < c.NV; v++) {
     const int L = c.visits[v].first, pass = c.visits[v].second;
     const bool loop_start = c.core(L) && L == c.CS;
+    if (multi) core->cache.lend_hold();  // (a prompt's loan: what the GPU's first use of the slab faulted back in goes back again)
     if (loop_start && pass > 0) {  // the previous pass's message sources, then the loop starts again from its input
       auto tm = clk::now();
       stage_mark(ST_SPAN);
@@ -2476,9 +2498,22 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
   const GpuSplitAcct ga0 = gacct;
   const double me_w0 = core->moe_gpu_wait_ms, me_s0 = core->moe_gpu_stage_ms, me_m0 = core->moe_gpu_macs;
   const uint64_t me_n0 = core->moe_gpu_sets, me_f0 = core->moe_gpu_failed;
-  const int sub = std::min(po.chunk, CHUNK_MAX), span = std::max(sub, po.span);
+  // the prompt's memory (prompt_plan, every family's rule): the sub-chunk's buffers, the span's arrays (residual, its
+  // value at the loop's start, block states, message sources: 0.74 GB at 8K positions), the cancel snapshot
+  span_blocks();
+  PromptBytes pb;
+  pb.sub = sub_bytes_per_pos();
+  pb.span = span_bytes_per_pos();
+  pb.snap = cancel ? (double)fixed_bytes(*S) : 0.0;
+  pb.held = scratch_held();
+  PrefillOpts oc = po;
+  oc.chunk = std::min(po.chunk, CHUNK_MAX);
+  const PromptPlan plan = prompt_plan(oc, n, pb);
+  const int sub = plan.chunk, span = std::max(sub, plan.span);
   PrefillOpts o = po;
   o.span = span;
+  if (plan.lend && gpu) gpu->touch();  // (the GPU's first use of its wrapped buffers before the loan)
+  PromptLoan loan(*core, plan.lend);
   int spans = 0;
   const bool ok = prefill_spans(*core, n, capture, cancel, o, [&](int done, int m, bool last, const std::vector<int>& cap_rel) {
     if (m == 1) {
@@ -2507,7 +2542,7 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
     // bytes per prompt position: expert records read from the store, expert records and resident matrices the kernels
     // went through (once per sub-chunk each)
     const double np_ = std::max(1, done);
-    o << "{\"chunk\":" << sub << ",\"span\":" << span << ",\"spans\":" << spans << ",\"hold_releases\":" << core->n_hold_release << ",\"union_batches\":" << core->n_union_batches
+    o << "{\"chunk\":" << sub << ",\"chunk_asked\":" << po.chunk << ",\"span\":" << span << ",\"span_asked\":" << po.span << ",\"lent_mb\":" << plan.lend / 1e6 << ",\"spans\":" << spans << ",\"hold_releases\":" << core->n_hold_release << ",\"union_batches\":" << core->n_union_batches
       << ",\"mb_read\":" << st->mb_read << ",\"expert_mb_touched\":" << (T->bytes_exp - be0) / MB
       << ",\"resident_mb_touched\":" << (T->bytes_res - br0) / MB << ",\"read_mb_per_pos\":" << st->mb_read / np_
       << ",\"expert_touched_mb_per_pos\":" << (T->bytes_exp - be0) / MB / np_

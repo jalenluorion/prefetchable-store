@@ -1917,7 +1917,9 @@
   "gpu_min_wave": 128,
   "pack_min": 1,
   "dn_rows": 64,
-  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunk, span, names of the next layer (whole from 1000 positions, else its released router's picks), the last span joined under 64 positions, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256), the experts in waves as they land (a wave on the GPU from 128 rows), every expert and the shared expert through the packed kernels, down projections in 64-row jobs: the values this model's prefill was written and measured with (results/ios/p3-gpu/GPU-PREFILL.md)"
+  "scratch_mb": 768,
+  "lend": 1,
+  "notes": "the batched prompt path (dmeng/prefill.h): sub-chunk, span, names of the next layer (whole from 1000 positions, else its released router's picks), the last span joined under 64 positions, the GPU's share from sub-chunks of 64 (as Flash-Next; measured on a base M4 before the shared prompt path: 192-token prompts 6.0 -> 4.3 s for the 35B, 9.7 -> 8.3 s for Inkling against 256), the experts in waves as they land (a wave on the GPU from 128 rows), every expert and the shared expert through the packed kernels, down projections in 64-row jobs: the values this model's prefill was written and measured with (results/ios/p3-gpu/GPU-PREFILL.md); the prompt's memory as every family's (prompt_plan): a scratch bound of 768 MB (scratch_mb: the sub-chunk at most a quarter, the span the rest, equal spans) and the transient buffers lent by the cache with prefill_release (lend), as Flash-Next"
  },
  "drafting": {
   "cost_prior": {
