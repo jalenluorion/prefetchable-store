@@ -117,8 +117,9 @@ early address (lossless: names only schedule reads; the released router decides)
   --evict auto|freq|pred|hazard  --rd-prio 0|1  --rd-excl 0|1  --spec-max N  --cancel 0|1
   --bg-ranks D --bg-gate G --bg-split P --bg-queue Q --bg-max N   background reads for the drive's idle time: the routers' ranks
                          m+1..D of the steps already named, while no urgent read and at most G speculative ones are in
-                         flight, in P pieces (N in flight), at most Q records queued (default: the profile's
-                         "background" entry; no published profile declares one, so off; --bg-ranks 0 = off)
+                         flight, in P pieces (N in flight), at most Q records queued (default: the profile's `background`,
+                         which no published profile declares: off; split 2, queue 2, max 1; under the confidence names
+                         rule, the top D's ranks it left unnamed)
   --name-gate 0|1        1: a name that needs a read is not issued while urgent reads wait for a reader (default 0)
                          auto (default): the hazard keep-score (the phone's online per-layer table, results/ios/evict/
                          EVICT.md), with uniform per-layer caps while the cache holds fewer than 4 records per layer per
