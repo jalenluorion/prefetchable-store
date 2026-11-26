@@ -874,7 +874,8 @@ int main(int argc, char** argv) {
        << ",\"pf_evicted_unused_per_token\":" << per(CS.n_pf_unused_evicted) << ",\"pf_stolen_per_token\":" << per(CS.n_pf_stolen)
        << ",\"purged\":" << CS.n_purged << ",\"held_at_end\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.held(p);
-    js << "],\"held_gb\":" << C.cache.held_bytes() / 1e9 << ",\"mb_preads_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6);
+    js << "],\"held_gb\":" << C.cache.held_bytes() / 1e9 << ",\"mb_preads_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6)
+       << ",\"pageins\":" << Cache::task_pageins() - pgin0;  // the process's page-ins in the loop (the readers never page in)
     if (C.cache.mem == Mem::FILE) {
       js << ",\"file\":{\"check\":" << C.cache.file_check << ",\"evict_hint\":" << C.cache.file_evict_hint << ",\"skip_resident\":" << RD.file_skip_resident
          << ",\"prefault\":" << RD.file_prefault << ",\"checks_per_token\":" << per(CS.file_checks) << ",\"file_refaults\":" << CS.file_refaults
