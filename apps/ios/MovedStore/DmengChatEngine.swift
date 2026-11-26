@@ -395,11 +395,7 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         o.routersId = q ? DmengLaunch.defaultRouters : nil
         o.routerM = 0
         o.threads = 0
-        o.readers = 0
-        #if os(iOS) && !targetEnvironment(macCatalyst)
-        // the phone's drive (engine's random record pattern, queue kept full): 4 readers 0.745 GB/s, 8 readers 0.84
-        o.readers = 8
-        #endif
+        o.readers = 0  // the profile's: phone and phone-small declare 8 (4 readers 0.745 GB/s, 8 readers 0.84 on the phone's drive)
         // the derived files: the Hub's layout (derived/), else .dmeng/
         // the manifest the engine opens with (ManifestChoice): the release line's bundled one, or the folder's own
         let pick = ManifestChoice.choose(kind: kind, dir: dir, profile: DmengLaunch.profile)
