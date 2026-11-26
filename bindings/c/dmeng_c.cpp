@@ -762,6 +762,7 @@ int dm_counters(dm_engine* e, dm_counters_t* out) {
   out->read_busy_ns = e->C->cache.rd.busy_wall();
   out->spare_memory = !e->C->cache.file_under ? 0 : e->C->cache.spare_paused.load() ? 2 : 1;
   out->step_ns = e->step_ns;
+  out->bytes_named_unused = e->C->cache.st.n_pf_unused_evicted * (uint64_t)e->C->cache.P[0].rec;
   return DM_OK;
 }
 
@@ -769,6 +770,11 @@ int dm_spare_memory_pause(dm_engine* e) {
   if (!e || !e->C->cache.file_under) return DM_EINVAL;
   e->C->cache.spare_pause();
   return DM_OK;
+}
+
+int64_t dm_store_resident_bytes(dm_engine* e) {
+  if (!e || e->C->cache.fmap.empty()) return -1;
+  return (int64_t)e->C->cache.file_resident_bytes();
 }
 
 const char* dm_stats_json(dm_engine* e) {

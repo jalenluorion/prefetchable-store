@@ -255,6 +255,8 @@ typedef struct dm_counters_t {
   uint64_t read_busy_ns;                /* wall time with at least one expert read in flight (drive rate = bytes_read / it) */
   int spare_memory;                     /* the file cache under the slab: 0 off, 1 on, 2 paused (dm_spare_memory_pause) */
   uint64_t step_ns;                     /* wall time inside dm_step (steady clock), summed: decode_steps / it = the rate */
+  uint64_t bytes_named_unused;          /* named records evicted before any use (records x the first pool's record bytes):
+                                           reads that served nothing */
 } dm_counters_t;
 int dm_counters(dm_engine* e, dm_counters_t* out);
 
@@ -262,6 +264,11 @@ int dm_counters(dm_engine* e, dm_counters_t* out);
  * model_options "run:spare-mem=0|1"): stop adding expert pages to the file cache for the rest of the session (a memory
  * warning); reads go to the drive as without it. Any thread; idempotent. DM_EINVAL if the tier is not on. */
 int dm_spare_memory_pause(dm_engine* e);
+
+/* The store's pages the OS file cache holds now (bytes, mincore over the mapped store files): DM_MEM_FILE or spare
+ * memory under the slab (paused included); -1 when the store is not mapped (a locked slab alone reads past the file
+ * cache). Any thread. */
+int64_t dm_store_resident_bytes(dm_engine* e);
 
 /* JSON of what ran since the last call (decode ms per stage, hit rate, MB read, prefix-cache counters, memory: process
  * footprint, the policy's held GB and, in DM_MEM_FILE, the store pages resident in the file cache by mincore). The

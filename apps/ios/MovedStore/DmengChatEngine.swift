@@ -175,7 +175,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
     }
 
     /// Rows for one reply: the counters at the decode's start and end, its tokens and seconds.
-    static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, speed: GenSpeed) -> [(String, String)] {
+    /// `storeResident`: the model's files the system's file cache held at the end (nil: not tracked, spare memory off);
+    /// `bigMemory`: a phone where the spare-memory switch is offered (its rows show whether it is on or off).
+    static func replyRows(_ c0: dm_counters_t, _ c1: dm_counters_t, tokens: Int, speed: GenSpeed, storeResident: Int64? = nil,
+                          bigMemory: Bool = false) -> [(String, String)] {
         let seconds = speed.seconds
         let n = Double(max(1, tokens))
         let ms = 1000 * seconds / n
@@ -189,9 +192,13 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
             ("Speed", speed.detail),  // this round's; ChatModel.lastReplyRows shows the message's (GenSpeed)
             ("Read from storage", String(format: "%.1f MB per token", read / 1e6 / n)),
         ]
-        if c1.spare_memory != 0 {
+        if c1.spare_memory != 0 || bigMemory {
             r.append(("From spare memory", String(format: "%.1f MB per token", spare / 1e6 / n)))
+            r.append(("Model files held by the system", storeResident.map { String(format: "%.2f GB at the end of the reply", Double($0) / 1e9) }
+                      ?? "not tracked (spare memory off)"))
         }
+        r.append(("Read but never used", String(format: "%.1f MB per token (named ahead, dropped before use)",
+                                                Double(c1.bytes_named_unused &- c0.bytes_named_unused) / 1e6 / n)))
         r += [
             ("Waiting on storage", String(format: "%.0f ms per token (%.0f%% of each token)", wait, ms > 0 ? 100 * wait / ms : 0)),
             ("Experts found in memory", picks > 0 ? String(format: "%.1f%% of picks", 100 * Double(c1.hits &- c0.hits) / picks) : "-"),
@@ -881,7 +888,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                             heldExpertsMean: Double(cEnd.held_bytes) / rec, syncReads: Int(cEnd.misses &- c0.misses), split: split,
                             prefillStats: ["prefill_s": sr.msPrefill / 1000, "prefill_mb_read": sr.mbRead,
                                            "prefill_reused": Double(sr.reused), "prefill_computed": Double(sr.computed)])
-        let rows = Self.replyRows(c0, cEnd, tokens: new.count, speed: sp)
+        let rows = Self.replyRows(c0, cEnd, tokens: new.count, speed: sp, storeResident: m.storeResidentBytes,
+                                  bigMemory: DmengLaunch.spareMemoryOffered)
         lock.withLock { _last = d; _replyRows = rows }
         log("DMENG REPLY ids " + new.map(String.init).joined(separator: ","))
         if ink { log("DMENG REPLY raw " + (lead + c.decode(new)).debugDescription + " (stop: \(reason.rawValue)\(stopId.map { ", token \($0)" } ?? ""))") }
