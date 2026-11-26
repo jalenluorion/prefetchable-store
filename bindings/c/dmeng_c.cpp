@@ -227,7 +227,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.run_ahead_max != 0) F("--run-ahead-max", std::to_string(std::max(0, o.run_ahead_max)));
   if (o.run_ahead_sat_skip != 0) F("--run-ahead-sat-skip", o.run_ahead_sat_skip > 0 ? "1" : "0");
   if (o.readers > 0) F("--readers", std::to_string(o.readers));
-  // model_options entries "run:--FLAG=VALUE": any dmeng run flag (presets.h run_flag), read after the fields above (so a
+  // model_options entries "run:FLAG=VALUE" (or run:--FLAG=VALUE): any dmeng run flag (presets.h run_flag), read after the fields above (so a
   // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode fast-eps, --rd-prio)
   std::string model_opts;
   {
@@ -238,7 +238,9 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
       const std::string kv = mo.substr(i, j - i);
       if (kv.rfind("run:", 0) == 0) {
         const size_t q = kv.find('=');
-        F(kv.substr(4, q == std::string::npos ? std::string::npos : q - 4).c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
+        std::string flag = kv.substr(4, q == std::string::npos ? std::string::npos : q - 4);
+        if (flag.rfind("--", 0) != 0) flag = "--" + flag;  // run:bg-ranks=8 as run:--bg-ranks=8
+        F(flag.c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
       } else if (!kv.empty()) {
         model_opts += (model_opts.empty() ? "" : ";") + kv;
       }
