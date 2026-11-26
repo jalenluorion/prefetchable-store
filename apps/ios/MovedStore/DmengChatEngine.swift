@@ -675,7 +675,14 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let n = head.count + body.count - 1
         guard n > head.count else { return }
         var ids = Array((head + body).prefix(n))
-        var marks: [Int32] = [Int32(n)]
+        // the system boundary first, as the reply and the warm-up mark it: the prefix cache pins a sync's first mark (it
+        // is meant for the system boundary), so a type-ahead position given first was pinned, and every word's 63 MB
+        // checkpoint stayed in memory (7-9 of them, 0.53-0.59 GB after one typed message on the 35B: memory warnings
+        // that cut the expert cache). Given after the boundary, these are ordinary checkpoints the memory rule trims.
+        let hm = templateMessages(hist, mode: HistoryMode.current)
+        var marks: [Int32] = []
+        if hm.first?["role"] == "system", let sb = systemBoundary(c, system: hm[0], thinking: think)?.count, sb < n { marks.append(Int32(sb)) }
+        marks.append(Int32(n))
         if let full, let F = try? c.promptIds(messages: templateMessages(full, mode: HistoryMode.current), thinking: think),
            F.count > n, Array(F.prefix(n)) == ids {
             ids = F
