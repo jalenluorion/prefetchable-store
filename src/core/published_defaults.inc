@@ -52,12 +52,16 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   },
   "prefill": {
    "chunk": 256,
+   "dn_rows": 64,
    "gpu_min": 64,
+   "gpu_min_wave": 128,
    "join": 0.25,
    "lend": 1,
+   "pack_min": 1,
    "scratch_mb": 768,
    "short_names": "router",
    "span": 8192,
+   "waves": true,
    "whole_from": 0
   },
   "profiles": {
@@ -264,14 +268,18 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
   "prefill": {
    "apart": 1,
    "chunk": 256,
+   "dn_rows": 64,
    "drop_upto": 64,
    "fast": 1,
    "gpu_min": 64,
+   "gpu_min_wave": 128,
    "join": 0.25,
    "lend": 1,
+   "pack_min": 1,
    "scratch_mb": 768,
    "short_names": "router",
    "span": 32768,
+   "waves": true,
    "whole_from": 2048
   },
   "profiles": {
