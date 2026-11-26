@@ -6,7 +6,8 @@ The engine resolves a run from the folder's moved-store.json; a key the folder's
 with no `profiles`, a folder with no manifest at all run with --profile) is taken from the published manifest of the
 same family (python/convert/<family>/moved-store.json: the weight repo's as published), then from the engine's
 family-neutral built-in values (src/core/presets.cpp). So no per-family value is written in the engine's code: this file
-copies the declared keys (`modes`, `profiles` without their file lists, `defaults`, `drafting`) into a C++ string.
+copies the declared keys (`modes`, `profiles` without their file lists, a profile's own `modes` included, `defaults`,
+`drafting`) into a C++ string.
 --check: exit 1 if the include differs from what the manifests give (tests/tiny_all.sh runs it).
 """
 import json, os, sys
@@ -29,11 +30,24 @@ def strip_notes(x):
     return x
 
 
+def engines(modes):
+    """A `modes` block as the engine reads it: each mode's engine string (its descriptive fields are for the reader)."""
+    return {k: {"engine": v["engine"]} for k, v in (modes or {}).items() if "engine" in v}
+
+
+def profile(pv):
+    """A profile's run settings: its file lists dropped, its own `modes` (over the model-level ones) as engine strings."""
+    e = strip_notes({k: v for k, v in pv.items() if k not in DROP and k != "modes"})
+    if "modes" in pv:
+        e["modes"] = engines(pv["modes"])
+    return e
+
+
 out = {}
 for f in FAMILIES:
     m = json.load(open(os.path.join(HERE, f, "moved-store.json")))
-    e = {"modes": {k: {"engine": v["engine"]} for k, v in (m.get("modes") or {}).items() if "engine" in v},
-         "profiles": {p: strip_notes({k: v for k, v in pv.items() if k not in DROP}) for p, pv in (m.get("profiles") or {}).items()},
+    e = {"modes": engines(m.get("modes")),
+         "profiles": {p: profile(pv) for p, pv in (m.get("profiles") or {}).items()},
          "defaults": strip_notes({k: v for k, v in (m.get("defaults") or {}).items() if k not in ("experts",)})}
     if "prefill" in m:
         e["prefill"] = {k: v for k, v in m["prefill"].items() if k not in ("notes", "note", "measured")}

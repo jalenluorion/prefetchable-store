@@ -13,6 +13,10 @@ struct Preset {
   std::string family, profile, profile_why;
   std::string cache_dir;           // the engine's cache folder (DIR/.dmeng): prefix-cache disk copies, the saved hot set
   std::string mode, engine_mode;   // "exact" / "fast"; the engine's mode string ("lossless", "approx:drop")
+  // where engine_mode comes from: "modes.<mode>" (the model-level declaration: the folder's manifest, the published one,
+  // the built-in), "profiles.<profile>.modes.<mode>" (the profile's own declaration over it), "given" (an explicit
+  // engine mode string, --mode / the C API's mode, which no declaration replaces)
+  std::string engine_mode_from;
   std::string resident_id;         // resident_q8 | resident_q4
   std::string resident;            // the file when it is not the resolver's default (resident_q4); "" = default
   std::string cache = "auto";      // auto (from free memory, then memory pressure) | slab (sized at open, iOS)
@@ -102,7 +106,9 @@ std::string device_profile(int64_t avail_bytes, double min_gb, std::string& why)
 
 // Resolve the defaults of model folder `dir` for profile `profile_req` ("" / "auto" = the device's) and mode
 // `mode_req` ("" = the profile's; exact | fast | lossless | approx[:PRESET]). derived_dir: the engine's cache folder
-// ("" = DIR/.dmeng). Router files are found (or derived) as docs/MANIFEST-PRESETS.md says.
+// ("" = DIR/.dmeng). Router files are found (or derived) as docs/MANIFEST-PRESETS.md says. A mode's engine string is the
+// model-level modes.<mode>.engine, replaced by the profile's own profiles.<profile>.modes.<mode>.engine when it declares
+// one (Preset::engine_mode_from says which); a mode_req that names no declared mode is an engine string and is kept.
 bool resolve_preset(const std::string& dir, const std::string& profile_req, const std::string& mode_req, const std::string& derived_dir,
                     int64_t avail_bytes, Preset& p, std::string& err);
 

@@ -247,8 +247,9 @@ if wanted("server"):
         verdict("server", "FAIL", str(e)[-400:])
 
 # ---------------------------------------------------------------------------------------------- drafting
-def declared(name, drafts):
-    """The tiny folder (symlinks) with a manifest whose every profile declares `drafts` (the resolved-default path)."""
+def declared(name, drafts=None, edit=None):
+    """The tiny folder (symlinks) with a manifest whose every profile declares `drafts` (the resolved-default path), or
+    edited by `edit` (a function of the manifest)."""
     F = os.path.join(T, name)
     shutil.rmtree(F, ignore_errors=True)
     os.makedirs(F)
@@ -261,8 +262,11 @@ def declared(name, drafts):
         elif e != "moved-store.json":
             os.symlink(os.path.join(M, e), os.path.join(F, e))
     m2 = json.loads(json.dumps(man))
-    for pv in m2["profiles"].values():
-        pv["drafts"] = drafts
+    if drafts is not None:
+        for pv in m2["profiles"].values():
+            pv["drafts"] = drafts
+    if edit:
+        edit(m2)
     json.dump(m2, open(os.path.join(F, "moved-store.json"), "w"), indent=1)
     return F
 
@@ -482,6 +486,44 @@ if wanted("presets"):
             for fe, g in got.items():
                 if g != want:
                     bad.append(f"{prof} prefill {fe}: {g} != {want}")
+            ncell += 1
+        # a profile's own mode declaration (profiles.<p>.modes.fast) over the model-level modes.fast, in a temporary
+        # manifest: that profile resolves to its string, every other profile to the model-level one, in all three front
+        # ends ("preset": engine_mode, engine_mode_from; "resolved": mode); an explicit engine string is kept as given
+        OVER = "approx:drop:w=0.15:mass=0.15:late=-1"
+        op = "phone" if "phone" in man["profiles"] else next(iter(man["profiles"]))
+
+        def over(m2):
+            m2["profiles"][op]["modes"] = {"fast": {"definition": "the fast mode with this profile's own leave-out threshold", "engine": OVER,
+                                                    "read_if": {"missing_routing_weight_over": 0.15}, "calibration": {"measured": "(a test value)"}}}
+
+        FO = declared("pm", edit=over)
+        model_fast = man["modes"]["fast"]["engine"]
+
+        def preset_of(fe, prof, mode):
+            if os.path.exists(j):
+                os.remove(j)
+            if fe == "dmeng":
+                r = run([DMENG, "--model", FO, "--profile", prof, "--mode", mode, "--prompt-file", ip, "--n", "2", "--threads", "2", "--json", j])
+                d = json.load(open(j)) if r.returncode == 0 else None
+                return (d["preset"], d["resolved"]) if d else r.stderr[-200:]
+            if fe == "capi":
+                r = run([DMGATE, "--model", FO, "--profile", prof, "--mode", mode, "--prompt-ids", ip, "--n", "2", "--threads", "2", "--cache-gb", "auto", "--json", j])
+                d = json.load(open(j))["stats"] if r.returncode == 0 else None
+                return (d["policy"]["preset"], d["resolved"]) if d else r.stderr[-200:]
+            r = run([DMSERVE, "--model", FO, "--profile", prof, "--mode", mode, "--threads", "2"], inp="", timeout=120)
+            ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
+            d = json.loads(ready[0][6:]) if ready else None
+            return (d["preset"], d["resolved"]) if d else r.stderr[-200:]
+
+        cases = [(prof, "fast", (OVER, f"profiles.{op}.modes.fast") if prof == op else (model_fast, "modes.fast")) for prof in man["profiles"]]
+        cases.append((op, "approx:drop:w=0.2", ("approx:drop:w=0.2", "given")))  # an explicit engine string wins
+        for prof, mode, (s, src) in cases:
+            for fe in ("dmeng", "capi", "dmserve"):
+                g = preset_of(fe, prof, mode)
+                if not isinstance(g, tuple) or (g[0].get("engine_mode"), g[0].get("engine_mode_from"), g[1].get("mode")) != (s, src, s):
+                    got_s = g if not isinstance(g, tuple) else (g[0].get("engine_mode"), g[0].get("engine_mode_from"), g[1].get("mode"))
+                    bad.append(f"{prof} --mode {mode} with {op}'s own fast {fe}: {got_s} != {(s, src, s)}")
             ncell += 1
         detail = f"{ncell} cells x 3 front ends ({', '.join(man['profiles'])})"
         verdict("presets", "FAIL" if bad or cross else "PASS", detail + ("" if not bad else " | precedence: " + " || ".join(bad[:6]))
