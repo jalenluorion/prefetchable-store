@@ -5,6 +5,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
+#include <set>
 
 #include "files.h"
 
@@ -575,6 +577,14 @@ bool Manifest::check_derived(const Derived& d, const std::string& path, std::str
   const std::string base = path.substr(path.rfind('/') + 1), stamps = cache_dir() + "/checked", stamp = stamps + "/" + base + ".sha256";
   char want[256];
   snprintf(want, sizeof want, "%lld %lld %s", (long long)st.st_size, mt, d.sha256.c_str());
+  // checked before in this process (the stamp below could not be written, e.g. on a full drive): not hashed again
+  static std::mutex memo_mu;
+  static std::set<std::string> memo;
+  const std::string memo_key = path + "|" + want;
+  {
+    std::lock_guard<std::mutex> lk(memo_mu);
+    if (memo.count(memo_key)) return true;
+  }
   if (FILE* f = fopen(stamp.c_str(), "r")) {  // checked before, and the file has not changed since
     char got[256] = {0};
     const bool same = fgets(got, sizeof got, f) && std::string(got).rfind(want, 0) == 0;
@@ -589,10 +599,17 @@ bool Manifest::check_derived(const Derived& d, const std::string& path, std::str
   }
   mkdir(cache_dir().c_str(), 0755);
   mkdir(stamps.c_str(), 0755);
-  if (FILE* f = fopen(stamp.c_str(), "w")) {  // (a read-only folder: checked again next time)
-    fprintf(f, "%s\n", want);
-    fclose(f);
+  {
+    std::lock_guard<std::mutex> lk(memo_mu);
+    memo.insert(memo_key);
   }
+  bool stamped = false;
+  if (FILE* f = fopen(stamp.c_str(), "w")) {  // (a read-only folder or a full drive: checked again at the next launch)
+    stamped = fprintf(f, "%s\n", want) > 0;
+    stamped = fclose(f) == 0 && stamped;
+    if (!stamped) unlink(stamp.c_str());  // no half-written stamp left behind
+  }
+  if (!stamped) fprintf(stderr, "dmeng: %s checked (sha256), but its record %s could not be written: hashed again at the next launch\n", base.c_str(), stamp.c_str());
   return true;
 }
 
