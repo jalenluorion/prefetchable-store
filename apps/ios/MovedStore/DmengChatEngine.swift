@@ -636,6 +636,28 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         }
     }
     var selfCheckStats: String { lock.withLock { model }?.statsJSON() ?? "" }
+    struct Forced: Sendable { var agree: Int; var n: Int; var firstDiff: Int; var prefillSeconds: Double; var prefillJSON: String; var top: [Int] }
+    /// SelfCheck: the prompt synced, then `cont` teacher-forced: at each position the argmax against the next forced id.
+    func selfCheckForced(_ prompt: [Int], cont: [Int]) async throws -> Forced {
+        guard let m = lock.withLock({ model }) else { throw EngineError.notLoaded }
+        return try await m.run {
+            var logits = [Float](repeating: 0, count: m.vocab)
+            let tp = Date()
+            _ = try m.sync(prompt.map { Int32($0) }, logits: &logits)
+            let ps = Date().timeIntervalSince(tp)
+            let pj = m.lastPrefillJSON
+            var agree = 0, first = -1
+            var top: [Int] = []
+            for (i, t) in cont.enumerated() {
+                let a = Int(DmengModel.argmax(logits, vocab: m.vocab))
+                top.append(a)
+                if a == t { agree += 1 } else if first < 0 { first = i }
+                if i + 1 == cont.count { break }
+                guard try m.step(Int32(t), logits: &logits) else { break }
+            }
+            return Forced(agree: agree, n: cont.count, firstDiff: first, prefillSeconds: ps, prefillJSON: pj, top: top)
+        }
+    }
     #endif
 
     /// One reply on the engine's queue: render, sync (prefill with progress), decode.

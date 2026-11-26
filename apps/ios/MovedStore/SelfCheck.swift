@@ -278,6 +278,39 @@ enum SelfCheck {
             return
         }
 
+        // -selfcheck-agree N: the coding prompt in Exact, N greedy ids E (with the prompt's time and reads); then in Fast the
+        // same prompt and E teacher-forced: top-choice agreement with Exact over the N positions after the prompt
+        if let ns = arg("-selfcheck-agree"), let n = Int(ns), let d = model.engine as? DmengChatEngine, let prompt = codeRowIds {
+            var res: [String: Any] = ["prompt_ids": prompt.count, "n": n]
+            for mode in ["exact", "fast"] {
+                modeOverride = mode
+                await d.unload()
+                model.engineState = .idle
+                await model.load()
+                guard model.engineState == .ready else { res["\(mode)_engine"] = model.engineState.label; continue }
+                if mode == "exact" {
+                    if let g = try? await d.selfCheckGreedy(prompt, n: n) {
+                        res["exact_ids"] = g.ids
+                        res["exact_prefill_s"] = g.prefillSeconds
+                        res["exact_prefill"] = json(g.prefillJSON)
+                    }
+                } else if let e = res["exact_ids"] as? [Int], let f = try? await d.selfCheckForced(prompt, cont: e) {
+                    res["fast_agree"] = Double(f.agree) / Double(max(1, f.n))
+                    res["fast_first_diff"] = f.firstDiff
+                    res["fast_prefill_s"] = f.prefillSeconds
+                    res["fast_prefill"] = json(f.prefillJSON)
+                    res["fast_top"] = f.top
+                    res["fast_stats"] = json(d.selfCheckStats)
+                    log("SELFCHECK agree fast vs exact \(f.agree)/\(f.n), first diff \(f.firstDiff), fast prompt \(String(format: "%.1f", f.prefillSeconds)) s")
+                }
+                res["\(mode)_mem"] = mem("agree \(mode)")
+            }
+            modeOverride = nil
+            out["agree"] = res
+            finish()
+            return
+        }
+
         // -selfcheck-memrow: only the memory of one long prompt (the coding prompt, 357 ids) in the default mode: the
         // footprint before it, its highest value while the prompt is read (sampled every 50 ms) and after ~10 s of decode
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-memrow") {
