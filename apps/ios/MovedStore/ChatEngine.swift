@@ -138,6 +138,10 @@ enum EngineError: LocalizedError {
 // MARK: token counts for the tool loop
 
 extension ChatEngine {
+    /// The last finished reply in the engine's own counters, in display order (Settings > Diagnostics > Last reply in
+    /// detail); empty before the first reply or for an engine without counters.
+    var lastReplyRows: [(String, String)] { (self as? DmengChatEngine)?.replyRows ?? [] }
+
     /// Prompt tokens of `messages` (string messages, generation prompt added) by the engine's own tokenizer and template;
     /// nil before load.
     func promptTokenCount(_ messages: [[String: String]], thinking: Bool) -> Int? {

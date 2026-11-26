@@ -385,6 +385,17 @@ struct DiagnosticsView: View {
                 row("Memory warnings", "\(m.memoryWarnings)")
                 Button("Sample memory now") { m.memSample("settings") }
             }
+            if !m.engine.lastReplyRows.isEmpty {
+                Section {
+                    ForEach(Array(m.engine.lastReplyRows.enumerated()), id: \.offset) { _, kv in
+                        row(kv.0, kv.1).font(.caption)
+                    }
+                } header: {
+                    Text("Last reply in detail")
+                } footer: {
+                    Text("From the engine's own counters for the most recent reply.")
+                }
+            }
             Section("Engine") {
                 row("State", m.engineState.label)
                 Text(m.engine.info.detail).font(.caption).foregroundStyle(.secondary)
