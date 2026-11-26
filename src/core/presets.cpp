@@ -497,8 +497,10 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   r.gpu_frac = g.gpu_frac ? *g.gpu_frac : pf ? P.gpu_frac : r.gpu_frac;
   r.gpu_experts = g.gpu_experts ? *g.gpu_experts : pf ? P.gpu_experts : r.gpu_experts;
   if (g.gpu_off) r.gpu_frac = r.gpu_experts = 0;
+  // the prompt: an explicit --prefill-chunk; under a profile the batched path with the model's declared sub-chunk and
+  // span (0: the manifest's "prefill", as the C API); else (or while recording a routing) the front end's own value
   if (g.prefill_chunk) r.prefill_chunk = *g.prefill_chunk;
-  else if (pf && !g.recording) r.prefill_chunk = 512;
+  else if (pf && !g.recording) r.prefill_chunk = 0;
   // run-ahead, readers, background reads
   r.run_ahead = g.run_ahead ? *g.run_ahead : pf ? P.run_ahead : r.run_ahead;
   r.run_ahead_depth = g.run_ahead_depth ? *g.run_ahead_depth : pf ? P.run_ahead_depth : r.run_ahead_depth;
