@@ -136,6 +136,8 @@ struct CoreOpts {
   Mem mem = Mem::MLOCK;
   bool spare_mem = false;  // the spare tier: a probation tier in the OS file cache under the slab (store.h; --spare-mem)
   double spare_gb = 0;     // its probation budget in GB (Cache::prob_bytes; --spare-gb; 0: SPARE_GB_DEFAULT)
+  int spare_uses = 3;      // its promotion rule (Cache::prom_uses / prom_margin; --spare-uses, --spare-margin)
+  double spare_margin = 0.1;
   double drive_gbs = 0;    // bench only: the readers' combined drive rate capped at this many GB/s (Readers::drive_bps,
                            // --drive-gbs); 0 = off, the default, in no profile
   bool skip_reads = false;   // timing without reads (the slots keep whatever bytes they have)

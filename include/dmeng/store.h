@@ -25,13 +25,17 @@
 //    a reader brings into the file cache by a buffered pread into its scratch buffer and a touch of every page of the
 //    mapping (the reader does the I/O and the soft faults); the compute reads the record
 //    through the read-only mapping of its layer file (rec()). The slab is not given a copy.
-//  - its reuse promotes it: a use at a later token than its first use (the statistics' clock: a multi-position pass is
-//    one token, so a prompt's positions and a looped layer's passes inside one token are one use) marks it; at the next
-//    step boundary (tier_step, on the compute thread) it is copied from the mapping into the slab slot a miss would
-//    have taken (victim(): a free slot first, else the policy's lowest keep score; per-layer caps kept, never borrowed
-//    past; the loop hold and names pin it until released, then it moves) and its file pages are dropped
-//    (msync MS_INVALIDATE). No slab slot to give: it stays in probation until its next reuse. The slab evicts as
-//    before; a record it evicts is gone (back only by a read).
+//  - reuse may promote it: used in prom_uses distinct tokens (default 3; the statistics' clock: a multi-position pass is
+//    one token, so a prompt's positions and a looped layer's passes inside one token are one), it is a candidate; at the
+//    next step boundary (tier_step, on the compute thread) it moves only if a free slab slot is there (below the layer's
+//    cap) or, with the hazard keep-score, its score exceeds the score of the record the slab would evict for it
+//    (hz_victim: the weakest eligible, pins, the loop hold and the caps as at an eviction) by prom_margin (0.1). Then that
+//    slab slot is reserved (evicted, pinned, in flight) and the readers' tier thread copies the record into it (a
+//    buffered pread: the file cache's pages); the record is used from the mapping until the copy lands, and moves at a
+//    later boundary once its probation slot is not in use; its file pages are then dropped. Refused (score, or no slot):
+//    it stays in probation, tested again at its next reuse. A resident probation record computes as fast as a slab one,
+//    so promotion only guards a clearly hot record against the OS's reclaim. The slab evicts as before; a record it
+//    evicts is gone (back only by a read).
 //  - before a use (slot_for_use) a probation record's pages are checked (mincore, every page): reclaimed by the OS, it
 //    is a miss like any other (pinned by a name or a hold: read again in place, urgent). A compute thread does not page
 //    fault on the drive in this path; Cache::task_pageins() counts the process's page-ins (the readers never page in).
@@ -135,8 +139,11 @@ struct Readers {
   // pages of a read that landed. drops_start before start(): state is [records]; drops_flush waits for the queue (tests)
   void drops_start(std::atomic<uint8_t>* state);
   void drop_pages(int key, const uint8_t* p, size_t n);
-  void drops_flush();
+  // a promotion's copy on the same thread (ahead of the drops): n bytes at off of fd into dst, then *done = 0
+  void copy_record(int key, int fd, long off, uint8_t* dst, size_t n, const uint8_t* view, std::atomic<int>* done);
+  void drops_flush();  // (tests) wait until the thread's drops and copies are done
   std::atomic<uint64_t> drops_done{0}, drops_cancelled{0};
+  std::atomic<uint64_t> copies_done{0}, copy_ns{0}, copy_bytes{0}, copy_drive_bytes{0};  // promotions' copies: done, their time, from the drive
   bool saturated();  // every reader has a read in flight and reads wait behind them
   bool urgent_backlog();  // every reader has a read in flight and urgent reads wait behind them (the drive is behind now)
   ~Readers() { stop(); }
@@ -153,8 +160,12 @@ struct Readers {
     int key;
     const uint8_t* p;
     size_t n;
+    int fd = -1;  // a copy (dst set): pread of fd at off into dst, then *done = 0
+    long off = 0;
+    uint8_t* dst = nullptr;
+    std::atomic<int>* done = nullptr;
   };
-  std::deque<Drop> drops_;
+  std::deque<Drop> drops_, copies_;
   bool drop_stop_ = false, drop_busy_ = false;
   bool can_spec() const;
   bool can_bg() const;
@@ -186,8 +197,8 @@ struct Slot {
   bool apart = false;      // read by the prompt running now (Cache::apart_on), not used by a decode step since
   // probation slots (spare tier, store.h header): the statistics' token of the first use (-1: none yet), uses since the
   // read, marked for promotion, and the read's sequence number (the budget drops the oldest)
-  long ptok = -1;
-  int puses = 0;
+  long ptok = -1;  // (the last token of a use)
+  int puses = 0, ptoks = 0;  // uses, distinct tokens used in
   bool promote = false;
   uint64_t pseq = 0;
 };
@@ -233,7 +244,12 @@ struct CacheStats {
   // promoted into the slab, promotions refused (no slab slot), probation records the OS reclaimed before their reuse
   // (found at a use or a promotion), the oldest dropped for the budget, the promotions' copy time
   uint64_t n_prob_hit = 0, bytes_prob_hit = 0, n_promoted = 0, n_promote_refused = 0, n_prob_reclaimed = 0, n_prob_budget_drops = 0;
-  double promote_ms = 0;
+  double promote_ms = 0;  // the compute thread's time in tier_step (the copies run on the readers' tier thread)
+  // promotions started (a slab slot reserved, the copy queued), refused by the keep-score gate, copies discarded (the
+  // record read again elsewhere meanwhile); the gate's scores summed (candidate, the slab's weakest eligible)
+  uint64_t n_promote_started = 0, n_promote_score_refused = 0, n_promote_discarded = 0, prom_score_n = 0;
+  double prom_score_cand = 0, prom_score_victim = 0;
+  uint64_t n_slab_drops = 0;  // slab records dropped (evictions, budget cuts): the slab's churn, tier on or off
 };
 
 struct Cache {
@@ -271,7 +287,14 @@ struct Cache {
   }
   int prob_check(int L, int slot);
   // at a step boundary on the compute thread (Core::moe_step / moe_chunk): the promotions due, the drain after a pause
-  bool tier_due() const { return !prom_q_.empty() || (prob_slots_ > 0 && spare_paused.load(std::memory_order_relaxed) && !prob_drained_); }
+  bool tier_due() const {
+    return !prom_q_.empty() || !prom_fl_.empty() || (prob_slots_ > 0 && spare_paused.load(std::memory_order_relaxed) && !prob_drained_);
+  }
+  // the promotion rule (store.h header): a probation record used in prom_uses distinct tokens (at least 2) is a
+  // candidate; it moves into the slab if a free slab slot is there, else (hazard keep-score) only if its keep score
+  // exceeds the score of the slab record it would displace by prom_margin
+  int prom_uses = 3;
+  double prom_margin = 0.1;
   void tier_step();
   void tier_drain();                     // every unpinned probation record dropped (a pause; any thread while idle)
   uint64_t prob_held_bytes() const;      // the bytes the engine believes are in probation now (records held there)
@@ -634,6 +657,12 @@ struct Cache {
   bool prob_drained_ = false;           // after a pause: nothing left in probation
   uint64_t prob_seq_ = 0;
   std::vector<int> prom_q_;             // records (L * NE + e) marked for promotion
+  struct Prom {                         // a promotion whose copy is in flight: record, probation slot, slab slot, read
+    int k, s, v;
+    uint64_t pseq;
+  };
+  std::vector<Prom> prom_fl_;
+  void promote_settle();
   int prob_take(int L);                 // a free probation slot, else the oldest unpinned landed one's (dropped); -1
   void promote_one(int L, int slot);
   void hz_enter(int L, int slot, int e);  // a record enters slab slot `slot`: the hazard minimum and the ranker's list

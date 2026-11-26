@@ -11,8 +11,9 @@ checked):
               re-reads), 1 / 4 / 5 compute threads, the folder's router naming, run-ahead, and an oracle replaying the
               recorded routing at leads 1 and one token; names + run-ahead with the names' reads held in flight
               (DMENG_TEST_SPEC_READ_US: a miss finds every free slot still being read); the spare tier on (--spare-mem 1:
-              probation budgets that overflow and that hold every record, 1 thread, names + run-ahead, names in flight,
-              greedy ids), each run checked to have promoted records and served reuses from the file cache
+              probation budgets that overflow and that hold every record, 1 thread, every reuse promoted, names +
+              run-ahead, names in flight, greedy ids), each run checked to have served reuses from the file cache (the
+              every-reuse arm: to have promoted records)
   prefill     the batched prefill equals single steps: dmserve --check (logits, fixed state, KV, greedy continuation; CPU,
               and the GPU's share on a Metal build), and dmeng's ids after a batched and a token-by-token prompt
   checkpoint  dmserve --check-ckpt (a long request, the same again, one diverging at 60%, each equal to a cold computation)
@@ -165,8 +166,10 @@ if wanted("invariance"):
         # reads overflow (the oldest dropped) and one that holds every record the slab does not
         SPARE_LO = ["--spare-mem", "1", "--spare-gb", f"{0.2 * sum(rb) * meta['experts'] / 1e9:.6f}"]
         SPARE_HI = ["--spare-mem", "1", "--spare-gb", f"{0.8 * sum(rb) * meta['experts'] / 1e9:.6f}"]
+        ALL_PROMOTED = ["--spare-uses", "2", "--spare-margin", "-1"]  # every reuse promoted (the copy and the move every token)
         spare = [("few slots, spare tier (small budget)", FEW + SPARE_LO), ("few slots, spare tier (every record)", FEW + SPARE_HI),
-                 ("few slots, spare tier, 1 thread", FEW + SPARE_LO + ["--threads", "1"])]
+                 ("few slots, spare tier, 1 thread", FEW + SPARE_LO + ["--threads", "1"]),
+                 ("few slots, spare tier, every reuse promoted", FEW + SPARE_LO + ALL_PROMOTED)]
         if RT:
             spare += [("few slots, spare tier, router names + run-ahead", FEW + SPARE_LO + RT + ["--run-ahead", str(K)])]
         variants += spare
@@ -176,11 +179,12 @@ if wanted("invariance"):
             reads.append(js.get("reads", 0))
             if g != base:
                 bad.append(nm)
-            if "--spare-mem" in fl:  # the tier must have run: records promoted, reuses served from the file cache
+            if "--spare-mem" in fl:  # the tier must have run: reuses served from the file cache, the promotion gate tested
                 sm = js.get("spare_memory") or {}
                 tier.append(sm.get("promotions_per_token", 0))
                 pageins.append(sm.get("pageins", -1))
-                if not (sm.get("promotions_per_token", 0) > 0 and sm.get("reuses_per_token", 0) > 0):
+                # (the default rule may promote nothing on a tiny model: the every-reuse arm must promote)
+                if not (sm.get("reuses_per_token", 0) > 0 and (sm.get("promotions_per_token", 0) > 0 or "--spare-margin" not in fl)):
                     bad.append(f"{nm}: the tier did not run as expected ({json.dumps(sm)[:300]})")
         if RT:  # names' reads held 3 ms in flight (one reader), as on a busy machine: a miss waits for one to land
             b40, _ = logits("base40", 40, "--cache-gb", f"{ALL_GB:.6f}")

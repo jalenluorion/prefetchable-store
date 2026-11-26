@@ -147,23 +147,40 @@ int main(int argc, char** argv) {
     done(c, 0, s, 0);
     c.tok_now = 0;
     check(!c.tier_due() && c.slot_of(0, 3) == s, "a reuse inside the token (a looped layer's pass) does not promote");
-    // a use at a later token: promoted at the next step boundary
+    // a use in a second token: not yet (prom_uses 3 distinct tokens); a third: a candidate
     c.slot(0, s).pins = 1;
     s = c.slot_for_use(0, 3);
     done(c, 0, s, 1);
     check(c.st.n_prob_hit == 2 && c.st.bytes_prob_hit == 2 * R0, "uses after the first are counted as served by the file cache");
-    check(c.tier_due(), "a use at a later token marks it for promotion");
-    c.tok_now = 1;
-    c.slot(0, s).pins = 1;  // pinned (a name): not moved at this boundary
+    check(c.prom_uses == 3 && !c.tier_due(), "used in two tokens: not a candidate (the rule's 3 distinct tokens)");
+    c.slot(0, s).pins = 1;
+    done(c, 0, s, 2);
+    check(c.tier_due(), "used in a third token: a candidate for promotion");
+    // the gate: the slab is full, so its keep score must beat the record it would displace by the margin
+    c.tok_now = 2;
+    c.prom_margin = 2.0;  // (a hazard score is a probability: nothing beats another by 2)
     c.tier_step();
-    check(c.slot_of(0, 3) == s && c.tier_due(), "a pinned record waits for a later boundary");
+    check(c.slot_of(0, 3) == s && c.st.n_promote_score_refused == 1 && c.st.prom_score_n == 1 && !c.tier_due(),
+          "refused by the keep-score gate: stays in probation (slab untouched)");
+    c.prom_margin = -2.0;  // (every candidate passes)
+    c.slot(0, s).pins = 1;
+    done(c, 0, s, 3);  // its next reuse: tested again
+    c.tok_now = 3;
+    c.slot(0, s).pins = 1;  // pinned (a name): not started at this boundary
+    c.tier_step();
+    check(c.slot_of(0, 3) == s && c.tier_due() && c.st.n_promote_started == 0, "a pinned record waits for a later boundary");
     c.unpin(0, s);
     c.tier_step();
-    c.rd.drops_flush();  // (the pages are dropped by the readers' drop thread)
+    check(c.st.n_promote_started == 1 && c.slot_of(0, 3) == s && c.rec(0, s) == view && c.held(0) == 7,
+          "started: a slab slot reserved (its record evicted), the copy queued, the record still used from the mapping");
+    c.rd.drops_flush();  // the copy lands (the readers' tier thread)
+    c.tier_step();       // the move, at the next boundary
+    c.rd.drops_flush();  // (the pages are dropped by the same thread)
     const int ps = c.slot_of(0, 3);
     check(ps >= 0 && ps < S.n && same_as_file(c.rec(0, ps), 0, 3, R0) && c.rec(0, ps) == S.row(ps), "promoted: a slab slot with the file's bytes");
     check(none_resident(view, R0), "promoted: its file pages dropped (one place)");
-    check(c.st.n_promoted == 1 && c.held(0) == 8 && c.prob_held(0) == 0 && !c.tier_due(), "promotions 1 (a slab record evicted for it); slab 8, probation 0");
+    check(c.st.n_promoted == 1 && c.held(0) == 8 && c.prob_held(0) == 0 && !c.tier_due() && c.rd.copies_done.load() == 1,
+          "promotions 1 (a slab record evicted for it, one copy on the tier thread); slab 8, probation 0");
     // the budget: 7 more reads into a probation of 6 drop the oldest's pages
     int sl[7];
     for (int i = 0; i < 7; i++) {
@@ -189,6 +206,7 @@ int main(int argc, char** argv) {
     check(resident(v12, R0) && c.rd.bytes.load() - b1 == R0 && same_as_file(c.rec(1, s12), 1, 2, R0), "... read again in place by a reader (urgent)");
     c.unpin(1, s12);
     // a promotion whose pages the OS took: dropped, not copied from the drive on the compute thread
+    c.prom_uses = 2;
     {
       const int s13 = c.slot_of(1, 3);
       c.slot(1, s13).pins = 1;
@@ -208,6 +226,22 @@ int main(int argc, char** argv) {
             "a read after a drop of the same record: its pages resident, the bytes the file's");
       done(c, 1, s10, 3);
     }
+    // probation loses a record while its copy is in flight (the budget, the OS): the copy is installed as it is
+    {
+      c.prom_margin = -2.0;
+      const int s14 = c.slot_of(1, 4);
+      c.slot(1, s14).pins = 1;
+      done(c, 1, s14, 9);
+      c.tok_now = 9;
+      const uint64_t started = c.st.n_promote_started, promoted = c.st.n_promoted;
+      c.tier_step();
+      msync(c.fmap[1] + 4 * R0, R0, MS_INVALIDATE);  // the OS takes it before its use
+      check(c.slot_for_use(1, 4) < 0 && c.st.n_promote_started == started + 1, "in flight, reclaimed: the use misses");
+      c.rd.drops_flush();
+      c.tier_step();
+      const int p14 = c.slot_of(1, 4);
+      check(p14 >= 0 && p14 < S.n && same_as_file(c.rec(1, p14), 1, 4, R0) && c.st.n_promoted == promoted + 1, "... and the landed copy is installed in the slab");
+    }
     // names land in probation too
     const int sn = c.name(0, 9, 12);
     check(sn >= S.n && c.slot(0, sn).pf_pins == 1, "a name's read lands in probation");
@@ -220,7 +254,7 @@ int main(int argc, char** argv) {
     c.rd.drops_flush();
     check(c.prob_held(0) == 0 && !c.tier_due(), "the pause drains probation");
     bool gone = true;
-    for (int e = 4; e < 7; e++) gone &= none_resident(c.fmap[1] + (size_t)e * R0, R0);
+    for (int e = 5; e < 7; e++) gone &= none_resident(c.fmap[1] + (size_t)e * R0, R0);
     check(gone && none_resident(c.fmap[0] + 9 * R0, R0), "... and drops its pages");
     const int s2 = miss(c, 0, 11, 20);
     check(s2 >= 0 && s2 < S.n && same_as_file(c.rec(0, s2), 0, 11, R0), "after the pause a miss goes to the slab");
@@ -243,9 +277,13 @@ int main(int argc, char** argv) {
     check(a >= c.P[0].n && b >= c.P[1].n && same_as_file(c.rec(1, b), 1, 2, R1), "two pools: reads land in each pool's probation");
     done(c, 0, a, 0);
     done(c, 1, b, 0);
+    c.prom_uses = 2;
+    c.prom_margin = -2.0;
     c.slot(1, b).pins = 1;
     done(c, 1, b, 1);
     c.tok_now = 1;
+    c.tier_step();
+    c.rd.drops_flush();
     c.tier_step();
     c.rd.drops_flush();
     const int pb = c.slot_of(1, 2);

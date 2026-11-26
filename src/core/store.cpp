@@ -98,6 +98,8 @@ void Readers::stop() {
   }
 }
 
+static bool all_resident(const uint8_t* p, size_t n);
+
 void Readers::drops_start(std::atomic<uint8_t>* state) {
   drop_state_ = state;
   drop_stop_ = false;
@@ -117,9 +119,17 @@ void Readers::drop_pages(int key, const uint8_t* p, size_t n) {
   drop_cv_.notify_one();
 }
 
+void Readers::copy_record(int key, int fd, long off, uint8_t* dst, size_t n, const uint8_t* view, std::atomic<int>* done) {
+  {
+    std::lock_guard<std::mutex> lk(drop_mu_);
+    copies_.push_back({key, view, n, fd, off, dst, done});
+  }
+  drop_cv_.notify_one();
+}
+
 void Readers::drops_flush() {
   std::unique_lock<std::mutex> lk(drop_mu_);
-  drop_cv_.wait(lk, [&] { return (drops_.empty() && !drop_busy_) || !drop_th_.joinable(); });
+  drop_cv_.wait(lk, [&] { return (drops_.empty() && copies_.empty() && !drop_busy_) || !drop_th_.joinable(); });
 }
 
 void Readers::drop_loop() {
@@ -130,11 +140,30 @@ void Readers::drop_loop() {
       std::unique_lock<std::mutex> lk(drop_mu_);
       drop_busy_ = false;
       drop_cv_.notify_all();  // (drops_flush)
-      drop_cv_.wait(lk, [&] { return drop_stop_ || !drops_.empty(); });
-      if (drops_.empty()) return;  // stopping, nothing left
-      d = drops_.front();
-      drops_.pop_front();
+      drop_cv_.wait(lk, [&] { return drop_stop_ || !drops_.empty() || !copies_.empty(); });
+      if (drops_.empty() && copies_.empty()) return;  // stopping, nothing left
+      auto& q = !copies_.empty() ? copies_ : drops_;  // a promotion's copy first (a step may wait for its slot)
+      d = q.front();
+      q.pop_front();
       drop_busy_ = true;
+    }
+    if (d.dst) {  // a promotion's copy: a buffered pread (the file cache's pages copied; the drive's if the OS took them)
+      const int64_t t0 = now_ns();
+      if (!all_resident(d.p, d.n)) copy_drive_bytes.fetch_add(d.n, std::memory_order_relaxed);
+      size_t got = 0;
+      while (got < d.n) {
+        ssize_t r = pread(d.fd, d.dst + got, d.n - got, d.off + (long)got);
+        if (r <= 0) {
+          fprintf(stderr, "promotion copy failed (fd %d off %ld): %s\n", d.fd, d.off, strerror(errno));
+          abort();
+        }
+        got += (size_t)r;
+      }
+      copy_ns.fetch_add((uint64_t)(now_ns() - t0), std::memory_order_relaxed);
+      copies_done.fetch_add(1, std::memory_order_relaxed);
+      copy_bytes.fetch_add(d.n, std::memory_order_relaxed);
+      d.done->store(0, std::memory_order_release);
+      continue;
     }
     uint8_t want = 1;
     if (drop_state_[d.key].compare_exchange_strong(want, 2, std::memory_order_acq_rel)) {
@@ -618,40 +647,61 @@ void Cache::tier_drain() {
 }
 
 void Cache::tier_step() {
-  if (spare_paused.load(std::memory_order_relaxed)) {
-    if (!prob_drained_) tier_drain();
-    prom_q_.clear();
-    return;
-  }
-  if (prom_q_.empty() || apart_on) return;  // (a prompt apart: its records move after it)
   const auto t0 = clk::now();
-  size_t w = 0;
-  for (size_t i = 0; i < prom_q_.size(); i++) {
-    const int k = prom_q_[i], L = k / NE;
-    const int s = tab[(size_t)k];
-    if (s < 0 || !is_prob(L, s) || !pool(L).s[s].promote) continue;  // gone meanwhile (the budget, the OS)
-    if (pool(L).s[s].pins > 0 || pool(L).pending[s].load(std::memory_order_acquire) != 0) {
-      prom_q_[w++] = k;  // in use (a hold, a name): at a later boundary
-      continue;
+  const bool paused = spare_paused.load(std::memory_order_relaxed);
+  if (paused && !prob_drained_) tier_drain();
+  if (!prom_fl_.empty()) promote_settle();  // copies that landed: the records move (also after a pause)
+  if (paused) {
+    prom_q_.clear();
+  } else if (!prom_q_.empty() && !apart_on) {  // (a prompt apart: its records move after it)
+    size_t w = 0;
+    for (size_t i = 0; i < prom_q_.size(); i++) {
+      const int k = prom_q_[i], L = k / NE;
+      const int s = tab[(size_t)k];
+      if (s < 0 || !is_prob(L, s) || !pool(L).s[s].promote) continue;  // gone meanwhile (the budget, the OS)
+      if (pool(L).s[s].pins > 0 || pool(L).pending[s].load(std::memory_order_acquire) != 0) {
+        prom_q_[w++] = k;  // in use (a hold, a name): at a later boundary
+        continue;
+      }
+      promote_one(L, s);
     }
-    promote_one(L, s);
+    prom_q_.resize(w);
   }
-  prom_q_.resize(w);
   st.promote_ms += std::chrono::duration<double, std::milli>(clk::now() - t0).count();
 }
 
-// probation slot -> the slab slot a miss would have taken (victim: a free slot first, else the lowest keep score; caps
-// kept, never borrowed past), copied from the mapping at memory speed; its file pages dropped after the copy
+// a probation record marked at its reuse (prom_uses distinct tokens) -> the gate, then a slab slot reserved and its copy
+// started on the readers' tier thread; the record is used from the mapping until promote_settle moves it.
+// The gate: a free slab slot below the layer's cap is taken at once (nothing displaced); else, with the hazard
+// keep-score, its score must exceed that of the record the slab would evict for it (hz_victim: the lowest eligible
+// score, pins, the loop hold and the caps as at an eviction) by prom_margin. Refused: it stays in probation and is
+// tested again at its next reuse in a later token.
 void Cache::promote_one(int L, int s) {
   SlotPool& S = pool(L);
   Slot& x = S.s[s];
   const int e = x.e;
   const uint8_t* src = fmap[L] + (size_t)e * S.rec;
-  if (!all_resident(src, S.rec)) {  // the OS took it: no copy from the drive on the compute thread (a later use misses)
+  if (!all_resident(src, S.rec)) {  // the OS took it: a later use misses (no copy from the drive)
     st.n_prob_reclaimed++;
     drop(L, s, true);
     free_slot(layer_pool[L], s);
     return;
+  }
+  const bool capped = !lcap.empty() && lheld[L] >= lcap[L];
+  if ((capped || S.free_.empty()) && hazard_evict) {
+    hz_tick(tok_now);
+    const int w = hz_victim(L, capped, 1);
+    if (w >= 0 && S.s[w].layer >= 0) {
+      const double cs = keep_score(L, e, tok_now), vs = keep_score(S.s[w].layer, S.s[w].e, tok_now);
+      st.prom_score_n++;
+      st.prom_score_cand += cs;
+      st.prom_score_victim += vs;
+      if (!(cs > vs + prom_margin)) {
+        x.promote = false;
+        st.n_promote_score_refused++;
+        return;
+      }
+    }
   }
   prob_bypass_ = true;
   const int v = victim(L, 1);  // (reserve 1: a capped layer gives its own record, as a name's request; no borrowing)
@@ -662,21 +712,64 @@ void Cache::promote_one(int L, int s) {
     return;
   }
   if (mem == Mem::PURGEABLE) touch_nonvolatile(L, v);
-  std::memcpy(S.row(v), src, S.rec);
-  rd.drop_pages(L * NE + e, src, S.rec);  // one place: the slab (the pages dropped by the readers' drop thread)
-  Slot& y = S.s[v];
-  y = x;
-  y.pins = y.pf_pins = 0;
-  y.pf_unused = y.apart = y.promote = false;
-  y.ptok = -1;
-  y.puses = 0;
-  y.pseq = 0;
-  tab[(size_t)L * NE + e] = v;
+  // the slab slot is reserved (pinned, "in flight") until the copy lands; the record stays where it is meanwhile
+  S.s[v] = Slot();
+  S.s[v].pins = 1;
+  S.pending[v].store(1, std::memory_order_release);
   if (!lheld.empty()) lheld[L]++;
-  hz_enter(L, v, e);
-  x = Slot();
-  S.pfree.push_back(s);
-  st.n_promoted++;
+  const int k = L * NE + e;
+  prom_fl_.push_back({k, s, v, x.pseq});
+  rd.copy_record(k, fds[L], (long)((size_t)e * S.rec), S.row(v), S.rec, src, &S.pending[v]);
+  st.n_promote_started++;
+}
+
+// promotions whose copy landed: the record moves into its slab slot when its probation slot is not in use (else at a
+// later boundary); if probation lost it meanwhile (the budget, the OS) the copy is installed as it is (the file's
+// bytes); if it was read again elsewhere meanwhile the copy is discarded
+void Cache::promote_settle() {
+  size_t w = 0;
+  for (size_t i = 0; i < prom_fl_.size(); i++) {
+    const Prom pr = prom_fl_[i];
+    const int L = pr.k / NE, e = pr.k % NE;
+    SlotPool& S = pool(L);
+    if (S.pending[pr.v].load(std::memory_order_acquire) != 0) {
+      prom_fl_[w++] = pr;
+      continue;
+    }
+    const int cur = tab[(size_t)pr.k];
+    Slot& y = S.s[pr.v];
+    const uint8_t* src = fmap[L] + (size_t)e * S.rec;
+    if (cur == pr.s && S.s[pr.s].pseq == pr.pseq) {
+      Slot& x = S.s[pr.s];
+      if (x.pins > 0 || S.pending[pr.s].load(std::memory_order_acquire) != 0) {
+        prom_fl_[w++] = pr;  // in use now: at a later boundary
+        continue;
+      }
+      y = x;
+      y.pf_unused = y.apart = y.promote = false;
+      y.pins = y.pf_pins = 0;
+      y.ptok = -1;
+      y.puses = y.ptoks = 0;
+      y.pseq = 0;
+      x = Slot();
+      S.pfree.push_back(pr.s);
+    } else if (cur < 0) {
+      y = Slot();
+      y.layer = L;
+      y.e = e;
+    } else {  // read again into another slot meanwhile: that copy stays, this one goes
+      y = Slot();
+      free_slot(layer_pool[L], pr.v);
+      if (!lheld.empty()) lheld[L]--;
+      st.n_promote_discarded++;
+      continue;
+    }
+    tab[(size_t)pr.k] = pr.v;
+    hz_enter(L, pr.v, e);
+    rd.drop_pages(pr.k, src, S.rec);  // one place: the slab
+    st.n_promoted++;
+  }
+  prom_fl_.resize(w);
 }
 
 void Cache::hz_enter(int L, int slot, int e) {
@@ -718,6 +811,7 @@ void Cache::drop(int L, int slot, bool count_pf_unused) {
   if (b.layer >= 0) {
     const size_t k = (size_t)b.layer * NE + b.e;
     const bool pr = slot >= pool(L).n;  // a probation record (the spare tier)
+    if (!pr) st.n_slab_drops++;
     tab[k] = -1;
     hz_gone(b.layer, slot);
     if (!lheld.empty() && !pr) lheld[b.layer]--;
@@ -1018,7 +1112,7 @@ void Cache::issue(int L, int slot, int e, bool urgent, long step, float pp) {
   hz_enter(L, slot, e);
   if (pr) {
     x.ptok = -1;
-    x.puses = 0;
+    x.puses = x.ptoks = 0;
     x.promote = false;
     x.pseq = ++prob_seq_;
     S.pfifo.push_back({slot, x.pseq});
@@ -1108,9 +1202,10 @@ void Cache::use(int L, int slot, long t_use, long step) {
       st.n_prob_hit++;
       st.bytes_prob_hit += pool(L).rec;
     }
-    if (!apart_on) {
-      if (x.ptok < 0) x.ptok = t;
-      else if (t > x.ptok && !x.promote && prob_on()) {
+    if (!apart_on && (x.ptok < 0 || t > x.ptok)) {  // a use in a token it was not used in yet
+      x.ptok = t;
+      x.ptoks++;
+      if (x.ptoks >= std::max(2, prom_uses) && !x.promote && prob_on()) {
         x.promote = true;
         prom_q_.push_back(x.layer * NE + x.e);
       }

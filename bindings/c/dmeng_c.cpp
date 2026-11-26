@@ -457,6 +457,8 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
   co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;  // model_options "run:spare-mem=1"
   co.spare_gb = ro.spare_gb;                            // model_options "run:spare-gb=X"
+  co.spare_uses = ro.spare_uses;                        // "run:spare-uses=N", "run:spare-margin=M"
+  co.spare_margin = ro.spare_margin;
   ro.spare_mem = co.spare_mem;
   co.drive_gbs = ro.drive_gbs;  // model_options "run:drive-gbs=X" (bench only)
   e->C = std::make_unique<Core>();
@@ -1012,6 +1014,8 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"tier\":\"probation\",\"probation_budget_gb\":" << Ca.prob_bytes / 1e9 << ",\"probation_held_gb\":" << Ca.prob_held_bytes() / 1e9
       << ",\"gb_reuse_served\":" << Ca.st.bytes_prob_hit / 1e9 << ",\"gb_from_drive\":" << Ca.rd.bytes.load() / 1e9
       << ",\"promotions\":" << Ca.st.n_promoted << ",\"promotions_refused\":" << Ca.st.n_promote_refused
+      << ",\"promotions_refused_by_score\":" << Ca.st.n_promote_score_refused << ",\"slab_drops\":" << Ca.st.n_slab_drops
+      << ",\"promote_copy_ms\":" << Ca.rd.copy_ns.load() / 1e6
       << ",\"reclaimed_before_reuse\":" << Ca.st.n_prob_reclaimed << ",\"budget_drops\":" << Ca.st.n_prob_budget_drops
       << ",\"promote_ms\":" << Ca.st.promote_ms << ",\"pageins\":" << Cache::task_pageins() - Ca.pageins_at_init << "}";
   s << "}";

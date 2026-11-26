@@ -145,9 +145,11 @@ outputs
   --drive-gbs X          bench only: the readers' combined drive rate capped at X GB/s (one clock across the reader
                          threads, prompt and decode reads alike; the wait counts as a slow read's), a slower drive's
                          stand-in; off by default and in every profile (C API: model_options "run:drive-gbs=X")
-  --spare-mem 0|1 --spare-gb X   the spare tier (include/dmeng/store.h): reads land in a probation tier in the OS file
+  --spare-mem 0|1 --spare-gb X --spare-uses N --spare-margin M   the spare tier (include/dmeng/store.h): reads land in a probation tier in the OS file
                          cache, their reuse moves them into the slab; on by the profile's rule (phone: at least 11 GB
-                         physical) or forced with 1 on any profile; X = its probation budget in GB (the profile's, else 6)
+                         physical) or forced with 1 on any profile; X = its probation budget in GB (the profile's, else 6);
+                         a record used in N distinct tokens (3) moves into the slab if a slab slot is free or its keep
+                         score beats the record it would displace by M (0.1)
   --state-check         after the decode, restore the state saved after the prompt (fixed + positional parts) and
                          decode again: the ids must be the same
   --prefill-chunk N      the prompt through the model's batched prefill in chunks of N (1: single steps); exact
@@ -560,6 +562,8 @@ int main(int argc, char** argv) {
   co.mem = mem_of(a.mem);
   co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;
   co.spare_gb = ro.spare_gb;
+  co.spare_uses = ro.spare_uses;
+  co.spare_margin = ro.spare_margin;
   co.drive_gbs = ro.drive_gbs;
   co.skip_reads = a.skip_reads;
   co.loop_hold = a.loop_hold;
@@ -808,7 +812,7 @@ int main(int argc, char** argv) {
   auto& CS = C.cache.st;
   auto& RD = C.cache.rd;
   uint64_t dt0[7] = {0};
-  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0, pgin0 = 0;
+  uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0, pgin0 = 0, cpns0 = 0, cpn0 = 0, cpdr0 = 0;
   double fe_ms = 0;  // the front end's per-token work outside the model's step (sampling, records): stage "sample"
   auto reset_stats = [&]() {
     fe_ms = 0;
@@ -823,6 +827,9 @@ int main(int argc, char** argv) {
     fskip0 = RD.file_resident_skips.load();
     fskipb0 = RD.file_bytes_skipped.load();
     pgin0 = Cache::task_pageins();
+    cpns0 = RD.copy_ns.load();
+    cpn0 = RD.copy_bytes.load();
+    cpdr0 = RD.copy_drive_bytes.load();
     for (int i = 0; i < 3; i++) {
       q0[i] = RD.q_ns[i].load();
       s0[i] = RD.svc_ns[i].load();
@@ -875,7 +882,8 @@ int main(int argc, char** argv) {
        << ",\"purged\":" << CS.n_purged << ",\"held_at_end\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.held(p);
     js << "],\"held_gb\":" << C.cache.held_bytes() / 1e9 << ",\"mb_preads_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6)
-       << ",\"pageins\":" << Cache::task_pageins() - pgin0;  // the process's page-ins in the loop (the readers never page in)
+       << ",\"pageins\":" << Cache::task_pageins() - pgin0  // the process's page-ins in the loop (the readers never page in)
+       << ",\"slab_drops_per_token\":" << per(CS.n_slab_drops);  // slab records evicted or cut (the slab's churn, tier on or off)
     if (C.cache.mem == Mem::FILE) {
       js << ",\"file\":{\"check\":" << C.cache.file_check << ",\"evict_hint\":" << C.cache.file_evict_hint << ",\"skip_resident\":" << RD.file_skip_resident
          << ",\"prefault\":" << RD.file_prefault << ",\"checks_per_token\":" << per(CS.file_checks) << ",\"file_refaults\":" << CS.file_refaults
@@ -897,6 +905,13 @@ int main(int argc, char** argv) {
          << ",\"mb_from_drive_per_token\":" << per((RD.bytes.load() - rd_bytes0) / 1e6) << ",\"reuses_per_token\":" << per(CS.n_prob_hit)
          << ",\"promotions_per_token\":" << per(CS.n_promoted) << ",\"promotions_refused_per_token\":" << per(CS.n_promote_refused)
          << ",\"promote_ms_per_token\":" << per(CS.promote_ms) << ",\"budget_drops_per_token\":" << per(CS.n_prob_budget_drops)
+         << ",\"promote_rule\":{\"uses\":" << C.cache.prom_uses << ",\"margin\":" << C.cache.prom_margin << "}"
+         << ",\"promotions_started_per_token\":" << per(CS.n_promote_started) << ",\"promotions_refused_by_score_per_token\":" << per(CS.n_promote_score_refused)
+         << ",\"promotions_discarded_per_token\":" << per(CS.n_promote_discarded)
+         << ",\"promote_score_candidate_mean\":" << CS.prom_score_cand / std::max<uint64_t>(1, CS.prom_score_n)
+         << ",\"promote_score_displaced_mean\":" << CS.prom_score_victim / std::max<uint64_t>(1, CS.prom_score_n)
+         << ",\"promote_copy_ms_per_token\":" << per((RD.copy_ns.load() - cpns0) / 1e6) << ",\"mb_promote_copied_per_token\":" << per((RD.copy_bytes.load() - cpn0) / 1e6)
+         << ",\"mb_promote_copy_from_drive_per_token\":" << per((RD.copy_drive_bytes.load() - cpdr0) / 1e6)
          << ",\"reclaimed_before_reuse\":" << CS.n_prob_reclaimed << ",\"reclaimed_before_reuse_per_token\":" << per(CS.n_prob_reclaimed)
          << ",\"pageins\":" << pgin << ",\"pageins_per_token\":" << per(pgin)
          << ",\"store_in_file_cache_gb_at_end\":" << C.cache.file_resident_bytes() / 1e9 << "}";
