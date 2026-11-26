@@ -317,7 +317,7 @@ int main(int argc, char** argv) {
   int n = 400, threads = 0, readers = 0, resize_at = -1, cancel_test = 0;
   double gb = 3.3, resize_gb = 0;
   const char* policy_probe = NULL;
-  const char *arms = NULL, *model_opts = NULL, *alt_model = NULL;  /* --arms off,on,nothing (one process), --model-options S */
+  const char *arms = NULL, *alt_model = NULL;  /* --arms off,on,nothing (one process) */
   int warm_n = 50, file_hint = 0, measure_after = 0, force_exact = 0;
   const char *resident = NULL, *mode = NULL;  /* --resident FILE (e.g. the 4-bit resident_q4), --mode approx:drop */
   const char* model_options = NULL;           /* --model-options "k=v;run:FLAG=VALUE" (dm_open_opts.model_options) */
@@ -381,7 +381,6 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--measure-after")) measure_after = atoi(v), i++;
     else if (!strcmp(k, "--alt-model")) alt_model = v, i++;
     else if (!strcmp(k, "--force-exact")) force_exact = atoi(v), i++;
-    else if (!strcmp(k, "--model-options")) model_opts = v, i++;
     else if (!strcmp(k, "--file-hint")) file_hint = atoi(v), i++;
     else {
       fprintf(stderr, "unknown flag %s\n", k);
@@ -429,7 +428,6 @@ int main(int argc, char** argv) {
   o.prefill_gpu_int_kernel = gpu_int;
   o.prefill_gpu_min_wave = gpu_wave;
   o.prefill_threads = prefill_threads;
-  o.model_options = model_opts;
   o.file_evict_hint = file_hint;
   if (arms) {  /* the arms in one process (header comment) */
     FILE* jf = json ? fopen(json, "w") : NULL;
