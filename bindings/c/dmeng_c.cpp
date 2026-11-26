@@ -51,6 +51,7 @@ struct dm_engine {
   std::unique_ptr<Routers> R;
   std::unique_ptr<Xtok> X;  // cross-token routers, wrapping R
   std::string preset_json = "null";
+  std::string prefill_json = "{}";  // the prompt path's declared values (presets.h declared_prefill)
   Resolved res;  // the settings after precedence (presets.h), in dm_stats_json under "resolved"
   std::unique_ptr<Planner> PL;
   std::unique_ptr<Pool> prefill_pool;  // dm_sync's compute threads when they differ from decode's
@@ -263,8 +264,15 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   const Preset& P = ro.preset;
   const bool profiled = ro.profiled;
   if (profiled) e->preset_json = P.json();
-  if (ro.drafts > 0) {  // (no drafting in the C API: a manifest default cannot turn on what this front end does not do)
-    ro.notes.push_back("drafts: the C API has no drafting, off");
+  // no drafting in the C API: asked for explicitly it is refused; a profile's declared drafts are left off here (said in
+  // the notes, and the "resolved" block reports none; the "preset" block keeps what the profile declares)
+  if (ro.draft != "none" && ((g.draft && *g.draft != "none") || (g.drafts && *g.drafts > 0))) {
+    g_err = "drafts: the C API has no drafting (draft " + ro.draft + " asked for)";
+    return nullptr;
+  }
+  if (ro.draft != "none") {
+    ro.notes.push_back("drafts: the profile declares draft " + ro.draft + "; the C API has no drafting, off");
+    ro.draft = "none";
     ro.drafts = 0;
   }
   // the prompt's sub-chunk is the model's own here (the C API does not set it; dmeng and dmserve use 512): printed as 0
@@ -305,6 +313,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     g_err = "load: " + err;
     return nullptr;
   }
+  e->prefill_json = prefill_json(lo.prefill);
   e->routers_path = ro.routers;
   CoreOpts co;
 #if TARGET_OS_IPHONE && !TARGET_OS_MACCATALYST
@@ -795,7 +804,7 @@ const char* dm_stats_json(dm_engine* e) {
   s << ",\"policy\":{\"evict\":\"" << e->C->o.evict << "\",\"hazard\":" << Ca.hazard_evict << ",\"layer_caps_opt\":\"" << e->C->o.layer_caps
     << "\",\"caps_auto\":" << Ca.caps_auto << ",\"caps_active\":" << !Ca.lcap.empty() << ",\"slots\":" << Ca.budget_bytes() / std::max<int64_t>(1, (int64_t)Ca.P[0].rec)
     << ",\"plan\":" << e->o.plan << ",\"routers\":\"" << e->routers_path << "\",\"router_m\":" << (e->R ? e->R->m : 0)
-    << ",\"mode\":\"" << (e->C->ns.on ? "approx" : "lossless") << "\",\"preset\":" << e->preset_json << ",\"xtok\":" << (e->X ? "true" : "false") << ",\"router_tau\":" << (e->R ? e->R->tau : 0) << ",\"split\":" << e->C->o.split
+    << ",\"mode\":\"" << (e->C->ns.on ? "approx" : "lossless") << "\",\"preset\":" << e->preset_json << ",\"prefill_declared\":" << e->prefill_json << ",\"xtok\":" << (e->X ? "true" : "false") << ",\"router_tau\":" << (e->R ? e->R->tau : 0) << ",\"split\":" << e->C->o.split
     << ",\"prefill_threads\":" << (e->prefill_pool ? e->prefill_pool->size() : e->C->o.threads)
     << ",\"resident_bits\":" << (e->o.resident_bits == 4 ? 4 : 8) << ",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9
     << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode << "}";

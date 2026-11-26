@@ -23,7 +23,7 @@ DROP = {"parts", "bytes", "bytes_rule", "optional", "bytes_with_optional", "opti
 
 def strip_notes(x):
     if isinstance(x, dict):
-        return {k: strip_notes(v) for k, v in x.items() if k not in ("notes", "note", "definition", "measured_note")}
+        return {k: strip_notes(v) for k, v in x.items() if k not in ("notes", "note", "definition", "measured_note", "calibration")}
     if isinstance(x, list):
         return [strip_notes(v) for v in x]
     return x

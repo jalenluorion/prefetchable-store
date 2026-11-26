@@ -204,6 +204,8 @@ bool Core::init(const ModelInfo& info, const CoreOpts& opts, const std::string& 
   uw.assign((size_t)steps * K, 0.f);
   wait_step.assign(steps, 0.0);
   miss_step.assign(steps, 0);
+  wait_unnamed_step.assign(steps, 0.0);
+  nwait_unnamed_step.assign(steps, 0);
   holds.assign(mi.layers, {});
   used_tok.assign(mi.layers, {});
   return true;
@@ -214,6 +216,14 @@ void Core::reset_stats() {
   ns.reset_stats();
   std::fill(wait_step.begin(), wait_step.end(), 0.0);
   std::fill(miss_step.begin(), miss_step.end(), 0);
+  std::fill(wait_unnamed_step.begin(), wait_unnamed_step.end(), 0.0);
+  std::fill(nwait_unnamed_step.begin(), nwait_unnamed_step.end(), 0);
+  // the run-ahead's counters and where the wait sits: from here, as every decode statistic (they used to count the
+  // prompt's single steps too); its pending names (ra.step, pslot) are state, not statistics, and stay
+  ra.events = ra.ms = ra.would_read = ra.found = ra.lead_ms = ra.issued = ra.wasted = ra.top8 = ra.top8_n = 0;
+  ra.aborted = ra.over_ms = ra.refused = ra.withheld = ra.skip_budget = ra.skip_sat = 0;
+  for (int d = 0; d < 4; d++) deep_top8[d] = deep_n[d] = deep_would[d] = deep_found[d] = deep_events[d] = deep_issued[d] = deep_wasted[d] = 0;
+  wait_cov_ms = wait_uncov_ms = steps_wait_cov = steps_wait_uncov = steps_no_wait = steps_total = 0;
   t.zero();
   exp_spin_ns.store(0);
   for (int a = 0; a < 2; a++)
@@ -939,7 +949,7 @@ void Core::lossless(int step, const float* x, float* y, const MoeView& v) {
   wait_step[step] += wt;
   t.experts += ms_between(t2, t3) - wt - rat;
   t.ra += rat;
-  ra_where(wt);
+  ra_where(step, wt);
   stage_mark(ST_MOE_CACHE);
   finish_step(step, sl, K);
   if (hook) {
@@ -1060,11 +1070,17 @@ void Core::ra_predict(int step, const MoeView& v, const bool* done, const float*
   ra_tok_events += 1;
 }
 
-void Core::ra_where(double wt) {
+void Core::ra_where(int step, double wt) {
   steps_total += 1;
-  if (wt <= 0.01) steps_no_wait += 1;
-  else if (ra_cov) wait_cov_ms += wt, steps_wait_cov += 1;
-  else wait_uncov_ms += wt, steps_wait_uncov += 1;
+  if (wt <= 0.01) {
+    steps_no_wait += 1;
+  } else if (ra_cov) {
+    wait_cov_ms += wt, steps_wait_cov += 1;
+  } else {
+    wait_uncov_ms += wt, steps_wait_uncov += 1;
+    wait_unnamed_step[step] += wt;
+    nwait_unnamed_step[step]++;
+  }
   ra_cov = false;
 }
 
@@ -1385,7 +1401,7 @@ void Core::approx(int step, const float* x, float* y, const MoeView& v) {
   wait_step[step] += wt;
   t.experts += ms_between(t2, t3) - wt - rat;
   t.ra += rat;
-  ra_where(wt);
+  ra_where(step, wt);
   auto& ut = used_tok[L];
   if (looped(step)) {
     if (pass == 0) ut.clear();

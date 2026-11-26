@@ -187,12 +187,49 @@ void run_rows_n(Pool& pool, const JobN* jobs, int nj, int chunk, bool ref = fals
 
 // ---------------------------------------------------------------------------------------------- numerics
 float dot_bf16(const uint16_t* w, const float* x, int n);
+// rmsnorm's factor 1 / rms(x) of N rows (row s: x[s], len elements): each row's sum of squares in double, in order, the
+// scale in float. A sum is a chain of dependent adds; the N rows' chains run side by side, so N factors take about the
+// time of one, each the same bits as alone.
+template <int N>
+inline void rms_factors_k(const float* const* x, int len, float eps, float* rs) {
+  double ss[N];
+  for (int s = 0; s < N; s++) ss[s] = 0;
+  for (int i = 0; i < len; i++)
+    for (int s = 0; s < N; s++) ss[s] += (double)x[s][i] * x[s][i];
+  for (int s = 0; s < N; s++) rs[s] = 1.f / std::sqrt((float)(ss[s] / len) + eps);
+}
+// the same for any number of rows (in groups of up to 4: a row's arithmetic does not depend on the grouping)
+inline void rms_factors(const float* const* x, int n, int len, float eps, float* rs) {
+  for (int s = 0; s < n; s += 4) {
+    switch (n - s < 4 ? n - s : 4) {
+      case 1: rms_factors_k<1>(x + s, len, eps, rs + s); break;
+      case 2: rms_factors_k<2>(x + s, len, eps, rs + s); break;
+      case 3: rms_factors_k<3>(x + s, len, eps, rs + s); break;
+      default: rms_factors_k<4>(x + s, len, eps, rs + s); break;
+    }
+  }
+}
 // out = x / rms(x) * w (w null: no weight); the sum of squares in double, the scale in float
 inline void rmsnorm(const float* x, const float* w, int n, float eps, float* out) {
-  double ss = 0;
-  for (int i = 0; i < n; i++) ss += (double)x[i] * x[i];
-  float r = 1.f / std::sqrt((float)(ss / n) + eps);
+  float r;
+  rms_factors_k<1>(&x, n, eps, &r);
   for (int i = 0; i < n; i++) out[i] = x[i] * r * (w ? w[i] : 1.f);
+}
+// rmsnorm of n independent rows (row s: x[s] -> out[s] with weight w[s], w or w[s] null: none), each row bit for bit
+// rmsnorm's, the rows' sums side by side (rms_factors); every factor is taken before any row is written
+inline void rmsnorm_n(const float* const* x, const float* const* w, int n, int len, float eps, float* const* out) {
+  for (int s0 = 0; s0 < n; s0 += 4) {
+    const int k = n - s0 < 4 ? n - s0 : 4;
+    float rs[4];
+    rms_factors(x + s0, k, len, eps, rs);
+    for (int s = 0; s < k; s++) {
+      const float* xs = x[s0 + s];
+      const float* ws = w ? w[s0 + s] : nullptr;
+      float* o = out[s0 + s];
+      const float r = rs[s];
+      for (int i = 0; i < len; i++) o[i] = xs[i] * r * (ws ? ws[i] : 1.f);
+    }
+  }
 }
 inline float sigm(float x) { return 1.f / (1.f + std::exp(-x)); }
 inline float silu(float x) { return x / (1.f + std::exp(-x)); }

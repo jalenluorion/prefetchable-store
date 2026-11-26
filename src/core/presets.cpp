@@ -29,20 +29,20 @@ using ms::Json;
 // defaults, drafting); what is left here is a property of the device class each profile stands for, measured with the
 // models of the weight repos (results/ios/p3-gpu/GPU-PREFILL.md: the Mac's GPU share of the prefill;
 // results/parity/PARITY.md: run-ahead at depth 1; the phones: 8 readers, run-ahead limited to 0.2 of the token's compute,
-// off while the readers are saturated, exact mode only; phone-small: the 4-bit resident in fast mode with the confidence
-// names rule, results/ios). The run-ahead names a step's top_k picks ("top_k": the manifest's experts.top_k) unless a
-// profile says otherwise.
+// off while the readers are saturated, exact mode only; both phones default to fast mode (exact on request);
+// phone-small: the 4-bit resident with the confidence names rule, results/ios). The run-ahead names a step's top_k
+// picks ("top_k": the manifest's experts.top_k) unless a profile says otherwise.
 #include "published_defaults.inc"
 static const char* BUILTIN = R"({
  "modes": {"exact": {"engine": "lossless"}, "fast": {"engine": "approx:drop"}},
  "profiles": {
   "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
           "run_ahead": {"picks": "top_k", "depth": 1}},
-  "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+  "phone": {"mode": "fast", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
             "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
   "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
                   "readers": 8, "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
- "defaults": {"routers": [], "names": {"rule": "top", "m": 8}, "cross_token": null, "eviction": "auto", "drafts": false}})";
+ "defaults": {"routers": [], "names": {"rule": "top", "m": 8}, "cross_token": null, "eviction": "auto", "drafts": {"lookup": false, "head": false}}})";
 
 // the published declarations of `family` (null: none, an unknown family)
 static const Json* published(const std::string& family) {
@@ -306,7 +306,18 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
   if (const Json* pr = dflt("priority_reads"); pr && pr->kind == Json::BOOL) p.rd_prio = pr->b && (!p.routers.empty() || !p.xtok.empty());
   if (const Json* ev = dflt("eviction")) p.evict = ev->str_or("auto");
   if (const Json* lc = dflt("layer_caps")) p.layer_caps = lc->str_or("");
-  if (const Json* dr = dflt("drafts")) p.drafts = dr->kind == Json::BOOL && dr->b;
+  if (const Json* dr = dflt("drafts")) {  // {"lookup": B, "head": B}; a bool (an older manifest): the lookup drafts
+    if (dr->kind == Json::BOOL) {
+      p.draft_lookup = dr->b;
+    } else if (dr->kind == Json::OBJ) {
+      for (auto& kv : dr->obj)
+        if (kv.first != "lookup" && kv.first != "head") return (err = "profile " + p.profile + ": drafts." + kv.first + ": not a drafting source (lookup, head)"), false;
+      p.draft_lookup = (*dr)["lookup"].kind == Json::BOOL && (*dr)["lookup"].b;
+      p.draft_head = (*dr)["head"].kind == Json::BOOL && (*dr)["head"].b;
+    } else {
+      return (err = "profile " + p.profile + ": drafts must be {\"lookup\": bool, \"head\": bool}"), false;
+    }
+  }
   if (const Json* pg = prof("prefill_gpu"); pg && pg->kind == Json::OBJ) {  // per profile only (the device decides)
     p.gpu_frac = (*pg)["projections"].f(0);
     p.gpu_experts = (*pg)["experts"].f(0);
@@ -368,7 +379,8 @@ std::string Preset::json() const {
     << ",\"names\":" << (tau > 0 ? "{\"rule\":\"confidence\",\"tau\":" + std::to_string(tau) + ",\"candidates\":" + std::to_string(cand) + "}"
                                  : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << q(xtok_id) << ",\"cross_token_file\":" << q(xtok) << ",\"priority_reads\":" << (rd_prio ? "true" : "false")
-    << ",\"eviction\":" << q(evict) << ",\"layer_caps\":" << q(layer_caps) << ",\"drafts\":" << (drafts ? "true" : "false") << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
+    << ",\"eviction\":" << q(evict) << ",\"layer_caps\":" << q(layer_caps) << ",\"drafts\":{\"lookup\":" << (draft_lookup ? "true" : "false") << ",\"head\":" << (draft_head ? "true" : "false")
+    << "},\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"notes\":[";
@@ -396,7 +408,8 @@ std::string Resolved::json() const {
                                   : "{\"rule\":\"top\",\"m\":" + std::to_string(m) + "}")
     << ",\"cross_token\":" << qq(xtok) << ",\"cache_gb\":" << cache_gb << ",\"cache_auto\":" << (cache_auto ? "true" : "false")
     << ",\"cache_start\":" << (cache_auto ? qq(cache_start) : std::string("null"))
-    << ",\"eviction\":" << qq(evict) << ",\"drafts\":" << drafts << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
+    << ",\"eviction\":" << qq(evict) << ",\"drafts\":{\"lookup\":" << (draft == "lookup" || draft == "fixed" || draft == "both" ? "true" : "false")
+    << ",\"head\":" << (draft == "head" || draft == "both" ? "true" : "false") << "},\"draft\":" << qq(draft) << ",\"prefill_gpu\":{\"projections\":" << gpu_frac
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
@@ -406,25 +419,43 @@ std::string Resolved::json() const {
   return o.str();
 }
 
-std::vector<std::pair<std::string, std::string>> declared_prefill(const std::string& dir, const std::string& family) {
+std::vector<std::pair<std::string, std::string>> declared_prefill(const std::string& dir, const std::string& family, const std::string& profile) {
   std::vector<std::pair<std::string, std::string>> out;
   ms::Manifest m;
   std::string err;
   const bool has = exists(dir + "/moved-store.json") && m.load(dir, err);
+  const Json* pub = published(has ? m.family : family);
+  auto take = [&](const Json* pf) {  // the block's values, each key replacing an earlier one
+    if (!pf || pf->kind != Json::OBJ) return;
+    for (auto& kv : pf->obj) {
+      const Json& v = kv.second;
+      if (kv.first == "notes" || kv.first == "note") continue;
+      char b[64];
+      if (v.kind == Json::NUM) snprintf(b, sizeof b, "%.17g", v.f(0));
+      else if (v.kind == Json::BOOL) snprintf(b, sizeof b, "%d", v.b ? 1 : 0);
+      else if (v.kind == Json::STR) snprintf(b, sizeof b, "%s", v.s().c_str());
+      else continue;  // notes, calibrations and the like
+      bool found = false;
+      for (auto& o : out)
+        if (o.first == kv.first) o.second = b, found = true;
+      if (!found) out.push_back({kv.first, b});
+    }
+  };
+  // the model's: the folder manifest's "prefill", else the family's published one
   const Json* pf = has ? member(&m.raw, "prefill") : nullptr;
-  if (!pf) pf = member(published(has ? m.family : family), "prefill");
-  if (!pf || pf->kind != Json::OBJ) return out;
-  for (auto& kv : pf->obj) {
-    const Json& v = kv.second;
-    if (kv.first == "notes" || kv.first == "note") continue;
-    char b[64];
-    if (v.kind == Json::NUM) snprintf(b, sizeof b, "%.17g", v.f(0));
-    else if (v.kind == Json::BOOL) snprintf(b, sizeof b, "%d", v.b ? 1 : 0);
-    else if (v.kind == Json::STR) snprintf(b, sizeof b, "%s", v.s().c_str());
-    else continue;  // notes and the like
-    out.push_back({kv.first, b});
+  take(pf ? pf : member(pub, "prefill"));
+  // then the profile's own "prefill" block (measured per device), the folder's profile, else the published one
+  if (!profile.empty() && profile != "none") {
+    const Json* pp = has ? member(member(member(&m.raw, "profiles"), profile), "prefill") : nullptr;
+    take(pp ? pp : member(member(member(pub, "profiles"), profile), "prefill"));
   }
   return out;
+}
+
+std::string prefill_json(const std::vector<std::pair<std::string, std::string>>& kv) {
+  std::string o = "{";
+  for (size_t i = 0; i < kv.size(); i++) o += (i ? ",\"" : "\"") + kv[i].first + "\":" + q(kv[i].second);
+  return o + "}";
 }
 
 std::vector<double> draft_cost_prior(const std::string& dir) {
@@ -457,7 +488,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.cache_auto = cache != "fixed";
   x.cache_start = cache_start;
   x.evict = evict;
-  x.drafts = drafts > 0 ? 1 : 0;
+  x.draft = draft;
   x.gpu_frac = gpu_frac;
   x.gpu_experts = gpu_experts;
   x.run_ahead = run_ahead > 0 ? run_ahead : 0;
@@ -531,9 +562,10 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   r.bg_ranks = g.bg_ranks ? *g.bg_ranks : pf ? P.bg_ranks : r.bg_ranks;
   r.bg_gate = g.bg_gate ? *g.bg_gate : pf ? P.bg_gate : r.bg_gate;
   // drafting
-  if (g.drafts) r.drafts = *g.drafts;
-  else if (pf) r.drafts = P.drafts ? 1 : 0;
-  r.draft = g.draft ? *g.draft : r.drafts > 0 ? "lookup" : r.draft;
+  if (g.draft) r.draft = *g.draft;
+  else if (g.drafts) r.draft = *g.drafts > 0 ? "lookup" : "none";
+  else if (pf) r.draft = P.draft_lookup && P.draft_head ? "both" : P.draft_lookup ? "lookup" : P.draft_head ? "head" : "none";
+  r.drafts = r.draft != "none" ? 1 : 0;
   // no early names under --drafts 1: on the real 35B and Inkling (agent turns, 6.6 / 7.8 GB) naming the lookup source's
   // picks 4 positions ahead read 40-70 MB per token more than plain decoding and cancelled the passes' gain (early 0: fewer
   // MB per token than plain decoding at the same tokens per step); --early N still sets it

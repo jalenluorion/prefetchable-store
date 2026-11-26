@@ -39,10 +39,9 @@ each user turn so the warmed system prompt stays the same across days.
 
 The app picks the profile from the memory iOS makes available to it when it opens:
 
-- **`phone`**: at least 5.0 GB available to the app. 8-bit in-memory weights.
-- **`phone-small`**: the 6 GB class (iPhone 14 Pro, iPhone 15, iPhone 15 Plus). Calibrated 4-bit in-memory weights.
-
-The app starts in Fast on both profiles.
+- **`phone`**: at least 5.0 GB available to the app. 8-bit in-memory weights, Fast by default.
+- **`phone-small`**: the 6 GB class (iPhone 14 Pro, iPhone 15, iPhone 15 Plus). Calibrated 4-bit in-memory weights,
+  Fast by default.
 
 Below 3 GB available the app says the phone does not have enough memory instead of offering the download.
 
@@ -107,9 +106,9 @@ profile (the table above) and starts when you tap **Download**.
 
 ## Using the app
 
-**Fast and Exact** are under Settings › Model › Mode, one setting per model. Fast is the default for both models on
-every phone; choose Exact for answers identical to the full model's, at a slower speed. A change applies the next time
-you open the app (or when you switch models).
+**Exact and Fast** are under Settings › Model › Mode, one setting per model. The default is Fast on both profiles
+(`phone` and `phone-small`) for both models; Exact stays your choice. A change applies the next time you open the app
+(or when you switch models).
 
 **Spare memory.** On a phone with at least 11 GB of memory, Settings › Diagnostics › Use spare memory for the model's
 files (off by default) keeps recently used parts of the model in memory the system has spare, so fewer are read from

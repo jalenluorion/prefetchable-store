@@ -202,10 +202,12 @@ bool Qwen35::verify(State& s0, const int32_t* ids, int n, Want want) {
   for (int L = 0; L < c.NL; L++) {
     const Lw& W = lw[L];
     auto ta = clk::now();
-    for (int i = 0; i < n; i++) {
-      rmsnorm(xs[i], W.ln_in, H, c.eps, hs[i]);
-      W8.xa[i].prep(hs[i], H);
+    {  // the positions' norms side by side (rmsnorm_n: each position's rmsnorm bits)
+      const float* nw[TMAX];
+      for (int i = 0; i < n; i++) nw[i] = W.ln_in;
+      rmsnorm_n(xs, nw, n, H, c.eps, hs);
     }
+    for (int i = 0; i < n; i++) W8.xa[i].prep(hs[i], H);
     const XQB* pA = pk(W8.pa, W8.xa, H);
     float* ob[TMAX];
     for (int i = 0; i < n; i++) ob[i] = W8.ob.data() + (size_t)i * std::max(ZD, QD);
@@ -295,7 +297,11 @@ bool Qwen35::verify(State& s0, const int32_t* ids, int n, Want want) {
       float* x = xs[i];
       const float* y = ys[i];
       for (int j = 0; j < H; j++) x[j] += y[j];
-      rmsnorm(x, W.ln_post, H, c.eps, hs[i]);
+    }
+    {
+      const float* nw[TMAX];
+      for (int i = 0; i < n; i++) nw[i] = W.ln_post;
+      rmsnorm_n(xs, nw, n, H, c.eps, hs);
     }
     core->moe_chunk(L, n, hf, ys, views[L]);
     for (int i = 0; i < n; i++) {
@@ -306,10 +312,12 @@ bool Qwen35::verify(State& s0, const int32_t* ids, int n, Want want) {
   }
   // every position's logits, as the single step's head computes them
   auto th = clk::now();
-  for (int i = 0; i < n; i++) {
-    rmsnorm(xs[i], fnorm, H, c.eps, hs[i]);
-    W8.xh[i].prep(hs[i], H);
+  {
+    const float* nw[TMAX];
+    for (int i = 0; i < n; i++) nw[i] = fnorm;
+    rmsnorm_n(xs, nw, n, H, c.eps, hs);
   }
+  for (int i = 0; i < n; i++) W8.xh[i].prep(hs[i], H);
   float* lo[TMAX];
   for (int i = 0; i < n; i++) lo[i] = W8.lg.data() + (size_t)i * c.V;
   if (fast_head && !W8.old && (want == Want::GREEDY || (want == Want::TOPK && head_topk > 0))) {

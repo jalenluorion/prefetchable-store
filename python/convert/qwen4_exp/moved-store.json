@@ -796,7 +796,8 @@
  },
  "drafting": {
   "cost_prior": null,
-  "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it"
+  "note": "no measured pass costs declared: the draft controller starts from the neutral prior (a pass of n positions costs n steps) until a session's measured costs (DIR/.dmeng/draft_cost.txt) replace it",
+  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: none (this family has no draft head: a profile declaring head fails at open)), resolved once for dmeng, dmserve and the C API (which has no drafting: a declared default stays off there, an explicit request is refused); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile until measured on the real model; this family has no multi-position verify pass yet, so a profile declaring either source fails at open"
  },
  "modes": {
   "exact": {
@@ -992,6 +993,10 @@
   "mac": {
    "when": "macOS",
    "mode": "exact",
+   "drafts": {
+    "lookup": false,
+    "head": false
+   },
    "resident": "resident_q8",
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
@@ -1406,7 +1411,6 @@
   "cross_token": null,
   "eviction": "auto",
   "layer_caps": "none",
-  "drafts": false,
   "priority_reads": true
  },
  "layout": {

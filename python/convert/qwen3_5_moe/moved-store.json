@@ -1109,6 +1109,10 @@
   "mac": {
    "when": "macOS",
    "mode": "exact",
+   "drafts": {
+    "lookup": false,
+    "head": false
+   },
    "resident": "resident_q8",
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
@@ -1372,6 +1376,42 @@
     "projections": 0.4,
     "experts": 0.4
    },
+   "prefill": {
+    "apart": 0,
+    "calibration": {
+     "measured": "base M4 16 GB, AC, the merged build (next), mac profile; 400 tokens after the model's code prompt, cache 6.6 GB; MB read per token, the published engine's beside",
+     "rows": [
+      {
+       "setting": "apart 1 (the model-level value)",
+       "mb_per_token": {
+        "exact": 89.1,
+        "fast": 68.6
+       },
+       "best_tok_s": {
+        "exact": 13.7
+       }
+      },
+      {
+       "setting": "apart 0 (this)",
+       "mb_per_token": {
+        "exact": 83.3,
+        "fast": 51.9
+       },
+       "best_tok_s": {
+        "exact": 16.34
+       }
+      },
+      {
+       "setting": "the published engine",
+       "mb_per_token": {
+        "exact": 94.4,
+        "fast": 65.8
+       }
+      }
+     ],
+     "reason": "off on the Mac: keeping the prompt apart from the decode's cache statistics (on from a Flash-Next measurement) cost this model decode reads after a long prompt, in exact and fast mode; the phone profiles keep the model-level value until measured on the iPhone"
+    }
+   },
    "run_ahead": {
     "picks": 8,
     "depth": 1
@@ -1379,7 +1419,11 @@
   },
   "phone": {
    "when": "iOS with at least 5.0 GB available at open",
-   "mode": "exact",
+   "mode": "fast",
+   "drafts": {
+    "lookup": false,
+    "head": false
+   },
    "resident": "resident_q8",
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
@@ -1654,6 +1698,10 @@
   "phone-small": {
    "when": "iOS with less than 5.0 GB available at open (the 6 GB class)",
    "mode": "fast",
+   "drafts": {
+    "lookup": false,
+    "head": false
+   },
    "resident": "resident_q4",
    "precision": "4-bit",
    "precision_detail": "4-bit affine, groups of 64, calibrated",
@@ -1937,7 +1985,6 @@
   },
   "cross_token": null,
   "eviction": "auto",
-  "drafts": false,
   "experts": "aff4_g64: our 4-bit affine, groups of 64 (store/)",
   "priority_reads": true,
   "notes": {
@@ -1945,7 +1992,6 @@
    "names": "the confidence rule (tau 0.5 of 16 candidates) on every profile, as Inkling: measured on the base M4 (5.0 GB cache, exact, the code prompt and 200 tokens, two alternating pairs, AC, other processes 200-400% CPU): 128.5 / 128.7 MB per token, 8.14 / 13.23 tok/s, wait 11.9 / 13.8 ms against a top 8 143.4 / 143.5 MB, 9.13 / 11.16 tok/s, 14.7 / 13.9 ms: 10% fewer bytes, speed within the runs' spread",
    "cross_token": "none yet",
    "prompt_path": "batched span prefill, prefix cache with disk checkpoints, idle-time prefill of the next turn, saved hot set",
-   "drafts": "--drafts 1 is experimental (lookup and tool-call skeleton drafts, greedy requests only)",
    "priority_reads": "speculative reads (router and cross-token names) by priority, nearest step first, instead of first in, first out: the same for every family"
   }
  },
@@ -2000,6 +2046,7 @@
     2.8
    ],
    "estimated": "not used by the engine: from the measured parts of the verify pass after its fixes (the recurrent state streamed once per pass, the screened head, the packed gemm from 2 positions): 1.15 at 2 positions and 2.8 at 8, linear between; to replace the measured prior only after a real-model measurement"
-  }
+  },
+  "default_note": "profiles.<p>.drafts = {lookup, head}: drafting by default (lookup: the lookup and tool-call drafts; head: none (this family has no draft head: a profile declaring head fails at open)), resolved once for dmeng, dmserve and the C API (which has no drafting: a declared default stays off there, an explicit request is refused); --drafts 0|1 and --draft none|lookup|fixed|head|both override it; off on every profile until measured on the real model"
  }
 }

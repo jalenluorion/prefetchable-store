@@ -40,8 +40,8 @@ enum ModelKind: String, CaseIterable, Identifiable, Codable {
     func ctx(profile: String) -> Int { self == .inkling && profile == "phone-small" ? 4096 : 16384 }
     /// The mode setting's key: one per model (each model has its default per profile).
     var modeKey: String { self == .qwen36 ? "engine.mode" : "engine.mode.inkling" }
-    /// Fast on every profile, for both models (a user who chose Exact or Fast keeps that choice).
-    func defaultMode(profile: String) -> String { "fast" }
+    /// Fast on both phone profiles (phone, phone-small), for both models; Exact elsewhere (the manifests' profiles agree).
+    func defaultMode(profile: String) -> String { profile == "phone" || profile == "phone-small" ? "fast" : "exact" }
     /// The engine's mode string for the app's Fast. 35B: approx:drop at the threshold measured for the calibrated 4-bit
     /// in-memory weights (0.08); Inkling: the engine's own fast preset.
     var fastEngineMode: String { self == .qwen36 ? "approx:drop:w=0.08" : "fast" }

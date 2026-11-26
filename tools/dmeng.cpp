@@ -48,7 +48,7 @@ static const char* HELP_SHORT = R"(usage: dmeng --model DIR (--prompt TEXT | --p
   --temp T --top-p P --top-k K --seed S   sampling (default: greedy)
   --cache-gb G|auto      expert cache size in GB (default auto: from the memory free at start)
   --drafts 0|1           draft and verify, greedy or sampled (the ids are plain decoding's for the seed), in exact and fast
-                         mode (default 0)
+                         mode (default: the profile's drafts, off in every published profile)
   --json F               write the statistics line to F as well
   --help-advanced        every other option, grouped
 )";
@@ -63,7 +63,7 @@ profiles and modes (docs/MANIFEST-PRESETS.md)
                          --plan-routers makes the early address entirely the command line's
   --mode exact|fast|lossless|approx[:PRESET]   exact = lossless, fast = approx:drop (default: the profile's)
   --drafts 0|1           1 = --draft lookup (no early names), as in dmserve (a model's draft head: --draft head|both); default:
-                         the profile's (off)
+                         the profile's drafts {lookup, head} (off in every published profile)
   --reserve-gb G         --cache-gb auto: memory left to the rest of the system (default 5.5)
   --print-defaults       print the resolved profile defaults as JSON and exit
   --model-opt NAME=V     a model or engine option (Model::set_option, then Core::set_option: chunk_aff4, prefill_*)
@@ -912,6 +912,12 @@ int main(int argc, char** argv) {
       for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per(C.wait_step[s]);
       js << "],\"misses_by_step\":[";
       for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per((double)C.miss_step[s]);
+      // the part of each step's wait the run-ahead had not named (a chain's first miss; run_ahead.wait_not_named_ms by
+      // step) and how often such a step waited, per token
+      js << "],\"wait_not_named_ms_by_step\":[";
+      for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per(C.wait_unnamed_step[s]);
+      js << "],\"waits_not_named_by_step\":[";
+      for (int s = 0; s < C.steps; s++) js << (s ? "," : "") << per((double)C.nwait_unnamed_step[s]);
       js << "]";
     }
     {
@@ -980,7 +986,7 @@ int main(int argc, char** argv) {
             r.bg_ranks = rts.bg_ranks;
             r.cache = a.cache_auto ? r.cache : "fixed";
             return r.resolved(a.cache_gb).json();
-          }() << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
+          }() << ",\"prefill_declared\":" << prefill_json(lo.prefill) << ",\"cache_auto\":" << auto_why << ",\"prefetch\":\"" << a.prefetch
        << "\",\"lead\":\"" << (a.prefetch == "oracle" ? a.lead : a.prefetch == "router" ? std::to_string(rts.lag) : plan ? a.plan_routers : "0")
        << "\",\"m\":" << (a.prefetch == "router" ? a.m : 0) << ",\"cache_gb\":" << a.cache_gb << ",\"slots\":[";
     for (int p = 0; p < C.cache.npools; p++) js << (p ? "," : "") << C.cache.slots(p);

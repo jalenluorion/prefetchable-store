@@ -492,8 +492,12 @@ void Flash::ng_row(const uint8_t* rec, float* out) const {
   for (int i = 0; i < c.ng_dim; i++) out[i] = (float)(int8_t)rec[2 + i] * s;
 }
 
-void Flash::hc_norm(const HCw& w, const float* hyper, float* normed) const {
-  for (int s = 0; s < c.HC; s++) rmsnorm(hyper + (size_t)s * c.H, w.norm + (size_t)s * c.H, c.H, c.eps, normed + (size_t)s * c.H);
+void Flash::hc_norm(const HCw& w, const float* hyper, float* normed) const {  // the streams' norms side by side
+  const float* x[64];
+  const float* nw[64];
+  float* o[64];
+  for (int s = 0; s < c.HC; s++) x[s] = hyper + (size_t)s * c.H, nw[s] = w.norm + (size_t)s * c.H, o[s] = normed + (size_t)s * c.H;
+  rmsnorm_n(x, nw, c.HC, c.H, c.eps, o);
 }
 void Flash::hc_lo(float* l) const {
   for (int i = 0; i < c.LOW; i++) l[i] = silu(l[i] / (float)c.HC);
@@ -517,19 +521,27 @@ void Flash::ple_gate(const Lw& w, const float* key, const float* value, const fl
   const int H = c.H;
   float kn[8192], qn[8192], gt[64];
   for (int s = 0; s < c.HC; s++) {
-    rmsnorm(key + (size_t)s * H, w.pnk + (size_t)s * H, H, c.eps, kn);
-    rmsnorm(hyper + (size_t)s * H, w.pnq + (size_t)s * H, H, c.eps, qn);
+    {  // the key's and the query's norms side by side
+      const float* x2[2] = {key + (size_t)s * H, hyper + (size_t)s * H};
+      const float* w2[2] = {w.pnk + (size_t)s * H, w.pnq + (size_t)s * H};
+      float* o2[2] = {kn, qn};
+      rmsnorm_n(x2, w2, 2, H, c.eps, o2);
+    }
     double d = 0;
     for (int i = 0; i < H; i++) d += (double)kn[i] * qn[i];
     const float g = (float)d / std::sqrt((float)H);
     const float sg = g > 0.f ? 1.f : (g < 0.f ? -1.f : 0.f);
     gt[s] = sg * std::sqrt(std::max(std::fabs(g), 1e-6f));
   }
+  const float* gx[64];
+  const float* gw[64];
+  float* go[64];
   for (int s = 0; s < c.HC; s++) {
     const float sg = sigm(gt[s]);
     for (int i = 0; i < H; i++) gated[(size_t)s * H + i] = sg * value[i];
-    rmsnorm(gated + (size_t)s * H, w.pnc + (size_t)s * H, H, c.eps, normed + (size_t)s * H);
+    gx[s] = gated + (size_t)s * H, gw[s] = w.pnc + (size_t)s * H, go[s] = normed + (size_t)s * H;
   }
+  rmsnorm_n(gx, gw, c.HC, H, c.eps, go);  // the streams' norms side by side
 }
 // channel ch of the PLE's dilated depthwise convolution over [state, this position] (tap k reads position k * ngram_size
 // of the window, the taps as one fused multiply-add chain), its silu; then (commit) the channel's state moves by one
@@ -755,12 +767,10 @@ void Flash::hc_step(const HCw& w, const float* hyper, float* mixed, float* inj_o
   if (!ref) {  // (the reference path: below, its inputs in fp32)
     const int H = c.H;
     float rs[64];
-    {  // rmsnorm's factor per stream: the sum of squares in double, in order (the streams' chains side by side)
-      double ss[64];
-      for (int s = 0; s < c.HC; s++) ss[s] = 0;
-      for (int i = 0; i < H; i++)
-        for (int s = 0; s < c.HC; s++) ss[s] += (double)hyper[(size_t)s * H + i] * hyper[(size_t)s * H + i];
-      for (int s = 0; s < c.HC; s++) rs[s] = 1.f / std::sqrt((float)(ss[s] / H) + c.eps);
+    {  // rmsnorm's factor per stream (the streams' chains side by side: rms_factors)
+      const float* x[64];
+      for (int s = 0; s < c.HC; s++) x[s] = hyper + (size_t)s * H;
+      rms_factors(x, c.HC, H, c.eps, rs);
     }
     float r[64];
     HcA A;

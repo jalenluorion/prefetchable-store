@@ -148,6 +148,11 @@ add_executable(bench_mats tests/kernels/bench_mats.cpp)
 target_link_libraries(bench_mats PRIVATE dmengcore)
 target_compile_options(bench_mats PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
 
+# the decode's norms one row at a time against side by side (rmsnorm_n), the bits checked first (tests/kernels/bench_norms.cpp)
+add_executable(bench_norms tests/kernels/bench_norms.cpp)
+target_link_libraries(bench_norms PRIVATE dmengcore)
+target_compile_options(bench_norms PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
+
 add_executable(bench_kmulti_sme4 tests/kernels/bench_kmulti_sme4.cpp)
 target_link_libraries(bench_kmulti_sme4 PRIVATE dmengcore)
 target_compile_options(bench_kmulti_sme4 PRIVATE ${DM_ARCH} ${DM_CONTRACT} -Wall)
