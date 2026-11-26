@@ -22,7 +22,11 @@
  * The ids are compared within each mode (an approximate mode's ids legitimately depend on what is in memory); the exit
  * code is 4 when two arms of the exact mode differ. --measure-after N: each arm decodes N tokens before its counters and
  * clock start (n - N measured). --force-exact 1: an arm of another mode is fed the first exact arm's ids (teacher forcing)
- * and reports its top-1 agreement with them over the measured positions.
+ * and reports its top-1 agreement with them over the measured positions (an exact arm should then be the longest).
+ * More overrides: /n=N (tokens for this arm), /opt=K:V+K:V (model options K=V), /run=FLAG:V+FLAG:V (run flags, as
+ * run:--FLAG=V), /alt=1 (the model folder given by --alt-model instead of --model). Per arm also: the sampled peak
+ * footprint (prefill progress and every 10 tokens), the reads split (urgent, named, named and never used, MB per
+ * pool), the run-ahead's and the approximate mode's accounts.
  */
 #include <dirent.h>
 #include <fcntl.h>
@@ -37,7 +41,25 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <mach/mach.h>
+
 #include "dmeng_c.h"
+
+/* the process's physical footprint now (task_vm_info, what iOS charges an app), bytes */
+static uint64_t footprint_now(void) {
+  task_vm_info_data_t vi;
+  mach_msg_type_number_t c = TASK_VM_INFO_COUNT;
+  return task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&vi, &c) == KERN_SUCCESS ? vi.phys_footprint : 0;
+}
+static uint64_t arm_peak = 0;  /* the arm's sampled peak footprint (prefill progress, every 10 decode tokens) */
+static void peak_sample(void) {
+  const uint64_t f = footprint_now();
+  if (f > arm_peak) arm_peak = f;
+}
+static void on_progress_peak(void* user, int done, int total, double mb) {
+  (void)user, (void)done, (void)total, (void)mb;
+  peak_sample();
+}
 
 static double now_ms(void) {
   struct timespec t;
@@ -180,25 +202,42 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   if (arm_opt(arm, "readers", v, sizeof v)) o.readers = atoi(v);
   if (arm_opt(arm, "cache", v, sizeof v)) o.cache_bytes = (int64_t)(atof(v) * 1e9);
   if (arm_opt(arm, "drive", v, sizeof v)) snprintf(drive, sizeof drive, ";run:drive-gbs=%s", v);
-  snprintf(mo, sizeof mo, "%s%srun:spare-mem=%d%s", o.model_options ? o.model_options : "", o.model_options && *o.model_options ? ";" : "", on,
-           drive);
+  if (arm_opt(arm, "n", v, sizeof v) && atoi(v) > 1) n = atoi(v);
+  char extra[512] = "", ov[256];
+  if (arm_opt(arm, "opt", ov, sizeof ov))
+    for (char *sv = NULL, *t = strtok_r(ov, "+", &sv); t; t = strtok_r(NULL, "+", &sv)) {
+      char* c = strchr(t, ':');
+      if (c) *c = '=';
+      snprintf(extra + strlen(extra), sizeof extra - strlen(extra), ";%s", t);
+    }
+  if (arm_opt(arm, "run", ov, sizeof ov))
+    for (char *sv = NULL, *t = strtok_r(ov, "+", &sv); t; t = strtok_r(NULL, "+", &sv)) {
+      char* c = strchr(t, ':');
+      if (c) *c = '=';
+      snprintf(extra + strlen(extra), sizeof extra - strlen(extra), ";run:%s", t);
+    }
+  snprintf(mo, sizeof mo, "%s%srun:spare-mem=%d%s%s", o.model_options ? o.model_options : "", o.model_options && *o.model_options ? ";" : "", on,
+           drive, extra);
   o.model_options = mo;
   if (nothing) o.file_evict_hint = 2;
   if (after < 0 || after >= n - 1) after = 0;
   const double before = store_cache_gb(model, 0), at_start = warm ? before : store_cache_gb(model, 1);
+  arm_peak = 0;
   double t0 = now_ms();
   dm_engine* e = dm_open(model, &o);
   if (!e) {
     fprintf(stderr, "dm_open (%s): %s\n", arm, dm_last_error(NULL));
     return -1;
   }
+  peak_sample();
   const double load_s = (now_ms() - t0) / 1e3;
   dm_info_t inf;
   dm_info(e, &inf);
   float* lg = malloc(sizeof(float) * inf.vocab);
   dm_sync_result sr;
   double tp = now_ms();
-  if (dm_sync(e, ids, np, NULL, 0, lg, NULL, NULL, &sr) != DM_OK) return -1;
+  if (dm_sync(e, ids, np, NULL, 0, lg, on_progress_peak, NULL, &sr) != DM_OK) return -1;
+  peak_sample();
   const double prefill_s = (now_ms() - tp) / 1e3;
   gen[0] = dm_argmax(lg, inf.vocab);
   dm_counters_t c0, c1;
@@ -209,15 +248,22 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
     gen[k] = dm_argmax(lg, inf.vocab);
   }
   const int k0 = k;
-  dm_stats_json(e);
+  double pool0[4] = {0, 0, 0, 0};
+  {
+    const char* js0 = dm_stats_json(e);
+    const char* p = strstr(js0, "\"gb_read_by_pool_total\":[");
+    if (p) sscanf(p + strlen("\"gb_read_by_pool_total\":["), "%lf,%lf,%lf,%lf", &pool0[0], &pool0[1], &pool0[2], &pool0[3]);
+  }
   dm_counters(e, &c0);
   const uint64_t d0 = disk_read_bytes(), pi0 = pageins();
-  double td = now_ms();
+  double td = now_ms(), t300 = 0;
   for (; k < n; k++) {
     const int32_t in = force && k - 1 < nforce ? force[k - 1] : gen[k - 1];
     if (dm_step(e, in, lg) != DM_OK) break;
     gen[k] = dm_argmax(lg, inf.vocab);
     if (force && k < nforce) agree += gen[k] == force[k], forced++;
+    if (k % 10 == 0) peak_sample();
+    if (k - k0 + 1 == 300) t300 = now_ms();  /* the first 300 measured tokens' rate too (arms of different lengths) */
   }
   const double dec_ms = now_ms() - td;
   const uint64_t d1 = disk_read_bytes(), pi1 = pageins();
@@ -228,25 +274,34 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
   if (rs) rs += strlen("\"resolved\":");
   const int rlen = rs && re ? (int)(re - rs) : 4;
   if (!rs || !re) rs = "null";
-  char loop[1024];
+  char loop[1024], reads[1024], ra[2048], apx[1024];
   json_obj(st, "loop", loop, sizeof loop);
+  json_obj(st, "reads", reads, sizeof reads);
+  json_obj(st, "run_ahead", ra, sizeof ra);
+  json_obj(st, "approx", apx, sizeof apx);
+  double pool1[4] = {0, 0, 0, 0};
+  {
+    const char* p = strstr(st, "\"gb_read_by_pool_total\":[");
+    if (p) sscanf(p + strlen("\"gb_read_by_pool_total\":["), "%lf,%lf,%lf,%lf", &pool1[0], &pool1[1], &pool1[2], &pool1[3]);
+  }
   const int steps = k - k0 > 0 ? k - k0 : 1;
   const uint64_t picks = c1.picks - c0.picks;
   const double wait = (c1.wait_ms - c0.wait_ms) / steps;
-  char line[12288];
+  char line[16384];
   snprintf(line, sizeof line,
            "{\"arm\":\"%s\",\"mode\":\"%s\",\"mem\":%d,\"threads\":%d,\"readers\":%d,\"spare_memory\":%d,\"evict_hint\":%d,\"store_cache_gb_before\":%.2f,"
            "\"store_cache_gb_at_start\":%.2f,\"store_cache_gb_at_end\":%.2f,\"cache_gb\":%.2f,\"load_s\":%.2f,\"prefill_s\":%.2f,\"prefill_mb\":%.0f,"
            "\"tokens\":%d,\"measured_tokens\":%d,\"tok_s\":%.3f,\"ms_per_token\":%.2f,\"wait_ms_per_token\":%.2f,\"compute_ms_per_token\":%.2f,"
            "\"hit_rate\":%.4f,\"mb_drive_counter_per_token\":%.2f,\"mb_spare_per_token\":%.2f,\"mb_disk_rusage_per_token\":%.2f,"
            "\"read_gb_s_busy\":%.3f,\"pageins_per_token\":%.2f,\"file_refaults_per_token\":%.3f,\"teacher_forced\":%d,\"agreement_with_exact\":%.4f,"
-           "\"loop\":%s,\"resolved\":%.*s}",
+           "\"tok_s_first_300\":%.3f,\"peak_footprint_gb\":%.2f,\"mb_by_pool_per_token\":[%.2f,%.2f],\"loop\":%s,\"reads\":%s,\"run_ahead\":%s,\"approx\":%s,\"resolved\":%.*s}",
            arm, o.mode ? o.mode : "", inf.memory_mode, inf.threads, inf.readers, c1.spare_memory, o.file_evict_hint, before, at_start,
            store_cache_gb(model, 0), inf.cache_bytes / 1e9, load_s, prefill_s, sr.mb_read, k, k - k0, (k - k0) / (dec_ms / 1e3),
            dec_ms / steps, wait, dec_ms / steps - wait, picks ? (double)(c1.hits - c0.hits) / picks : 0,
            (c1.bytes_read - c0.bytes_read) / 1e6 / steps, (c1.bytes_spare - c0.bytes_spare) / 1e6 / steps, (d1 - d0) / 1e6 / steps,
            (c1.bytes_read - c0.bytes_read) / 1e9 / ((c1.read_busy_ns - c0.read_busy_ns) / 1e9 + 1e-12), (double)(pi1 - pi0) / steps,
-           (double)(c1.file_refaults - c0.file_refaults) / steps, force != NULL, forced ? (double)agree / forced : -1.0, loop, rlen, rs);
+           (double)(c1.file_refaults - c0.file_refaults) / steps, force != NULL, forced ? (double)agree / forced : -1.0,
+           t300 > 0 ? 300 / ((t300 - td) / 1e3) : -1.0, arm_peak / 1e9, (pool1[0] - pool0[0]) * 1e3 / steps, (pool1[1] - pool0[1]) * 1e3 / steps, loop, reads, ra, apx, rlen, rs);
   printf("%s\n", line);
   fflush(stdout);
   if (jf) fprintf(jf, "%s\n", line), fflush(jf);
@@ -262,7 +317,7 @@ int main(int argc, char** argv) {
   int n = 400, threads = 0, readers = 0, resize_at = -1, cancel_test = 0;
   double gb = 3.3, resize_gb = 0;
   const char* policy_probe = NULL;
-  const char *arms = NULL, *model_opts = NULL;  /* --arms off,on,nothing (one process), --model-options S */
+  const char *arms = NULL, *model_opts = NULL, *alt_model = NULL;  /* --arms off,on,nothing (one process), --model-options S */
   int warm_n = 50, file_hint = 0, measure_after = 0, force_exact = 0;
   const char *resident = NULL, *mode = NULL;  /* --resident FILE (e.g. the 4-bit resident_q4), --mode approx:drop */
   const char* model_options = NULL;           /* --model-options "k=v;run:FLAG=VALUE" (dm_open_opts.model_options) */
@@ -324,6 +379,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--arms")) arms = v, i++;
     else if (!strcmp(k, "--warm-n")) warm_n = atoi(v), i++;
     else if (!strcmp(k, "--measure-after")) measure_after = atoi(v), i++;
+    else if (!strcmp(k, "--alt-model")) alt_model = v, i++;
     else if (!strcmp(k, "--force-exact")) force_exact = atoi(v), i++;
     else if (!strcmp(k, "--model-options")) model_opts = v, i++;
     else if (!strcmp(k, "--file-hint")) file_hint = atoi(v), i++;
@@ -382,7 +438,7 @@ int main(int argc, char** argv) {
     char mode_of[MAXA][64];
     int32_t* ref[MAXA];
     int nref[MAXA], nmodes = 0, same_exact = 1, same_all = 1;
-    int32_t* gen = malloc(sizeof(int32_t) * (n + 1));
+    int32_t* gen = malloc(sizeof(int32_t) * (n + 1 > 8192 ? n + 1 : 8192));  /* an arm may ask for more tokens (/n=) */
     int32_t* exact_ids = NULL;
     int nexact = 0;
     if (warm_n > 0) {
@@ -401,7 +457,9 @@ int main(int argc, char** argv) {
       const int exact = arm_exact(md);
       const int forced = force_exact && !exact && exact_ids;
       fprintf(stderr, "arm %s%s\n", arm, forced ? " (fed the first exact arm's ids)" : "");
-      const int k = run_arm(model, o, arm, ids, np, n, measure_after, forced ? exact_ids : NULL, nexact, gen, jf);
+      char altv[8];
+      const char* mdir = arm_opt(arm, "alt", altv, sizeof altv) && atoi(altv) && alt_model ? alt_model : model;
+      const int k = run_arm(mdir, o, arm, ids, np, n, measure_after, forced ? exact_ids : NULL, nexact, gen, jf);
       if (k < 0) return 1;
       if (exact && !exact_ids) exact_ids = malloc(sizeof(int32_t) * k), memcpy(exact_ids, gen, sizeof(int32_t) * k), nexact = k;
       int m = 0;
@@ -413,7 +471,8 @@ int main(int argc, char** argv) {
         ref[m] = malloc(sizeof(int32_t) * k), memcpy(ref[m], gen, sizeof(int32_t) * k), nref[m] = k, nmodes++;
         fprintf(stderr, "arm %s: %d ids, the first arm of mode '%s'\n", arm, k, md);
       } else if (m < nmodes) {
-        const int same = k == nref[m] && !memcmp(ref[m], gen, sizeof(int32_t) * k);
+        const int kk = k < nref[m] ? k : nref[m];  /* arms of different lengths (/n=): their common prefix */
+        const int same = !memcmp(ref[m], gen, sizeof(int32_t) * kk);
         same_all &= same;
         if (exact) same_exact &= same;
         fprintf(stderr, "arm %s: %d ids, %s the first '%s' arm's%s\n", arm, k, same ? "identical to" : "DIFFERENT from", md,

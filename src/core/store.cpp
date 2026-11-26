@@ -308,6 +308,7 @@ void Readers::loop() {
       if (!from_cache) {
         bytes.fetch_add(j.n, std::memory_order_relaxed);
         bytes_cls[cls].fetch_add(j.n, std::memory_order_relaxed);
+        if (j.pool >= 0 && j.pool < 4) bytes_pool[j.pool].fetch_add(j.n, std::memory_order_relaxed);
       }
       if (!j.dst && file_prefault) {  // map the cached pages here (soft faults), not in the compute threads
         const size_t pg = (size_t)getpagesize();

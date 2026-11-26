@@ -823,7 +823,10 @@ const char* dm_stats_json(dm_engine* e) {
     const double rec = (double)Cm.P[0].rec;
     s << ",\"reads\":{\"tokens\":" << dl(stp, e->rs_steps) << ",\"mb_urgent_per_token\":" << Cm.st.bytes_urgent / 1e6 / tok
       << ",\"mb_named_per_token\":" << Cm.st.bytes_pf / 1e6 / tok << ",\"named_records_per_token\":" << Cm.st.n_pf_issued / tok
-      << ",\"mb_named_unused_per_token\":" << Cm.st.n_pf_unused_evicted * rec / 1e6 / tok << ",\"wall_s\":" << wall << ",\"busy_s\":" << busy_s
+      << ",\"mb_named_unused_per_token\":" << Cm.st.n_pf_unused_evicted * rec / 1e6 / tok << ",\"gb_read_by_pool_total\":["
+      << Cm.rd.bytes_pool[0].load() / 1e9 << "," << Cm.rd.bytes_pool[1].load() / 1e9 << "," << Cm.rd.bytes_pool[2].load() / 1e9 << ","
+      << Cm.rd.bytes_pool[3].load() / 1e9 << "],\"pool_record_mb\":[" << Cm.P[0].rec / 1e6 << "," << (Cm.npools > 1 ? Cm.P[1].rec / 1e6 : 0) << "]"
+      << ",\"wall_s\":" << wall << ",\"busy_s\":" << busy_s
       << ",\"busy_pct\":" << 100.0 * busy_s / std::max(1e-9, wall) << ",\"gb_per_s_busy\":" << dl(by, e->rs_bytes) / 1e9 / std::max(1e-9, busy_s)
       << ",\"gb_per_s_wall\":" << dl(by, e->rs_bytes) / 1e9 / std::max(1e-9, wall) << "}";
     e->rs_busy = bw; e->rs_bytes = by; e->rs_steps = stp;

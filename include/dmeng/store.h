@@ -100,6 +100,7 @@ struct Readers {
   // statistics (written by the readers)
   std::atomic<uint64_t> bytes{0}, jobs{0}, busy_ns{0};
   std::atomic<uint64_t> bytes_cls[3] = {{0}, {0}, {0}};  // bytes read by class: urgent, speculative, background
+  std::atomic<uint64_t> bytes_pool[4] = {{0}, {0}, {0}, {0}};  // bytes read by pool (record format: Inkling's MXFP8 layers apart)
   std::atomic<uint64_t> file_resident_skips{0}, file_bytes_skipped{0};  // Mem::FILE pieces found resident, not read
   std::atomic<uint64_t> q_ns[3], svc_ns[3], njobs[3], spec_inflight_at_urgent{0};  // [0] urgent, [1] speculative, [2] background
   std::atomic<uint64_t> bg_promoted{0};  // background reads a step needed before they started (moved to urgent)
