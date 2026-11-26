@@ -45,6 +45,10 @@ enum SelfCheck {
     /// for `exactTokens`, with the engine's counters for the decode steps only. `-selfcheck-verify` also hashes the files.
     static let codeIds = [248045,846,198,40,2688,3133,383,264,2526,12654,2393,421,43303,18805,1433,7189,321,17657,287,1070,310,12977,13,9170,2706,1010,7189,513,5384,321,22217,279,1788,3150,369,5158,10598,13,5514,369,279,523,25,271,71093,12305,198,464,29174,11,854,11,2857,271,1005,417,27150,25,198,262,687,1259,2251,3676,701,11,1752,11,1866,11789,28,16,15,15,11,1866,30997,625,28,17,13,15,1590,198,285,638,3745,283,1752,198,285,638,6469,11789,283,1866,11789,198,285,638,6469,30997,625,283,1866,30997,625,198,285,638,43007,283,2958,198,285,638,7155,24230,283,2168,198,285,638,20362,283,29174,30371,363,198,285,29174,30977,8373,7424,1385,66032,11,37993,3497,553,2388,363,271,262,687,884,1153,11,1347,1590,198,285,440,638,20362,25,198,309,413,524,638,43007,25,198,388,638,7155,24230,283,854,6177,363,198,309,638,43007,1989,20009,8,198,285,413,2343,1153,43007,8,2518,638,6469,11789,25,198,309,638,22320,363,271,262,687,696,66032,1153,1590,198,285,1345,2912,25,198,309,854,10795,7,15,13,16,8,198,309,413,638,7155,24230,321,854,6177,363,471,638,7155,24230,835,638,6469,30997,625,25,198,388,638,22320,363,271,262,687,17657,1153,1590,198,285,3470,283,638,43007,198,285,440,1724,1153,3745,11,328,64,871,430,281,25,198,309,364,427,303,3470,25,198,388,281,3708,9028,20868,2515,8,478,2823,77,871,198,285,440,638,20362,25,198,309,638,43007,283,2958,198,309,638,7155,24230,283,2168,198,71093,271,9592,1396,6741,303,411,1970,11,10033,1204,1754,799,31130,466,40922,7189,11,321,2873,264,34773,2243,13,13262,279,569,3622,279,1788,11,321,884,264,3160,363,1654,421,17657,287,8554,369,2047,13,248046,198,248045,74455,198,248068,198]
     static let followPrompt = "And why are sunsets red?"
+    /// -selfcheck-resume: the follow-up sent to the kept chat after a relaunch.
+    static let resumePrompt = "And why is the sea blue?"
+    /// -selfcheck-keep-chat: the chat's id and the states that existed before it, for the next launch's -selfcheck-resume.
+    static var keptURL: URL { docsURL.appendingPathComponent("selfcheck-kept-chat.txt") }
     /// -selfcheck-chat-long: the new chat's first message is this long request (about 460 tokens) instead of chatPrompt.
     static let longPrompt = """
     I am writing a small command-line tool in Python that reads a folder of CSV files, each one a day of readings from a set     of temperature sensors, and produces a weekly summary. Every file has a header row with the columns timestamp,     sensor_id, temperature_c and status, where status is either ok, warn or fault. Some files have rows out of order, some     have duplicated rows, and a few have temperatures recorded as empty strings when a sensor dropped out. The tool should     accept the folder path and an optional start date on the command line, read only the seven files that fall in the week     beginning on that date (or the most recent full week when no date is given), and skip any file it cannot parse while     printing a warning that names the file and the line number of the first bad row. For each sensor it should report the     number of readings, the minimum, maximum and mean temperature over the week ignoring empty values, the number of warn     and fault rows, and the longest stretch of consecutive hours with no reading at all. Duplicated rows should be counted     once. The summary should be printed as an aligned table sorted by sensor id, and also written to a JSON file next to the     input folder when a flag asks for it. Please explain how you would structure the program into functions, which parts of     the standard library you would use for the dates, the CSV parsing and the command-line arguments, how you would handle     time zones if the timestamps carry an offset, and how you would test the gap computation and the duplicate handling     without real sensor files. Then write the core function that takes the parsed rows for one sensor and returns its     summary, with comments, and list the edge cases you would cover in its tests, such as a sensor with a single reading,     a week where a sensor never reports, readings exactly on the hour boundaries, and a fault row with an empty temperature.
@@ -118,7 +122,7 @@ enum SelfCheck {
         }
         // conversations a self-check made and could not delete (a run that was stopped): only the self-check's own two
         // prompts in them, nothing else
-        let mine: Set<String> = [chatPrompt, followPrompt, longPrompt]
+        let mine: Set<String> = [chatPrompt, followPrompt, longPrompt, resumePrompt]
         for c in ConversationStore.loadAll() {
             let users = c.messages.filter { $0.role == .user }.map(\.content)
             if !users.isEmpty && users.allSatisfy({ mine.contains($0) }) {
@@ -389,6 +393,46 @@ enum SelfCheck {
             return
         }
 
+        // -selfcheck-resume: the relaunch check. The chat a -selfcheck-keep-chat launch kept is opened (as a tap on it in
+        // the list), a follow-up is sent after 10 s, then the chat and the states it made are deleted.
+        if ProcessInfo.processInfo.arguments.contains("-selfcheck-resume") {
+            guard let t = try? String(contentsOf: keptURL, encoding: .utf8), let j = json(t) as? [String: Any],
+                  let ids = j["id"] as? String, let id = UUID(uuidString: ids), let before = j["states_before"] as? [String] else {
+                out["resume"] = ["error": "no kept chat (\(keptURL.lastPathComponent))"]
+                finish()
+                return
+            }
+            model.startOnce()
+            for _ in 0..<900 where model.engineState != .ready {
+                if case .failed = model.engineState { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            out["ready_s"] = Date().timeIntervalSince(tStart)
+            out["engine_default"] = model.engineState.label
+            let msgs = model.conversations.first { $0.id == id }?.messages.count ?? -1
+            out["resume_messages_before"] = msgs
+            log("SELFCHECK resume: kept chat \(ids) has \(msgs) messages after the relaunch")
+            if model.engineState == .ready, msgs > 0 {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                model.open(id)
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                let th = thermal()
+                let r = await model.reply(to: resumePrompt, maxNew: 160)
+                out["resume"] = chatRow(r, thermal0: th)
+                out["resume_last_reply"] = lastReply(model, "after relaunch")
+            }
+            model.delete(id)
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            await (model.engine as? DmengChatEngine)?.waitIdle()
+            out["chat_states_removed"] = removeStates(chatStates().subtracting(before))
+            try? FileManager.default.removeItem(at: keptURL)
+            out["conversations_after"] = ConversationStore.loadAll().count
+            out["memory_warnings"] = model.memoryWarnings
+            out["mem_end"] = mem("selfcheck end")
+            finish()
+            return
+        }
+
         // 1. the selected model's files against the Hub manifest's profile parts (only with -selfcheck-verify)
         if ProcessInfo.processInfo.arguments.contains("-selfcheck-verify") { out["verify"] = await verify(kind) }
 
@@ -432,10 +476,18 @@ enum SelfCheck {
             pk.on = false
             out["chat_peak_all_gb"] = Double(pk.v) / 1e9
             out["chat_regions_end"] = regions()
-            if let id { model.delete(id) }
+            let keep = ProcessInfo.processInfo.arguments.contains("-selfcheck-keep-chat")
+            if let id, !keep { model.delete(id) }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await (model.engine as? DmengChatEngine)?.waitIdle()  // the chat's warm-up after the reply has written its state
-            out["chat_states_removed"] = removeStates(chatStates().subtracting(statesBefore))
+            if keep, let id {  // kept for the next launch's -selfcheck-resume, which deletes it and its states
+                let k: [String: Any] = ["id": id.uuidString, "states_before": Array(statesBefore).sorted()]
+                if let d = try? JSONSerialization.data(withJSONObject: k) { try? d.write(to: keptURL) }
+                out["chat_kept"] = id.uuidString
+                log("SELFCHECK kept the chat \(id.uuidString) for -selfcheck-resume")
+            } else {
+                out["chat_states_removed"] = removeStates(chatStates().subtracting(statesBefore))
+            }
             out["mem_after_chat"] = mem("after chat")
         }
         out["conversations_after"] = ConversationStore.loadAll().count

@@ -164,6 +164,7 @@ Both models are bound by the phone's storage read rate, 0.8 to 0.9 GB/s measured
 
 Add `'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) SELFCHECK'` to the `xcodebuild` command (normal builds contain none of this), install, then run `xcrun devicectl device process launch --console --device <id> <bundle id> -- -selfcheck`.
 It hashes the selected model's files against the Hub manifest, sends one chat message (then deletes that chat), decodes 400 tokens greedily in Exact, writes `Documents/selfcheck.json`, logs `SELFCHECK DONE` and exits.
+With `-selfcheck-keep-chat` the chat is kept instead; the next launch with `-selfcheck-resume` opens it, sends a follow-up, then deletes it and the saved states it made.
 
 ## Checking the chat's scrolling
 
