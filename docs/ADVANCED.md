@@ -24,8 +24,8 @@ resolve to, as JSON, without loading the model.
   `--print-defaults`.
 - **Model and memory**: `--resident F` (another in-memory weights file, such as the 4-bit `resident_q4`),
   `--embeddings F`, `--cache-gb G|auto`, `--reserve-gb G` (memory left to the system by `auto`, default 5.5),
-  `--mem plain|mlock|purgeable|file` and its `--file-*` options, `--spare-mem 0|1` (the OS file cache under the locked
-  slab: the built-in `phone` profile turns it on from 11 GB of physical memory), `--res-mem`, `--threads`, `--readers`,
+  `--mem plain|mlock|purgeable|file` and its `--file-*` options, `--spare-mem 0|1` (spare memory, the OS file cache under
+  the locked slab: the built-in `phone` profile turns it on from 11 GB of physical memory, in exact mode), `--res-mem`, `--threads`, `--readers`,
   `--split`, `--prec`, `--ctx`, `--pool-share`, `--half-life`.
 - **Early names** (they only schedule reads; in `exact` the tokens do not depend on them): `--prefetch
   none|router|oracle|plan`, `--routers F --m M`, the confidence rule `--rt-tau T --rt-cand C`,

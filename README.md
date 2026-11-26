@@ -131,9 +131,7 @@ while idle.
 | input embedding | SSD, one row per token |
 
 On an iPhone the same engine runs with a smaller cache and 4-bit in-memory weights fitted on calibration text. On a
-phone with at least 11 GB of memory it also uses the system's spare memory: expert records the OS file cache already
-holds are copied from it instead of read from storage (on by default there, paused for the session after a memory
-warning; a switch in the app turns it off).
+phone with at least 11 GB of memory it also uses the system's spare memory in exact mode (Spare memory, below).
 
 ## Speed and memory
 
