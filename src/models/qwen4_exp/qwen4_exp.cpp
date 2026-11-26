@@ -937,6 +937,7 @@ void Flash::ple_step(int L, const float* hyper, float* out, bool commit) {
 void Flash::head_step(const float* xh, Want want) {
   auto th = clk::now();
   stage_mark(ST_HEAD);
+  head_in.assign(xh, xh + c.H);  // (final_hidden(-1))
   xin.prep(xh, c.H);
   if (fast_head && (want == Want::GREEDY || (want == Want::TOPK && head_topk > 0))) {
     greedy_ = sh.run(*core->pool, xin.q, want == Want::GREEDY ? 1 : head_topk, lgts.data());
