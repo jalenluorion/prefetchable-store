@@ -364,6 +364,8 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   co.qos = (int)e->qos;
   if (o.reader_qos > 0) co.reader_qos = (int)qos_of(o.reader_qos - 1);
   if (o.reader_io_low != 0) co.reader_io_low = o.reader_io_low > 0;  // 0: CoreOpts' platform default
+  co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;  // model_options "run:spare-mem=1"
+  ro.spare_mem = co.spare_mem;
   e->C = std::make_unique<Core>();
   if (!e->C->init(e->M->info(), co, model_dir, err) || !e->M->bind(*e->C, err)) {
     g_err = "core: " + err;
@@ -744,6 +746,15 @@ int dm_counters(dm_engine* e, dm_counters_t* out) {
   out->held_bytes = (int64_t)e->C->cache.held_bytes();
   out->budget_bytes = e->C->cache.budget_bytes();
   out->decode_steps = e->steps;
+  out->bytes_spare = e->C->cache.rd.file_bytes_skipped.load(std::memory_order_relaxed);
+  out->read_busy_ns = e->C->cache.rd.busy_wall();
+  out->spare_memory = !e->C->cache.file_under ? 0 : e->C->cache.spare_paused.load() ? 2 : 1;
+  return DM_OK;
+}
+
+int dm_spare_memory_pause(dm_engine* e) {
+  if (!e || !e->C->cache.file_under) return DM_EINVAL;
+  e->C->cache.spare_pause();
   return DM_OK;
 }
 
@@ -776,6 +787,9 @@ const char* dm_stats_json(dm_engine* e) {
       << ",\"max_gb\":" << Ca.fa.max_bytes / 1e9 << ",\"resident_fraction\":" << Ca.fa.res_frac << ",\"refaults_per_token_ema\":" << Ca.fa.refault_ema
       << ",\"shrinks\":" << Ca.fa.shrinks << ",\"grows\":" << Ca.fa.grows << ",\"changes\":" << Ca.fa.trace.size() << "},\"core_gb\":" << Ca.core_slab_bytes / 1e9
       << ",\"core_records\":" << Ca.core_held();
+  if (Ca.file_under)  // spare memory under the slab: what the file cache served, and how much of the store it holds now
+    s << ",\"spare_memory\":{\"paused\":" << Ca.spare_paused.load() << ",\"gb_served\":" << Ca.rd.file_bytes_skipped.load() / 1e9
+      << ",\"pieces_served\":" << Ca.rd.file_resident_skips.load() << ",\"store_in_file_cache_gb\":" << Ca.file_resident_bytes() / 1e9 << "}";
   s << "}";
   s << ",\"cache_lock\":" << Ca.lock_json();
   s << ",\"policy\":{\"evict\":\"" << e->C->o.evict << "\",\"hazard\":" << Ca.hazard_evict << ",\"layer_caps_opt\":\"" << e->C->o.layer_caps

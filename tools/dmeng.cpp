@@ -560,6 +560,7 @@ int main(int argc, char** argv) {
   co.cache_start_gb = a.cache_start_gb;
   co.half_life = a.half_life;
   co.mem = mem_of(a.mem);
+  co.spare_mem = ro.spare_mem && co.mem != Mem::FILE;
   co.skip_reads = a.skip_reads;
   co.loop_hold = a.loop_hold;
   co.evict = a.evict;
@@ -890,6 +891,10 @@ int main(int argc, char** argv) {
       for (size_t i = 0; i < C.cache.fa.trace.size(); i++) js << (i ? "," : "") << "[" << C.cache.fa.trace[i].first << "," << C.cache.fa.trace[i].second / 1e9 << "]";
       js << "]},\"core\":{\"gb\":" << C.cache.core_slab_bytes / 1e9 << ",\"records\":" << C.cache.core_held() << ",\"swapped\":" << C.cache.core_swapped << "}}";
     }
+    if (C.cache.file_under)  // spare memory under the slab: records copied from the OS file cache, not read from the drive
+      js << ",\"spare_memory\":{\"evict_hint\":" << C.cache.file_evict_hint << ",\"pieces_per_token\":" << per(RD.file_resident_skips.load() - fskip0)
+         << ",\"mb_served_per_token\":" << per((RD.file_bytes_skipped.load() - fskipb0) / 1e6)
+         << ",\"store_in_file_cache_gb_at_end\":" << C.cache.file_resident_bytes() / 1e9 << "}";
     js << ",\"footprint_gb\":" << m1.footprint_gb << ",\"footprint_peak_gb\":" << m1.footprint_peak_gb << ",\"compressed_gb\":" << m1.compressed_gb
        << ",\"resident_gb\":" << m1.resident_gb << ",\"footprint_after_load_gb\":" << m0.footprint_gb;
     {  // wait and on-the-spot misses by step group: before the loop, the looped steps, after it

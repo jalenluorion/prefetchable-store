@@ -139,6 +139,7 @@ struct CoreOpts {
   double cache_gb = 5.0, half_life = 8.0;
   double cache_start_gb = 0;  // > 0 and < cache_gb (mlock): slots for cache_gb reserved, only this much locked at start
   Mem mem = Mem::MLOCK;
+  bool spare_mem = false;  // a locked / plain slab: the OS file cache under it (store.h, Cache::file_under; --spare-mem)
   bool skip_reads = false;   // timing without reads (the slots keep whatever bytes they have)
   bool loop_hold = true;     // looped layers: what an earlier pass of the token used stays pinned until its last pass
   std::vector<double> pool_share;  // empty: the model's default

@@ -48,6 +48,11 @@ struct Preset {
   // on Flash-Next, measured in one process token by token, they raised the drive's effective rate 4-8% and the bytes
   // per token 2-8%, and the tokens did not get faster)
   int bg_ranks = 0, bg_gate = 0;
+  // the OS file cache under the locked slab (store.h, Cache::file_under): a profile's "spare_memory":
+  // {"min_physical_gb": G} turns it on where the device has at least G GB of physical memory (hw.memsize). Built-in:
+  // phone 11 (the 12 GB class); mac and phone-small undeclared (off)
+  double spare_min_gb = 0;
+  bool spare_mem = false;
   std::vector<std::string> notes;  // defaults that did not resolve, fallbacks taken
   std::string json() const;
 };
@@ -76,12 +81,16 @@ struct Resolved {
   std::string layer_caps;  // "" = the core's rule
   double xtok_tau = 0.5;
   int rd_prio = -1, prefill_chunk = 1;
+  bool spare_mem = false;  // written only when on (the block is unchanged with it off)
   std::string json() const;
 };
 
 // exact -> lossless, fast -> approx:drop (the built-in names); anything else is returned unchanged (lossless,
 // approx[:PRESET] stay accepted everywhere)
 std::string engine_mode_of(const std::string& mode);
+
+// the device's physical memory in bytes (hw.memsize; DMENG_TEST_PHYS_MEM overrides it, tests only)
+double physical_memory_bytes();
 
 // The profile of this device: macOS -> mac; iOS -> phone when the memory available to the process (avail_bytes, or
 // os_proc_available_memory() when avail_bytes < 0) is at least min_gb, else phone-small.
@@ -106,6 +115,7 @@ struct Given {
   std::optional<int> m, cand;
   std::optional<double> tau, xtok_tau;
   std::optional<bool> rd_prio;
+  std::optional<bool> spare_mem;        // --spare-mem 0|1: the OS file cache under the slab
   std::optional<std::string> evict, layer_caps;
   std::optional<double> cache_gb;       // an explicit size
   bool cache_auto = false;              // the automatic rule asked for explicitly
@@ -123,7 +133,7 @@ struct Given {
 // function under these names): --mode --resident --routers FILE|none --xtok FILE|none --m --rt-tau --rt-cand --xtok-tau
 // --rd-prio --evict --layer-caps --cache-gb N|auto --prefill-gpu-frac F --prefill-gpu-experts F --prefill-gpu off|on
 // --prefill-chunk N --run-ahead --run-ahead-depth --run-ahead-budget --run-ahead-max --run-ahead-sat-skip --readers
-// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
+// --bg-ranks --bg-gate --drafts 0|1 --draft MODE --early N --spare-mem 0|1; aliases kept: --gpu-frac, --gpu-experts, --chunk (dmserve's).
 // run_flag_name: the canonical name of a run-setting flag ("" if `flag` is not one); run_flag: its value into g (false
 // and err on a malformed value).
 std::string run_flag_name(const std::string& flag);
@@ -155,6 +165,7 @@ struct RunOpts {
   // positions ahead (a model's draft head is asked for explicitly: --draft head|both)
   std::string draft = "none";
   int early = 0;
+  bool spare_mem = false;  // the OS file cache under the slab (CoreOpts::spare_mem): explicit, else the profile's rule
   std::vector<std::string> notes;
   // the "resolved" block of every run's JSON (the cache's size once a front end has computed it)
   Resolved resolved(double cache_gb_in_force) const;

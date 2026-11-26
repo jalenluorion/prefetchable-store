@@ -2,6 +2,7 @@
 #include "dmeng/presets.h"
 
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <unistd.h>
 
 #include <TargetConditionals.h>
@@ -38,6 +39,7 @@ static const char* BUILTIN = R"({
   "mac": {"mode": "exact", "resident": "resident_q8", "cache": "auto", "prefill_gpu": {"projections": 0.4, "experts": 0.4},
           "run_ahead": {"picks": "top_k", "depth": 1}},
   "phone": {"mode": "exact", "resident": "resident_q8", "cache": "slab", "min_available_gb": 5.0, "readers": 8,
+            "spare_memory": {"min_physical_gb": 11.0},
             "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}},
   "phone-small": {"mode": "fast", "resident": "resident_q4", "cache": "slab", "names": {"rule": "confidence", "tau": 0.5, "candidates": 16},
                   "readers": 8, "run_ahead": {"picks": "top_k", "depth": 1, "budget": 0.2, "sat_skip": true, "modes": ["exact"]}}},
@@ -71,6 +73,13 @@ std::string engine_mode_of(const std::string& mode) {
   if (mode == "exact") return "lossless";
   if (mode == "fast") return "approx:drop";
   return mode;
+}
+
+double physical_memory_bytes() {
+  if (const char* t = getenv("DMENG_TEST_PHYS_MEM")) return atof(t);  // tests only: another device's memory on this Mac
+  uint64_t v = 0;
+  size_t n = sizeof v;
+  return sysctlbyname("hw.memsize", &v, &n, nullptr, 0) == 0 ? (double)v : 0;
 }
 
 std::string device_profile(int64_t avail, double min_gb, std::string& why) {
@@ -320,6 +329,13 @@ bool resolve_preset(const std::string& dir, const std::string& profile_req, cons
     }
   }
   if (const Json* rd = prof("readers"); rd && rd->kind == Json::NUM) p.readers = (int)rd->i(0);
+  // the OS file cache under the slab (store.h, Cache::file_under): on where the device has at least min_physical_gb of
+  // physical memory (the phone: 11, the 12 GB class; a 6 or 8 GB phone has no spare pages); undeclared = off
+  if (const Json* sm = prof("spare_memory"); sm && sm->kind == Json::OBJ && (*sm)["min_physical_gb"].kind == Json::NUM) {
+    p.spare_min_gb = (*sm)["min_physical_gb"].f(0);
+    const double phys = physical_memory_bytes();
+    p.spare_mem = p.spare_min_gb > 0 && phys >= p.spare_min_gb * 1e9;
+  }
   if (const Json* bg = prof("background"); bg && bg->kind == Json::OBJ) {  // per profile only (the drive decides)
     p.bg_ranks = (int)(*bg)["ranks"].i(0);
     p.bg_gate = (int)(*bg)["gate"].i(0);
@@ -385,7 +401,9 @@ std::string Resolved::json() const {
     << ",\"experts\":" << gpu_experts << "},\"run_ahead\":{\"picks\":" << run_ahead << ",\"depth\":" << run_ahead_depth << ",\"budget\":" << ra_budget
     << ",\"max_tok\":" << ra_max_tok << ",\"sat_skip\":" << (ra_sat_skip ? "true" : "false") << "},\"readers\":" << readers
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << qq(layer_caps)
-    << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk << "}";
+    << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
+  if (spare_mem) o << ",\"spare_memory\":true";
+  o << "}";
   return o.str();
 }
 
@@ -455,6 +473,7 @@ Resolved RunOpts::resolved(double cache_gb_in_force) const {
   x.xtok_tau = xtok_tau;
   x.rd_prio = rd_prio;
   x.prefill_chunk = prefill_chunk;
+  x.spare_mem = spare_mem;
   return x;
 }
 
@@ -520,6 +539,7 @@ bool resolve_run(const std::string& dir, const std::string& profile_req, const G
   // picks 4 positions ahead read 40-70 MB per token more than plain decoding and cancelled the passes' gain (early 0: fewer
   // MB per token than plain decoding at the same tokens per step); --early N still sets it
   r.early = g.early ? *g.early : r.drafts > 0 ? 0 : r.early;
+  r.spare_mem = g.spare_mem ? *g.spare_mem : pf ? P.spare_mem : r.spare_mem;
   return true;
 }
 
@@ -573,6 +593,7 @@ const RunFlag RUN_FLAGS[] = {
     {"--drafts", nullptr, RF_INT(drafts)},
     {"--draft", nullptr, RF_STR(draft)},
     {"--early", nullptr, RF_INT(early)},
+    {"--spare-mem", nullptr, [](const std::string& v, Given& g) { int x; return num(v, x) && ((g.spare_mem = x != 0), true); }},
 };
 #undef RF_INT
 #undef RF_DBL

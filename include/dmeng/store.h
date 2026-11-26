@@ -17,6 +17,15 @@
 // (mincore of its first and last page) and re-read when its pages are gone (a late miss, counted as a refault); any page
 // the check misses is a page fault, never wrong bytes. Eviction drops the bookkeeping entry (optionally a
 // MADV_DONTNEED hint on the range). A dirty tier in front of the file tier can be added as a second pool later.
+//
+// Spare memory under the slab (Cache::file_under, CoreOpts::spare_mem; a locked or plain slab only): the same file
+// tier placed below the slab instead of in its place. The layer files are opened buffered (no F_NOCACHE) and mapped
+// read-only as in Mem::FILE (for mincore only; the compute never reads the mapping), so a record read into the slab
+// also stays in the OS file cache after the slab evicts it, as clean file pages the OS may drop at any time and does
+// not charge to the process. A read into the slab whose pages mincore finds resident is a copy from the file cache,
+// not a drive read: it is counted in Readers::file_resident_skips / file_bytes_skipped, not in Readers::bytes. The
+// bytes in the slab are the file's bytes either way (lossless). spare_pause() (a memory warning) sets F_NOCACHE on the
+// files again: reads stop adding pages to the file cache (the slab path as before).
 #pragma once
 #include <atomic>
 #include <condition_variable>
@@ -76,7 +85,9 @@ struct Readers {
                              // (never while an urgent read is queued or in flight, or a speculative one is queued)
   bool bg_open();            // a background read queued now would start at once
   int bg_queued();           // background reads queued or in flight (jobs)
-  bool file_skip_resident = true;  // Mem::FILE: no pread for a piece whose pages are all resident (mincore)
+  bool file_skip_resident = true;  // Mem::FILE: no pread for a piece whose pages are all resident (mincore); spare
+                                   // memory under the slab: such a piece is counted as served by the file cache
+  std::atomic<bool> spare_on{false};  // spare memory under the slab in use (Cache::file_under, not paused)
   bool file_prefault = true;       // Mem::FILE: after the pread, touch one byte per page of the view (the reader takes
                                    // the soft faults that map the cached pages, not the compute threads)
   int qos = -1;                    // QoS class of the reader threads (qos_class_t); -1: user-initiated
@@ -178,6 +189,10 @@ struct Cache {
   // iOS or macOS), 2 msync(MS_INVALIDATE) (iOS, P2: the clean pages leave the file cache at once, so the policy, not the
   // OS's LRU, decides what stays)
   int file_evict_hint = 0;
+  // spare memory under the slab (header comment): set before init; spare_pause() any thread, once per session
+  bool file_under = false;
+  std::atomic<bool> spare_paused{false};
+  void spare_pause();
   void file_hit_check(int L, int slot);  // a held, landed record: re-read it now (urgent) if its pages are gone
   uint64_t file_resident_bytes() const;  // mincore over every layer file (a sample: costs ~ms, not per token)
   uint64_t held_bytes() const;           // bytes of the records the policy holds now (all pools)

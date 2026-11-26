@@ -250,8 +250,17 @@ typedef struct dm_counters_t {
   int64_t held_bytes;                   /* records the policy holds now */
   int64_t budget_bytes;                 /* the budget in force (adaptive in DM_MEM_FILE) */
   int64_t decode_steps;
+  uint64_t bytes_spare;                 /* expert bytes the OS file cache served instead of the drive (spare memory under
+                                           the slab; DM_MEM_FILE: resident records not read) */
+  uint64_t read_busy_ns;                /* wall time with at least one expert read in flight (drive rate = bytes_read / it) */
+  int spare_memory;                     /* the file cache under the slab: 0 off, 1 on, 2 paused (dm_spare_memory_pause) */
 } dm_counters_t;
 int dm_counters(dm_engine* e, dm_counters_t* out);
+
+/* Spare memory (the OS file cache under the locked slab: the phone profile's rule, physical memory >= 11 GB, or
+ * model_options "run:spare-mem=0|1"): stop adding expert pages to the file cache for the rest of the session (a memory
+ * warning); reads go to the drive as without it. Any thread; idempotent. DM_EINVAL if the tier is not on. */
+int dm_spare_memory_pause(dm_engine* e);
 
 /* JSON of what ran since the last call (decode ms per stage, hit rate, MB read, prefix-cache counters, memory: process
  * footprint, the policy's held GB and, in DM_MEM_FILE, the store pages resident in the file cache by mincore). The
