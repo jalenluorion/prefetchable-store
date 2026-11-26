@@ -45,6 +45,11 @@ enum SelfCheck {
     /// for `exactTokens`, with the engine's counters for the decode steps only. `-selfcheck-verify` also hashes the files.
     static let codeIds = [248045,846,198,40,2688,3133,383,264,2526,12654,2393,421,43303,18805,1433,7189,321,17657,287,1070,310,12977,13,9170,2706,1010,7189,513,5384,321,22217,279,1788,3150,369,5158,10598,13,5514,369,279,523,25,271,71093,12305,198,464,29174,11,854,11,2857,271,1005,417,27150,25,198,262,687,1259,2251,3676,701,11,1752,11,1866,11789,28,16,15,15,11,1866,30997,625,28,17,13,15,1590,198,285,638,3745,283,1752,198,285,638,6469,11789,283,1866,11789,198,285,638,6469,30997,625,283,1866,30997,625,198,285,638,43007,283,2958,198,285,638,7155,24230,283,2168,198,285,638,20362,283,29174,30371,363,198,285,29174,30977,8373,7424,1385,66032,11,37993,3497,553,2388,363,271,262,687,884,1153,11,1347,1590,198,285,440,638,20362,25,198,309,413,524,638,43007,25,198,388,638,7155,24230,283,854,6177,363,198,309,638,43007,1989,20009,8,198,285,413,2343,1153,43007,8,2518,638,6469,11789,25,198,309,638,22320,363,271,262,687,696,66032,1153,1590,198,285,1345,2912,25,198,309,854,10795,7,15,13,16,8,198,309,413,638,7155,24230,321,854,6177,363,471,638,7155,24230,835,638,6469,30997,625,25,198,388,638,22320,363,271,262,687,17657,1153,1590,198,285,3470,283,638,43007,198,285,440,1724,1153,3745,11,328,64,871,430,281,25,198,309,364,427,303,3470,25,198,388,281,3708,9028,20868,2515,8,478,2823,77,871,198,285,440,638,20362,25,198,309,638,43007,283,2958,198,309,638,7155,24230,283,2168,198,71093,271,9592,1396,6741,303,411,1970,11,10033,1204,1754,799,31130,466,40922,7189,11,321,2873,264,34773,2243,13,13262,279,569,3622,279,1788,11,321,884,264,3160,363,1654,421,17657,287,8554,369,2047,13,248046,198,248045,74455,198,248068,198]
     static let followPrompt = "And why are sunsets red?"
+    /// -selfcheck-chat-long: the new chat's first message is this long request (about 460 tokens) instead of chatPrompt.
+    static let longPrompt = """
+    I am writing a small command-line tool in Python that reads a folder of CSV files, each one a day of readings from a set     of temperature sensors, and produces a weekly summary. Every file has a header row with the columns timestamp,     sensor_id, temperature_c and status, where status is either ok, warn or fault. Some files have rows out of order, some     have duplicated rows, and a few have temperatures recorded as empty strings when a sensor dropped out. The tool should     accept the folder path and an optional start date on the command line, read only the seven files that fall in the week     beginning on that date (or the most recent full week when no date is given), and skip any file it cannot parse while     printing a warning that names the file and the line number of the first bad row. For each sensor it should report the     number of readings, the minimum, maximum and mean temperature over the week ignoring empty values, the number of warn     and fault rows, and the longest stretch of consecutive hours with no reading at all. Duplicated rows should be counted     once. The summary should be printed as an aligned table sorted by sensor id, and also written to a JSON file next to the     input folder when a flag asks for it. Please explain how you would structure the program into functions, which parts of     the standard library you would use for the dates, the CSV parsing and the command-line arguments, how you would handle     time zones if the timestamps carry an offset, and how you would test the gap computation and the duplicate handling     without real sensor files. Then write the core function that takes the parsed rows for one sensor and returns its     summary, with comments, and list the edge cases you would cover in its tests, such as a sensor with a single reading,     a week where a sensor never reports, readings exactly on the hour boundaries, and a fault row with an empty temperature.
+    """
+    static var firstPrompt: String { ProcessInfo.processInfo.arguments.contains("-selfcheck-chat-long") ? longPrompt : chatPrompt }
     /// Inkling's prompts: Documents/p2/ink_pitt_ids.txt and ink_code_ids.txt (the Nov 23 phone runs' files), else its
     /// Pittsburgh prompt built in (the coding row is then left out).
     static let inkPittBuiltIn = [371, 151698, 149879, 149876, 152652, 149879, 220, 136558, 165300, 149899]
@@ -106,7 +111,7 @@ enum SelfCheck {
         }
         // conversations a self-check made and could not delete (a run that was stopped): only the self-check's own two
         // prompts in them, nothing else
-        let mine: Set<String> = [chatPrompt, followPrompt]
+        let mine: Set<String> = [chatPrompt, followPrompt, longPrompt]
         for c in ConversationStore.loadAll() {
             let users = c.messages.filter { $0.role == .user }.map(\.content)
             if !users.isEmpty && users.allSatisfy({ mine.contains($0) }) {
@@ -395,13 +400,25 @@ enum SelfCheck {
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             let statesBefore = chatStates()
             var th = thermal()
-            let r1 = await model.reply(to: chatPrompt, maxNew: 160)
-            let id = model.conversations.first { $0.messages.contains { $0.role == .user && $0.content == chatPrompt } }?.id
+            final class Peak: @unchecked Sendable { var v = 0; var on = true }
+            let pk = Peak()
+            Thread { while pk.on { pk.v = max(pk.v, MemProbe.read("").physFootprint); usleep(50_000) } }.start()
+            out["chat_regions_before"] = regions()
+            let r1 = await model.reply(to: firstPrompt, maxNew: 160)
+            let id = model.conversations.first { $0.messages.contains { $0.role == .user && $0.content == firstPrompt } }?.id
             out["chat"] = chatRow(r1, thermal0: th)
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            out["chat_peak_gb"] = Double(pk.v) / 1e9
+            out["chat_regions_after"] = regions()
+            out["chat_engine_after"] = { let j = json((model.engine as? DmengChatEngine)?.selfCheckStats ?? "") as? [String: Any]
+                                         return ["memory": j?["memory"] ?? NSNull(), "prefix_cache": j?["prefix_cache"] ?? NSNull()] as [String: Any] }()
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             th = thermal()
             let r2 = await model.reply(to: followPrompt, maxNew: 160)
             out["chat_followup"] = chatRow(r2, thermal0: th)
+            pk.on = false
+            out["chat_peak_all_gb"] = Double(pk.v) / 1e9
+            out["chat_regions_end"] = regions()
             if let id { model.delete(id) }
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             await (model.engine as? DmengChatEngine)?.waitIdle()  // the chat's warm-up after the reply has written its state
