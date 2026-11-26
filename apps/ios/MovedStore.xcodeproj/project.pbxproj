@@ -146,6 +146,7 @@
 				B60000000000000000000001 /* Sources */,
 				B30000000000000000000001 /* Frameworks */,
 				B60000000000000000000002 /* Resources */,
+				B60000000000000000000010 /* Bundle the line's manifests */,
 			);
 			buildRules = (
 			);
@@ -210,6 +211,31 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		B60000000000000000000010 /* Bundle the line's manifests */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/../../python/convert/qwen3_5_moe/moved-store.json",
+				"$(SRCROOT)/../../python/convert/inkling2_loop/moved-store.json",
+			);
+			name = "Bundle the line's manifests";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/manifests/qwen3_5_moe.json",
+				"$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/manifests/inkling2_loop.json",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n# the release line's manifests, from the repo (python/convert/<family>/moved-store.json), into the app at build time (ManifestChoice in DmengChatEngine.swift decides at open whether to use them)\nD=\"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/manifests\"\nmkdir -p \"$D\"\nfor f in qwen3_5_moe inkling2_loop; do cp \"${SRCROOT}/../../python/convert/$f/moved-store.json\" \"$D/$f.json\"; done\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		B60000000000000000000001 /* Sources */ = {
