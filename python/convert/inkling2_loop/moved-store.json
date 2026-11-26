@@ -1246,9 +1246,19 @@
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
    "names": {
-    "rule": "confidence",
-    "tau": 0.5,
-    "candidates": 16
+    "exact": {
+     "rule": "confidence",
+     "tau": 0.5,
+     "candidates": 16
+    },
+    "fast": {
+     "rule": "top",
+     "m": 3
+    },
+    "calibration": {
+     "measured": "base M4, 7.8 GB cache, the merged engine, on AC; fast = approx:drop:w=0.15. Fast against exact on the same 1,100 teacher-forced positions per text (agreement | NLL delta, nats | MB per token | tok/s): code: confidence 0.5 of 16 0.9755 | +0.0070 | 67.3 | 16.5; top 3 0.9745 | +0.0067 | 30.1 | 17.0; names off 0.9736 | +0.0052 | 11.4 | 19.6. Prose: confidence 0.9909 | +0.0050 | 34.0 | 19.4; top 3 0.9845 | +0.0051 | 12.0 | 20.5; off 0.9791 | +0.0129 | 5.8 | 21.2. Exact, two alternating runs each (tok/s, wait ms per token): prose 7.8 GB: confidence 17.45, 17.37 (9.8 ms); top 3 16.86, 17.19 (10.3); off 17.04, 16.09 (11.8). Code 6.0 GB: confidence 9.59, 9.73 (46.5 ms, 268 MB per token); top 3 9.94, 10.10 (42.3 ms, 236 MB); off 9.91, 10.03 (45.5 ms, 221 MB). Prose 6.0 GB: confidence 13.03, 13.78; top 3 13.57, 13.70; off 13.23, 13.50",
+     "reason": "in fast mode a name starts a read that the leave-out rule would otherwise skip and the step then waits for it, so a generous rule reads two to three times the bytes for the same quality; top 3 keeps the NLL and halves the bytes; in exact the rules tie, so exact keeps the published rule; the phone profiles are measured on the phone"
+    }
    },
    "cache": "auto",
    "cache_rule": "locked; size chosen from free memory at start (ceiling = physical memory - 5.5 GB - the process's other memory); shrinks 1 GB per check under memory pressure and grows back",
