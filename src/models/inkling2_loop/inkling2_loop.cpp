@@ -1908,7 +1908,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   // Every loop over positions below runs each position's own arithmetic (the single step's) on the pool; the
   // convolutions, whose state moves position by position, run channel blocks in parallel with the positions in order.
   auto conv_par = [&](int C, const std::function<void(int, int, int)>& f) {  // f(i, c0, c1): position i, channels [c0, c1)
-    const int CB = 256;
+    const int CB = 64;  // (16 jobs for the 1,024 key / value channels, 36 for the 2,304 others)
     parallel_for(pool, (C + CB - 1) / CB, [&](int blk) {
       const int c0 = blk * CB, c1 = std::min(C, c0 + CB);
       for (int i = 0; i < n; i++) f(i, c0, c1);
@@ -2037,16 +2037,18 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   JobN jb[8];
   int nj = 0;
   stage_mark(ST_ATTN_PROJ);
-  jb[nj++] = {&W.q, n, xqa.data(), qi.data(), oq.data(), pa};
-  jb[nj++] = {&W.g, n, xqa.data(), qi.data(), og.data(), pa};
-  jb[nj++] = {&W.k, n, xqk.data(), ki.data(), ok.data(), pk_};
-  jb[nj++] = {&W.v, n, xqv.data(), vi.data(), ov.data(), pv_};
-  jb[nj++] = {&W.r, n, xqa.data(), qi.data(), orr.data(), pa};
+  // the products without a packed input first (one position at a time: a sink or a global layer's kwp / vwp row chunk is
+  // the longest job of the fork-join, which ended waiting on it when it was claimed last); the order changes no result
   jb[nj++] = {&W.sink, n, nullptr, qi.data(), osk.data(), nullptr};
   if (W.global) {
     jb[nj++] = {&W.kwp, n, nullptr, ki.data(), odk.data(), nullptr};
     jb[nj++] = {&W.vwp, n, nullptr, vi.data(), odv.data(), nullptr};
   }
+  jb[nj++] = {&W.q, n, xqa.data(), qi.data(), oq.data(), pa};
+  jb[nj++] = {&W.g, n, xqa.data(), qi.data(), og.data(), pa};
+  jb[nj++] = {&W.k, n, xqk.data(), ki.data(), ok.data(), pk_};
+  jb[nj++] = {&W.v, n, xqv.data(), vi.data(), ov.data(), pv_};
+  jb[nj++] = {&W.r, n, xqa.data(), qi.data(), orr.data(), pa};
   GpuGemm* const G = gpu && po.gpu_frac > 0 && n >= po.gpu_min ? gpu.get() : nullptr;
   run_rows_n_split(pool, G, po.gpu_frac, jb, nj, 32, ref, &T->bytes_res, &gacct);
   auto t3 = clk::now();
