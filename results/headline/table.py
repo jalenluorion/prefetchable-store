@@ -235,7 +235,7 @@ def tables():
         L += [""]
         t = agent_table(cells, m)
         if t:
-            L += [f"**{MODELS[m]}, agent turns** (recorded agent prompts, prefill then generation to the end of the turn; one run per cell)", ""]
+            L += [f"**{MODELS[m]}, agent turns** (recorded agent prompts, prefill then generation to the end of the turn; range over two runs)", ""]
             L += t + [""]
     t = prefill_table()
     if t:

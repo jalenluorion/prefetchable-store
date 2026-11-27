@@ -1,10 +1,12 @@
-# iPhone 15 Plus (6 GB), phone-small profile, measured on the device; fast: threshold 0.15; a dash: not measured
+# iPhone 15 Plus (6 GB), phone-small profile, measured on the device; fast: threshold 0.10 for the 35B, 0.15 for Inkling 2 Mini; a dash: no settled reading
 aspect	Qwen3.6-35B-A3B, exact	Qwen3.6-35B-A3B, fast	Inkling 2 Mini, exact	Inkling 2 Mini, fast
-decode in a chat, tokens/s	3.6-3.7	9.2-9.3	-	-
-decode, long prose / code, tokens/s	3.0-3.4 / 2.5	7.4-9.0 / 6.2	1.5 / -	4.5-5.0 / -
-MB read per token, decode	210-310	67-84	570	113
-first token of a new chat, sent at once / typed ahead, s	4.6-4.8 / 3.2-3.3	1.6-1.7 / 1.2	10.8-11.1 / -	2.4-2.6 / -
-first token of a follow-up, s	4.1	1.2	6.1-6.2	1.6-2.4
-first token after relaunching the app, s	4.6	1.1-1.2	-	-
-launch to ready, s	1.9-2.3	1.9-2.3	1.4-1.8	1.4-1.8
-top choice equal to the phone's own exact, 600 agent-text positions	-	581	-	570
+decode in a chat, tokens/s	3.4-3.7	5.8-6.4	1.3-1.4	5.1-5.3
+decode, long prose / code, tokens/s	3.0-3.4 / 2.4-2.7	5.0-5.9 / 3.5-4.2	1.4-1.5 / 1.0	4.5-5.1 / 4.9
+MB read per token, decode	210-310	100-175	570	105-113
+first token of a new chat, sent at once / typed ahead, s	4.6-5.4 / 3.2-3.3	3.2-3.3 / 2.3	10.5-11.1 / 5.2	2.1-2.6 / 1.1
+first token of a follow-up, s	4.0-4.3	2.6	6.1-6.2	1.4-1.6
+first token after relaunching the app, s	4.4-4.6	2.7	-	3.1
+a 470-490-token prompt sent at once, s to first token	15.4	16.9	-	37.5
+launch to ready, s	1.9-2.4	1.9-2.4	1.4-1.8	1.4-1.8
+top choice equal to the exact 8-bit engine, prose / agent text	0.913 / 0.884	0.860 / 0.868	-	-
+top choice equal to the phone's own exact, 600 agent-text positions	-	591	-	570
