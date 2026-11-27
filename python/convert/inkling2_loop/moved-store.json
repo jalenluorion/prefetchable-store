@@ -37,8 +37,8 @@
   },
   {
    "path": "README.md",
-   "bytes": 16640,
-   "sha256": "2a5cf4662abac096e4df95327821bc60098ce723800c153a5af566b0158a32fb",
+   "bytes": 16721,
+   "sha256": "4b6ba1fd11f76ce12babc823776da6e5fa564f8d64d42e21da4261f0c07bc159",
    "role": "card",
    "precision": "text"
   },
@@ -1510,9 +1510,19 @@
    "precision": "8-bit",
    "precision_detail": "8-bit affine, groups of 64",
    "names": {
-    "rule": "confidence",
-    "tau": 0.5,
-    "candidates": 16
+    "exact": {
+     "rule": "confidence",
+     "tau": 0.5,
+     "candidates": 16
+    },
+    "fast": {
+     "rule": "top",
+     "m": 3
+    },
+    "calibration": {
+     "measured": "iPhone 17 Pro (12.3 GB, profile phone), Inkling 2 Mini in fast (approx:drop:w=0.15) under the confidence rule 0.5 of 16, one 81-token reply, the app's diagnostics: 6.69 tok/s, 136.3 MB read per token of which 16.7 MB was named and never used (12% of the reads), 46 ms of each 149 ms token waiting on storage. Carried from the phones and the Mac where both rules were run: iPhone 15 Plus (phone-small), fast: the 35B top 3 8.99 and 8.62 tok/s against 7.89 and 6.86 under the confidence rule; Inkling 2 Mini top 3 5.05 and 4.53 against 4.71 and 4.12, top choice equal to exact at 570 against 573 of 600 positions; Mac (Inkling 2 Mini, 7.8 GB): the same loss against exact at less than half the bytes per token",
+     "reason": "fast: in fast mode a name starts a read the leave-out rule would otherwise skip and the step then waits for it, so a generous rule reads bytes that are never used; top 3 was the faster rule wherever both were run, and this profile's 12 GB phone showed the same unused reads; not yet run as an A/B on a 12 GB phone. Exact keeps the confidence rule"
+    }
    },
    "cache": "slab",
    "cache_rule": "locked slab sized at open: available - in-memory weights - router - 0.3 GB - 0.9 GB margin, clamped to 0.6-8 GB",

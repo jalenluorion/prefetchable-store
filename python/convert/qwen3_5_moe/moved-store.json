@@ -26,8 +26,8 @@
   },
   {
    "path": "README.md",
-   "bytes": 14385,
-   "sha256": "8e9cf3ff13c1375248177abd6325e0ac02d9887370df379c4603e56015bc69fd",
+   "bytes": 14848,
+   "sha256": "c4b31e226f82ca2c8d7c87685937755b2a803ca3db91e4ecacdd714f911fedbf",
    "role": "card",
    "precision": "text"
   },
@@ -1780,6 +1780,16 @@
      "measured": "iPhone 15 Plus, phone-small, cooled start, each arm twice in mixed order in one launch. Fast at w 0.15: top 3 8.99 and 8.62 tok/s, 77.6 MB per token (2.7 MB named and unused); the confidence rule 0.5 of 16 7.89 and 6.86 tok/s, 91 MB (5.7 unused); confidence 0.7 of 16 7.25 and 7.18 tok/s, 101.5 MB (5.3 unused). Exact, run-ahead on, 200 tokens per arm, exact ids identical in all six arms: top 3 3.35 and 3.00 tok/s, 234 MB per token; confidence 0.5 of 16 3.14 and 3.28 tok/s, 233 MB; top 5 2.85 and 3.11 tok/s, 234 MB",
      "reason": "fast: top 3 is the fastest (above); exact: a tie on decode tok/s (3.17 against 3.21 mean), and top 3 has the lower hit rate (0.70 against 0.74), so exact keeps the confidence rule",
      "threshold_0_08": "iPhone 15 Plus, phone-small, fast at threshold 0.08 with linear_k2, 8 readers, slab 1.485 GB, 200 tokens each, one run per cell, judged by counters (results/ios/p2/P2.md, names at threshold 0.08, 2026-11-23): plain top 3 4.33 tok/s, wait / compute 157 / 74 ms, 153 MB per token; the confidence rule (tau 0.5 over 16) 3.94 tok/s, 183 / 70 ms, 167 MB; plain top 2 4.06 tok/s; no names 3.92 tok/s"
+    }
+   },
+   "modes": {
+    "fast": {
+     "definition": "the model-level fast mode with this profile's leave-out threshold: a picked expert that is not in memory is read and waited for if its routing weight is over 0.10, and waited for if its read is already in flight; otherwise it is left out",
+     "engine": "approx:drop:w=0.10",
+     "calibration": {
+      "measured": "iPhone 15 Plus, phone-small (calibrated 4-bit in-memory weights, 1.42 GB slab), fast with the top 3 names, against the exact 8-bit engine on 1,545 prose and 2,872 agent-text positions (top choice equal | mean NLL | tok/s | MB read per token, prose / agent): threshold 0.10: 0.860 / 0.868 | 1.322 / 1.317 | 5.64 / 3.60 | 108 / 185; 0.13: 0.835 / 0.847 | 1.362 / 1.244 | 7.64 / 5.94 | 73 / 104; 0.15: 0.823 / 0.839 | 1.375 / 1.235 | 7.95 / 4.91 | 66 / 91; exact on the same weights: 0.913 / 0.884. Steady decode, cooled, the two thresholds interleaved: 5.86 and 5.83 tok/s at 0.10, 7.39 and 7.88 at 0.15",
+      "reason": "with this profile's small cache more of a token's picks are missing than on the Mac, so the model-level 0.15 leaves out more here: 0.10 keeps 0.04 more prose agreement and 0.03 more agent-text agreement than 0.15; the mac and phone profiles keep the model-level threshold"
+     }
     }
    },
    "cache": "slab",

@@ -91,9 +91,15 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     "min_available_gb": 5.0,
     "mode": "fast",
     "names": {
-     "candidates": 16,
-     "rule": "confidence",
-     "tau": 0.5
+     "exact": {
+      "candidates": 16,
+      "rule": "confidence",
+      "tau": 0.5
+     },
+     "fast": {
+      "m": 3,
+      "rule": "top"
+     }
     },
     "prefill_gpu": {
      "experts": 0,
@@ -282,6 +288,11 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
      "lookup": false
     },
     "mode": "fast",
+    "modes": {
+     "fast": {
+      "engine": "approx:drop:w=0.10"
+     }
+    },
     "names": {
      "exact": {
       "candidates": 16,
