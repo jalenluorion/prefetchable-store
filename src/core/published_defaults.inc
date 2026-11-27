@@ -74,7 +74,7 @@ static const char* PUBLISHED_DEFAULTS = R"JSON({
     },
     "prefill_gpu": {
      "experts": 0.6,
-     "measured": "base M4 16 GB, exact mode, cold, the engine's NVFP4 and MXFP8 GPU kernels (gpu_gemm.mm gn2x2 / gn4x1, gx64x16 / gx32x32): an 8,365-token prompt 0.4 / 0.6 / 0.65 / 0.7 of the experts' rows took 147.4 / 134.8 / - / 130.4 s before the MXFP8 share and the CPU kernels' changes; after them 0.6 120-122 s (the GPU's wait 1.8-2.2 s), 0.65 122.6 s (7.0 s), projections 0.5 120.4 s against 0.4 120.0 s; a 600-token prompt 8.8 / 8.9 s at 0.4, 8.5 / 8.5 s at 0.6; identical logits and ids at every share",
+     "measured": "base M4 16 GB, exact mode, cold, an 8,365-token prompt: 133.0 and 133.4 s with 0.4 of the experts' rows on the GPU, 122.6 and 122.7 s with 0.6, 122.6 s with 0.65 (the CPU then waits 7.0 s on the GPU against 1.8-2.2 s at 0.6); the projections' share 0.5 against 0.4: 120.4 against 120.0 s; a 600-token prompt 8.8-8.9 s at 0.4, 8.5 s at 0.6; identical logits and ids at every share",
      "projections": 0.4
     },
     "resident": "resident_q8",

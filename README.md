@@ -188,7 +188,7 @@ over two runs for the 35B and Inkling 2 Mini)
 | model | cold request | the same context again | 2,000 more tokens |
 |---|---|---|---|
 | Qwen3.6-35B-A3B (7,572 tokens) | 68.9-69.2 | 15.1 | 22.9-23.4 |
-| Inkling 2 Mini (8,365 tokens) | 167.7-183.1 | 5.3-6.1 | 48.3-52.6 |
+| Inkling 2 Mini (8,365 tokens) | 124.4-124.5 | 4.8 | 35.1 |
 | Qwen3.8-Flash-Next (7,598 tokens), `fast`, 3.0 GB cache | 81.6 | | |
 
 Qwen3.8-Flash-Next's cold request reads each expert it needs once, about 68 GB. Its later requests in the same session
@@ -200,7 +200,7 @@ Qwen3.8-Flash-Next's cold request reads each expert it needs once, about 68 GB. 
 | a tool result of 209 / 314 new tokens | 12.9 / 13.2 |
 | the first message of a new thread, from the saved system prompt | 3.3 |
 
-Through these requests the process peaked at 9.9 GB for the 35B (6.6 GB cache), 9.4 GB for Inkling 2 Mini (6 GB cache)
+Through these requests the process peaked at 9.9 GB for the 35B (6.6 GB cache), 9.2 GB for Inkling 2 Mini (6 GB cache)
 and 9.0 GB for Qwen3.8-Flash-Next.
 
 ### iPhone 15 Plus
