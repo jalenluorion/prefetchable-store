@@ -1742,11 +1742,13 @@ void phase_attn_g(void* p, int, int) {
   const ICfg& c = M.c;
   const int HD = c.HD, np = X.i1 - X.i0, NKV = c.NKV;
   const VState& S = M.S->vs[X.v];
-  static thread_local std::vector<float> scv, biasv;
+  static thread_local std::vector<float> scv, biasv, bfw;
   if ((int)biasv.size() < REP * c.REXT) biasv.resize((size_t)REP * c.REXT);
   const float scale = 1.f / std::sqrt((float)HD);
   for (int job; (job = X.next.fetch_add(1, std::memory_order_relaxed)) < np * NKV;) {
-    const int ip = X.i0 + job / NKV, kvh = job % NKV, pos = X.pos0 + ip;
+    // KV-head-major: the threads work on neighbouring positions of one head at a time, whose keys and values they share
+    // in the caches (a global layer's whole cache does not fit them); the order of the jobs changes no result
+    const int kvh = job / np, ip = X.i0 + job % np, pos = X.pos0 + ip;
     const int t0 = X.ring ? std::max(0, pos - c.WIN + 1) : 0, n = pos - t0 + 1;
     if ((int)scv.size() < REP * n) scv.resize((size_t)REP * (n + 1024));
     float* sc[REP];
@@ -1770,8 +1772,57 @@ void phase_attn_g(void* p, int, int) {
     }
     const _Float16* Kb = S.K + (size_t)kvh * S.cap * HD;
     const _Float16* Vb = S.V + (size_t)kvh * S.cap * HD;
-    for (int i = 0; i < n; i++) {
-      const int t = t0 + i, d = pos - t;
+    // each key's relative bias in key order (bias[g][pos - t], 0 past REXT), so four keys' biases are one load
+    if ((int)bfw.size() < REP * (n + 4)) bfw.resize((size_t)REP * (n + 1028));
+    float* bf[REP];
+    for (int g = 0; g < REP; g++) {
+      bf[g] = bfw.data() + (size_t)g * (n + 4);
+      for (int i = 0; i < n; i++) {
+        const int d = pos - (t0 + i);
+        bf[g][i] = d < c.REXT ? bias[g][d] : 0.f;
+      }
+    }
+    // the scores four keys at a time (each query's 8 dimensions loaded once for the four): per key and head the same
+    // two accumulators over the dimensions in order; the four keys' sums (l0 + l1) + (l2 + l3), as vaddvq gives each, by
+    // two pairwise adds; the score a multiply then an add (not fused), as attn_score; the maximum in key order
+    const float32x4_t vsc = vdupq_n_f32(scale);
+    int i4 = 0;
+    for (; i4 + 4 <= n; i4 += 4) {
+      const _Float16* kr4[4];
+      for (int u = 0; u < 4; u++) {
+        const int t = t0 + i4 + u;
+        kr4[u] = Kb + (size_t)(X.ring ? t % S.cap : t) * HD;
+      }
+      float32x4_t s0[4][REP], s1[4][REP];
+      for (int u = 0; u < 4; u++)
+        for (int g = 0; g < REP; g++) s0[u][g] = s1[u][g] = vdupq_n_f32(0);
+      for (int k = 0; k < HD; k += 8) {
+        float32x4_t ql[REP], qh[REP];
+        for (int g = 0; g < REP; g++) ql[g] = vld1q_f32(q[g] + k), qh[g] = vld1q_f32(q[g] + k + 4);
+        for (int u = 0; u < 4; u++) {
+          float16x8_t kv = vld1q_f16((const float16_t*)kr4[u] + k);
+          const float32x4_t lo = vcvt_f32_f16(vget_low_f16(kv)), hi = vcvt_high_f32_f16(kv);
+          for (int g = 0; g < REP; g++) {
+            s0[u][g] = vfmaq_f32(s0[u][g], lo, ql[g]);
+            s1[u][g] = vfmaq_f32(s1[u][g], hi, qh[g]);
+          }
+        }
+      }
+      for (int g = 0; g < REP; g++) {
+        const float32x4_t d4 = vpaddq_f32(vpaddq_f32(vaddq_f32(s0[0][g], s1[0][g]), vaddq_f32(s0[1][g], s1[1][g])),
+                                          vpaddq_f32(vaddq_f32(s0[2][g], s1[2][g]), vaddq_f32(s0[3][g], s1[3][g])));
+        float32x4_t m4 = vmulq_f32(d4, vsc);
+        __asm__("" : "+w"(m4));
+        const float32x4_t s4 = vaddq_f32(m4, vld1q_f32(bf[g] + i4));
+        vst1q_f32(sc[g] + i4, s4);
+        mx[g] = std::max(mx[g], vgetq_lane_f32(s4, 0));
+        mx[g] = std::max(mx[g], vgetq_lane_f32(s4, 1));
+        mx[g] = std::max(mx[g], vgetq_lane_f32(s4, 2));
+        mx[g] = std::max(mx[g], vgetq_lane_f32(s4, 3));
+      }
+    }
+    for (int i = i4; i < n; i++) {
+      const int t = t0 + i;
       const int slot = X.ring ? t % S.cap : t;
       const _Float16* kr = Kb + (size_t)slot * HD;
       float32x4_t s0[REP], s1[REP];
@@ -1786,7 +1837,7 @@ void phase_attn_g(void* p, int, int) {
       }
       for (int g = 0; g < REP; g++) {
         const float dot = vaddvq_f32(vaddq_f32(s0[g], s1[g]));
-        const float s = attn_score(dot, scale, d < c.REXT ? bias[g][d] : 0.f);
+        const float s = attn_score(dot, scale, bf[g][i]);
         sc[g][i] = s;
         mx[g] = std::max(mx[g], s);
       }
@@ -1797,6 +1848,7 @@ void phase_attn_g(void* p, int, int) {
       double z = std::exp((double)X.sink[ip][hh] - mx[g]);
       for (int i = 0; i < n; i++) z += (sc[g][i] = std::exp(sc[g][i] - mx[g]));
       iz[g] = (float)(1.0 / z);
+      for (int i = 0; i < n; i++) sc[g][i] = sc[g][i] * iz[g];  // each key's weight once (the same product as per pass)
     }
     float accs[REP][256];
     for (int k0 = 0; k0 < HD; k0 += 32) {  // 32 dimensions of every head per pass over the keys
@@ -1814,7 +1866,7 @@ void phase_attn_g(void* p, int, int) {
           vf[2 * u + 1] = vcvt_high_f32_f16(vv);
         }
         for (int g = 0; g < REP; g++) {
-          const float32x4_t pv = vdupq_n_f32(sc[g][i] * iz[g]);
+          const float32x4_t pv = vld1q_dup_f32(sc[g] + i);
           for (int u = 0; u < 8; u++) a[g][u] = vfmaq_f32(a[g][u], vf[u], pv);
         }
       }

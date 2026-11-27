@@ -279,25 +279,35 @@ void gemm_nvfp4_i16(const uint8_t* codes, const uint8_t* sc, float gmul, int K, 
   const uint8x16_t m = vdupq_n_u8(0x0F);
   const int q0 = p0 >> 1, q1 = (p1 + 1) >> 1;  // position pairs
   const size_t pstride = (size_t)KB * 16;
-  for (int qs = q0; qs < q1; qs += 4) {  // up to 4 pairs (8 positions) per tile
-    const int nq = std::min(4, q1 - qs);
+  // The accumulators stay in the SMMLA layout: per (row pair, position pair) and sub-block s one vector [row a pos a,
+  // row a pos b, row b pos a, row b pos b] (A0 / A1 by the batch-1 kernel's block parity), each lane the very sequence
+  // of fused multiply-adds mv_nvfp4 gives that output's lane s (dot * (scale_s * d_block), the product scale * d rounded
+  // once as there); they are transposed to the batch-1 kernel's lanes once, at the end. The activation scales of the tile
+  // as [d_a, d_b, d_a, d_b] per pair and block, built once per position tile.
+  constexpr int NQ = 4;  // position pairs per tile
+  static thread_local std::vector<float32x4_t> dd;
+  dd.resize((size_t)NQ * NB);
+  for (int qs = q0; qs < q1; qs += NQ) {  // up to 4 pairs (8 positions) per tile
+    const int nq = std::min(NQ, q1 - qs);
+    for (int j = 0; j < nq; j++)
+      for (int b = 0; b < NB; b++) {
+        const float t4[4] = {x.d[(size_t)(2 * (qs + j)) * NG + b], x.d[(size_t)(2 * (qs + j) + 1) * NG + b], 0.f, 0.f};
+        dd[(size_t)j * NB + b] = vcombine_f32(vld1_f32(t4), vld1_f32(t4));
+      }
     int r = r0;
     for (; r + 2 <= r1; r += 2) {
       const uint8_t* ca = codes + (size_t)r * rb;
       const uint8_t* cb = ca + rb;
       const uint8_t* sa = sc + (size_t)r * rs;
       const uint8_t* sbp = sa + rs;
-      float32x4_t A0[2][8], A1[2][8];
-      for (int a = 0; a < 2; a++)
-        for (int i = 0; i < 2 * nq; i++) A0[a][i] = A1[a][i] = vdupq_n_f32(0);
-      float32x4_t svA[4], svB[4];
+      float32x4_t A0[NQ][4], A1[NQ][4];
+      for (int j = 0; j < NQ; j++)
+        for (int s4 = 0; s4 < 4; s4++) A0[j][s4] = A1[j][s4] = vdupq_n_f32(0);
       for (int b = 0; b < NB; b++) {
-        const bool full = (b & ~3) + 4 <= NB;
-        if (full && (b & 3) == 0) {
-          nv_e4m3x16(sa + 4 * b, svA);
-          nv_e4m3x16(sbp + 4 * b, svB);
-        }
-        const float32x4_t scA = full ? svA[b & 3] : nv_e4m3x4(sa + 4 * b), scB = full ? svB[b & 3] : nv_e4m3x4(sbp + 4 * b);
+        const bool odd = (b & ~3) + 4 <= NB && (b & 1);  // the batch-1 kernel: blocks b, b + 2 -> acc0, b + 1, b + 3 -> acc1
+        const float32x4_t scA = nv_e4m3x4(sa + 4 * b), scB = nv_e4m3x4(sbp + 4 * b);
+        const float32x4_t sAB[4] = {vcombine_f32(vdup_laneq_f32(scA, 0), vdup_laneq_f32(scB, 0)), vcombine_f32(vdup_laneq_f32(scA, 1), vdup_laneq_f32(scB, 1)),
+                                    vcombine_f32(vdup_laneq_f32(scA, 2), vdup_laneq_f32(scB, 2)), vcombine_f32(vdup_laneq_f32(scA, 3), vdup_laneq_f32(scB, 3))};
         int8x16_t W[8];  // row pair, perm-order 8-input chunks: low nibbles of bytes 0-7, 8-15, high of 0-7, 8-15; then 16-31
         for (int h = 0; h < 2; h++) {
           uint8x16_t va = vld1q_u8(ca + 32 * b + 16 * h), vb = vld1q_u8(cb + 32 * b + 16 * h);
@@ -308,37 +318,34 @@ void gemm_nvfp4_i16(const uint8_t* codes, const uint8_t* sc, float gmul, int K, 
           W[4 * h + 2] = vqtbl1q_s8(lut, vshrq_n_u8(plo, 4));
           W[4 * h + 3] = vqtbl1q_s8(lut, vshrq_n_u8(phi, 4));
         }
-        for (int j = 0; j < nq; j++) {
+        for (int j = 0; j < NQ; j++) {
+          if (j >= nq) break;
           const int8_t* xh = x.hp + (size_t)(qs + j) * pstride + (size_t)b * 8 * 16;
           const int8_t* xl = x.lp + (size_t)(qs + j) * pstride + (size_t)b * 8 * 16;
-          int32x4_t T[4];
-          for (int s = 0; s < 4; s++) {  // sub-block s = chunks (s / 2) * 4 + s % 2 and that + 2
-            const int k0 = (s >> 1) * 4 + (s & 1), k1 = k0 + 2;
+          const float32x4_t dv = dd[(size_t)j * NB + b];
+          for (int s4 = 0; s4 < 4; s4++) {  // sub-block s4 = chunks (s4 / 2) * 4 + s4 % 2 and that + 2
+            const int k0 = (s4 >> 1) * 4 + (s4 & 1), k1 = k0 + 2;
             // the high plane's sums shifted by 8, the low plane's SMMLAs accumulated into them (the same integers as
-            // (hi << 8) + lo): [row a pos a, row a pos b, row b pos a, row b pos b]
+            // (hi << 8) + lo)
             const int32x4_t hi = vmmlaq_s32(vmmlaq_s32(vdupq_n_s32(0), W[k0], vld1q_s8(xh + 16 * k0)), W[k1], vld1q_s8(xh + 16 * k1));
-            T[s] = vmmlaq_s32(vmmlaq_s32(vshlq_n_s32(hi, 8), W[k0], vld1q_s8(xl + 16 * k0)), W[k1], vld1q_s8(xl + 16 * k1));
+            const int32x4_t T = vmmlaq_s32(vmmlaq_s32(vshlq_n_s32(hi, 8), W[k0], vld1q_s8(xl + 16 * k0)), W[k1], vld1q_s8(xl + 16 * k1));
+            const float32x4_t mm = vmulq_f32(sAB[s4], dv);
+            if (odd) A1[j][s4] = vfmaq_f32(A1[j][s4], vcvtq_f32_s32(T), mm);
+            else A0[j][s4] = vfmaq_f32(A0[j][s4], vcvtq_f32_s32(T), mm);
           }
-          int32x4_t D[4];
-          tr4(T, D);
-          const int pa = 2 * (qs + j), pb = pa + 1;
-          const float da = x.d[(size_t)pa * NG + b], db = x.d[(size_t)pb * NG + b];
-          const float32x4_t v0 = vmulq_f32(vcvtq_f32_s32(D[0]), vmulq_n_f32(scA, da));
-          const float32x4_t v1 = vmulq_f32(vcvtq_f32_s32(D[1]), vmulq_n_f32(scA, db));
-          const float32x4_t v2 = vmulq_f32(vcvtq_f32_s32(D[2]), vmulq_n_f32(scB, da));
-          const float32x4_t v3 = vmulq_f32(vcvtq_f32_s32(D[3]), vmulq_n_f32(scB, db));
-          float32x4_t(*A)[8] = (full && (b & 1)) ? A1 : A0;  // the batch-1 kernel: blocks b, b + 2 -> acc0, b + 1, b + 3 -> acc1
-          A[0][2 * j] = vaddq_f32(A[0][2 * j], v0);
-          A[0][2 * j + 1] = vaddq_f32(A[0][2 * j + 1], v1);
-          A[1][2 * j] = vaddq_f32(A[1][2 * j], v2);
-          A[1][2 * j + 1] = vaddq_f32(A[1][2 * j + 1], v3);
         }
       }
-      for (int i = 0; i < 2 * nq; i++) {
-        const int p = 2 * qs + i;
-        if (p < p0 || p >= p1) continue;
-        Y[(size_t)(p - p0) * ldy + (r - r0)] = vaddvq_f32(vaddq_f32(A0[0][i], A1[0][i])) * post;
-        Y[(size_t)(p - p0) * ldy + (r + 1 - r0)] = vaddvq_f32(vaddq_f32(A0[1][i], A1[1][i])) * post;
+      for (int j = 0; j < nq; j++) {
+        int32x4_t V0[4], V1[4], D0[4], D1[4];
+        for (int s4 = 0; s4 < 4; s4++) V0[s4] = vreinterpretq_s32_f32(A0[j][s4]), V1[s4] = vreinterpretq_s32_f32(A1[j][s4]);
+        tr4(V0, D0);  // D[0] = (row a, pos a), D[1] = (a, b), D[2] = (row b, pos a), D[3] = (b, b), lanes = sub-blocks
+        tr4(V1, D1);
+        const int pa = 2 * (qs + j);
+        for (int o = 0; o < 4; o++) {
+          const int p = pa + (o & 1), rr = r + (o >> 1);
+          if (p < p0 || p >= p1) continue;
+          Y[(size_t)(p - p0) * ldy + (rr - r0)] = vaddvq_f32(vaddq_f32(vreinterpretq_f32_s32(D0[o]), vreinterpretq_f32_s32(D1[o]))) * post;
+        }
       }
     }
     if (r < r1) {  // an odd last row: the batch-1 kernel on each position's own planes is not available here; scalar-exact
