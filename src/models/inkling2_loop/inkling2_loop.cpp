@@ -270,7 +270,7 @@ struct Inkling : Model {
   float* spmsrc(int i) { return sp_msrc.data() + (size_t)i * NMS * c.H; }
   XQB xqb_a, xqb_b, xqb_c, xqb_e, xqb_h;  // the sub-chunk's inputs packed for the batch kernels (>= 6 positions)
   // the batched prompt path's options (dmeng/prefill.h; this model's values: its manifest's "prefill"): the projections'
-  // GPU share through run_rows_n_split, the experts' (the NVFP4 layers; MXFP8 stays on the CPU) through moe_chunk
+  // GPU share through run_rows_n_split, the experts' (NVFP4 and MXFP8 layers, gpu_gemm.h) through moe_chunk
   PrefillOpts po;
   GpuShare gpu;
   GpuSplitAcct gacct;
@@ -2649,7 +2649,7 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
         << ",\"experts_nvfp4\":" << pf_exp_ms[0] - exm0[0] << ",\"experts_mxfp8\":" << pf_exp_ms[1] - exm0[1]
         << ",\"proj_in\":" << pf_proj_in_ms - pin0 << "},\"expert_mb_nvfp4\":" << pf_exp_mb[0] - exb0[0] << ",\"expert_mb_mxfp8\":" << pf_exp_mb[1] - exb0[1];
     }
-    if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))  // the GPU shares (the 35B's "gpu" account; experts: the NVFP4 layers)
+    if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))  // the GPU shares (the 35B's "gpu" account; experts: NVFP4 and MXFP8)
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac
         << ",\"gmac_gpu\":" << (gacct.macs_gpu - ga0.macs_gpu) / 1e9 << ",\"gmac_cpu\":" << (gacct.macs_cpu - ga0.macs_cpu) / 1e9
         << ",\"wait_ms\":" << gacct.ms_wait - ga0.ms_wait << ",\"stage_ms\":" << gacct.ms_stage - ga0.ms_stage << ",\"sets\":" << gacct.sets - ga0.sets

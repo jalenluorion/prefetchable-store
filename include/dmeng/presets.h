@@ -61,7 +61,7 @@ struct Preset {
   // the pass width is 1 + N positions
   int draft_max = 0;
   // the batched prefill's exact CPU + GPU split (Metal builds): shares of the attention projections' and the experts'
-  // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for every model, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts: the NVFP4 layers)
+  // rows on the GPU; 0 = CPU only (mac: 0.4 / 0.4 for every model, results/ios/p3-gpu/GPU-PREFILL.md; Inkling's experts 0.6, NVFP4 and MXFP8)
   double gpu_frac = 0, gpu_experts = 0;
   // run-ahead while a step waits on reads (exact: names only): the picks it names (0 = off) and its depth in layers
   // (mac: top_k at depth 1, results/parity/PARITY.md; the phone profiles: the same, in exact mode only)

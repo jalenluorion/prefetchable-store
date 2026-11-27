@@ -160,7 +160,7 @@ outputs
                          the CPU (builds with DM_METAL; the same bits); 0 = CPU only (default: the profile's; the
                          mac profile 0.4 for every model, else 0)
   --prefill-gpu-experts F  the same for the experts' products (routed experts in the slab, the shared expert;
-                         the mac profile 0.4; Inkling: its NVFP4 layers)
+                         the mac profile 0.4; Inkling's manifest 0.6, NVFP4 and MXFP8)
   --prefill-gpu off      the batched prefill on the CPU only (both shares 0)
   --draft lookup|fixed|head|both   draft and verify: drafts verified up to --draft-max 7 at a time in one pass;
                          accepted while each equals the token the pass itself produces (greedy: its argmax; sampled: the
