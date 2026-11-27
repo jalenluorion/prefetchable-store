@@ -1019,9 +1019,9 @@ if wanted("caps"):
             # hold; ids unchanged
             cap_gb = (2 * K + 4) * sum(rb) / 1e9
             got = {}
-            for caps in ("none", "uniform", "uniform:fit"):
-                out, js = greedy("caps_" + caps.replace(":", "_"), "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K), "--layer-caps", caps, n=64)
-                got[caps] = (out, js["pf_dropped_per_token"], js["pf_issued_per_token"])
+            for lc in ("none", "uniform", "uniform:fit"):
+                out, js = greedy("caps_" + lc.replace(":", "_"), "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K), "--layer-caps", lc, n=64)
+                got[lc] = (out, js["pf_dropped_per_token"], js["pf_issued_per_token"])
             bad = []
             if len({v[0] for v in got.values()}) != 1:
                 bad.append("ids differ between cap settings")
@@ -1031,10 +1031,10 @@ if wanted("caps"):
             # whatever bytes they have, so these ids mean nothing), and fit must then refuse no name at all while the
             # fixed reserve still refuses. With real reads, fit must refuse fewer names than the fixed reserve.
             dry = {}
-            for caps in ("uniform", "uniform:fit"):
-                _, js = greedy("caps_dry_" + caps.replace(":", "_"), "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K), "--layer-caps", caps,
+            for lc in ("uniform", "uniform:fit"):
+                _, js = greedy("caps_dry_" + lc.replace(":", "_"), "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K), "--layer-caps", lc,
                                "--skip-reads", n=64)
-                dry[caps] = js["pf_dropped_per_token"]
+                dry[lc] = js["pf_dropped_per_token"]
             if dry["uniform:fit"] != 0:
                 bad.append(f"with no read in flight fit still refuses {dry['uniform:fit']:.2f} names per token")
             if dry["uniform"] <= 0:
@@ -1056,12 +1056,12 @@ if wanted("background"):
             # without per-layer caps: exact ids identical to no background reads, and the reads issued under caps too
             cap_gb = (2 * K + 4) * sum(rb) / 1e9
             got, bad = {}, []
-            for caps in ("none", "uniform", "uniform:fit"):
+            for lc in ("none", "uniform", "uniform:fit"):
                 for bg in ("0", str(min(16, 2 * K + 2))):
-                    out, js = greedy(f"bg_{caps.replace(':', '_')}_{bg}", "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K),
-                                     "--layer-caps", caps, "--bg-ranks", bg, n=64)
+                    out, js = greedy(f"bg_{lc.replace(':', '_')}_{bg}", "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--m", str(K),
+                                     "--layer-caps", lc, "--bg-ranks", bg, n=64)
                     b = js.get("drive", {}).get("background", {})
-                    got[(caps, bg)] = (out, b.get("issued_per_token", 0.0), b.get("used_per_token", 0.0))
+                    got[(lc, bg)] = (out, b.get("issued_per_token", 0.0), b.get("used_per_token", 0.0))
             # the confidence rule (Inkling's names) under caps: the ranks it left unnamed
             out, js = greedy("bg_uniform_conf", "--cache-gb", f"{cap_gb:.6f}", "--routers", routers[0], "--rt-tau", "0.5", "--layer-caps", "uniform",
                              "--bg-ranks", "16", n=64)
