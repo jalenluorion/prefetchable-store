@@ -274,6 +274,11 @@ struct Inkling : Model {
   PrefillOpts po;
   GpuShare gpu;
   GpuSplitAcct gacct;
+  // the batched path's wall ms by part, accumulated (the prefill JSON's ms_by_stage reports a prompt's share): the MoE
+  // call per expert format [0] NVFP4 / [1] MXFP8 and its experts' compute part, the attention core of sliding / global
+  // applications, the message gates, the projections of the attention input / output
+  double pf_moe_ms[2] = {0, 0}, pf_exp_ms[2] = {0, 0}, pf_exp_mb[2] = {0, 0}, pf_core_ms[2] = {0, 0}, pf_gates_ms = 0, pf_proj_in_ms = 0,
+         pf_proj_out_ms = 0;
   long n_chunks = 0;
   PageVec<uint8_t> span_snap;
   std::vector<uint8_t> ring_tmp;  // the fixed state at a span's start (a cancel inside it); a ring slice
@@ -1890,6 +1895,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   for (int i = 0; i < n; i++)
     for (int b = 0; b < 3; b++) qkv_in[(size_t)b * n + i] = P_[i].ain + (size_t)(W.global ? b : 0) * H;
   if (msgs) {
+    auto tg = clk::now();
     stage_mark(ST_GATES);
     const Gate* G[3] = {&W.mg[0], &W.mg[1], &W.mg[2]};
     std::vector<const float*> mg((size_t)3 * n);
@@ -1902,6 +1908,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
     gates_n(*this, G, 3, qkv_in.data(), mg.data(), out.data(), n);
     for (int b = 0; b < 3; b++)
       for (int i = 0; i < n; i++) qkv_in[(size_t)b * n + i] = P_[i].gin + (size_t)b * H;
+    pf_gates_ms += ms_since(tg);
   }
   stage_mark(ST_NORMQ);
   for (int i = 0; i < n; i++) {
@@ -1992,6 +1999,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   run_rows_n_split(pool, G, po.gpu_frac, jb, nj, 32, ref, &T->bytes_res, &gacct);
   auto t3 = clk::now();
   T->attn_proj += ms_between(t2, t3);
+  pf_proj_in_ms += ms_between(t2, t3);
   // the KV preparation of every position (the convolutions in position order per channel block; clips and norms per
   // position and head), then the cache writes and the attention in groups that a sliding ring can hold (a global
   // layer's cache holds every position: one group)
@@ -2093,6 +2101,7 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   if (!ref && c.HD % XB != 0) parallel_for(pool, n, [&](int i) { pp[i]->xe.prep(P_[i].o, QD); });
   auto t4 = clk::now();
   T->attn_core += ms_between(t3, t4);
+  pf_core_ms[W.global ? 1 : 0] += ms_between(t3, t4);
   {
     std::vector<const XQ*> xo(n);
     std::vector<const float*> fo(n);
@@ -2110,7 +2119,9 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
       pe = &xqb_e;
     }
     JobN jo = {&W.o, n, xo.data(), fo.data(), oa.data(), pe};
+    auto to = clk::now();
     run_rows_n_split(pool, gpu && po.gpu_frac > 0 && n >= po.gpu_min ? gpu.get() : nullptr, po.gpu_frac, &jo, 1, 32, ref, &T->bytes_res, &gacct);
+    pf_proj_out_ms += ms_since(to);
   }
   stage_mark(ST_CONV);
   if (rb)
@@ -2159,9 +2170,14 @@ void Inkling::layer_chunk(int v, int i0, int n, bool msgs) {
   T->msg += ms_since(t6);
   core->moe_gpu = gpu && po.gpu_experts > 0 && n >= po.gpu_min ? gpu.get() : nullptr;  // the experts' share (prefill sub-chunks)
   core->moe_gpu_frac = po.gpu_experts;
+  const double ex0 = T->experts, eb0 = T->bytes_exp;
+  auto tm0 = clk::now();
   core->moe_chunk(v, n, xm.data(), ym.data(), views[L], nullptr, nullptr, i0);
   core->moe_gpu = nullptr;
   auto t8 = clk::now();
+  pf_moe_ms[c.fmt[L] == 'M'] += ms_between(tm0, t8);
+  pf_exp_ms[c.fmt[L] == 'M'] += T->experts - ex0;
+  pf_exp_mb[c.fmt[L] == 'M'] += (T->bytes_exp - eb0) / MB;
   stage_mark(ST_CONV);
   if (rb)
     parallel_for(pool, n, [&](int i) { std::memcpy(rb_in[(size_t)v * 4 + 3].data() + (size_t)(i0 + i) * H, P_[i].y, sizeof(float) * H); });
@@ -2488,6 +2504,9 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
     return r;
   }
   const double be0 = T->bytes_exp, br0 = T->bytes_res;
+  const Times tt0 = *T;  // the stage times before the prompt (ms_by_stage below)
+  const double moe0[2] = {pf_moe_ms[0], pf_moe_ms[1]}, exm0[2] = {pf_exp_ms[0], pf_exp_ms[1]}, exb0[2] = {pf_exp_mb[0], pf_exp_mb[1]};
+  const double cor0[2] = {pf_core_ms[0], pf_core_ms[1]}, gat0 = pf_gates_ms, pin0 = pf_proj_in_ms, pout0 = pf_proj_out_ms;
   const long c0 = n_chunks;
   const std::vector<uint32_t> nr0 = st ? core->cache.n_reads : std::vector<uint32_t>();  // reads per record before
   if (gpu) gpu->set_kernel(po.gpu_kernel);
@@ -2563,6 +2582,18 @@ bool Inkling::prefill(State& s0, const int32_t* ids, int n, bool want_logits, co
         o << (L ? "," : "") << "[" << rec << "," << rd << "]";
       }
       o << "],\"records_once_mb\":" << once / 1e6 << ",\"reads_mb\":" << all / 1e6;
+    }
+    {  // wall ms by stage over the prompt (the caller thread's time; a stage's GPU wait inside it), MB of experts traversed
+      const Times& t = *T;
+      o << ",\"ms_by_stage\":{\"embed\":" << t.embed - tt0.embed << ",\"depth_attn\":" << t.depth - tt0.depth << ",\"gates_norms_quant\":" << t.msg - tt0.msg
+        << ",\"of_which_gates\":" << pf_gates_ms - gat0 << ",\"attn_proj\":" << t.attn_proj - tt0.attn_proj << ",\"attn_core\":" << t.attn_core - tt0.attn_core
+        << ",\"of_core_sliding\":" << pf_core_ms[0] - cor0[0] << ",\"of_core_global\":" << pf_core_ms[1] - cor0[1]
+        << ",\"attn_out\":" << t.attn_out - tt0.attn_out << ",\"of_out_proj\":" << pf_proj_out_ms - pout0 << ",\"moe_router\":" << t.router - tt0.router
+        << ",\"experts\":" << t.experts - tt0.experts << ",\"wait\":" << t.wait - tt0.wait << ",\"cache\":" << t.cache - tt0.cache
+        << ",\"names\":" << t.pf - tt0.pf << ",\"post_mlp\":" << t.misc - tt0.misc << ",\"head\":" << t.head - tt0.head
+        << ",\"moe_nvfp4\":" << pf_moe_ms[0] - moe0[0] << ",\"moe_mxfp8\":" << pf_moe_ms[1] - moe0[1]
+        << ",\"experts_nvfp4\":" << pf_exp_ms[0] - exm0[0] << ",\"experts_mxfp8\":" << pf_exp_ms[1] - exm0[1]
+        << ",\"proj_in\":" << pf_proj_in_ms - pin0 << "},\"expert_mb_nvfp4\":" << pf_exp_mb[0] - exb0[0] << ",\"expert_mb_mxfp8\":" << pf_exp_mb[1] - exb0[1];
     }
     if (gpu && (po.gpu_frac > 0 || po.gpu_experts > 0))  // the GPU shares (the 35B's "gpu" account; experts: the NVFP4 layers)
       o << ",\"gpu\":{\"kernel\":\"" << (gpu->kernel() == 1 ? "matrix" : "integer") << "\",\"attn\":{\"frac\":" << po.gpu_frac

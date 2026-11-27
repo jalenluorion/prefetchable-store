@@ -1263,6 +1263,7 @@ int main(int argc, char** argv) {
     const bool fast = a.fast_head > 0 && fh_greedy_ok;
     const Want want = fast ? Want::GREEDY : head_topk ? Want::TOPK : Want::LAST;
     auto tp = clk::now();
+    PrefillStats pre_st;  // the batched prefill's own account (the family's detail: stages, GPU shares), in the JSON
     if (a.prefill_chunk != 1) {  // the batched prefill (records not kept; 0: the model's declared sub-chunk and span)
       std::string e2;
       if (a.prefill_chunk > 1 && !M->set_option("prefill_chunk", std::to_string(a.prefill_chunk), e2)) return die("prefill", e2);
@@ -1270,7 +1271,7 @@ int main(int argc, char** argv) {
       if (a.prefill_gpu_experts > 0 && !M->set_option("prefill_gpu_experts", std::to_string(a.prefill_gpu_experts), e2)) return die("prefill", e2);
       std::vector<int32_t> pid(prompt.begin(), prompt.end());
       wc::reset();
-      M->prefill(*S, pid.data(), (int)pid.size(), true, {}, nullptr, nullptr, nullptr);
+      M->prefill(*S, pid.data(), (int)pid.size(), true, {}, nullptr, &pre_st, nullptr);
       if (wc::on()) fprintf(stderr, "WORK %s\n", wc::json().c_str());
     } else {
       for (size_t i = 0; i < prompt.size(); i++) {
@@ -1279,6 +1280,12 @@ int main(int argc, char** argv) {
       }
     }
     const double prefill_s = ms_since(tp) / 1000;
+    if (!a.dump_logits.empty()) {  // --dump-logits F (generation): the logits after the prompt, float32 (the first token's)
+      if (FILE* f = fopen(a.dump_logits.c_str(), "wb")) {
+        fwrite(M->logits().data(), 4, M->logits().size(), f);
+        fclose(f);
+      }
+    }
     const uint64_t pre_bytes = CS.bytes_urgent + CS.bytes_pf, pre_miss = CS.n_miss, pre_hit = CS.n_hit;
     const double pre_wait_ms = CS.wait_ms;  // the compute thread waiting on reads during the prompt
     // --state-check: the state after the prompt, as the prefix cache would save it
@@ -1519,6 +1526,7 @@ int main(int argc, char** argv) {
       js << "]";
     }
     if (a.prefill_chunk != 1) js << ",\"prefill_chunk\":" << a.prefill_chunk;
+    if (!pre_st.json.empty()) js << ",\"prefill_detail\":" << pre_st.json;
     if (a.prefill_chunk != 1 && (a.prefill_gpu_frac > 0 || a.prefill_gpu_experts > 0))
       js << ",\"prefill_gpu_frac\":" << a.prefill_gpu_frac << ",\"prefill_gpu_experts\":" << a.prefill_gpu_experts;
     if (a.state_check) js << ",\"state_check\":{\"fixed_mb\":" << fixed_saved.size() / 1e6 << ",\"pos_mb\":" << pos_saved.size() / 1e6 << ",\"same_ids\":" << (state_same ? "true" : "false") << "}";
