@@ -68,6 +68,19 @@ static inline int64_t now_ns() {
   return std::chrono::duration_cast<std::chrono::nanoseconds>(clk::now().time_since_epoch()).count();
 }
 
+// this thread's CPU time so far (ns): user + system, and system alone (thread_basic_info; ~1 us per call)
+static void thread_cpu(uint64_t& all, uint64_t& sys) {
+  thread_basic_info_data_t b;
+  mach_msg_type_number_t c = THREAD_BASIC_INFO_COUNT;
+  if (thread_info(pthread_mach_thread_np(pthread_self()), THREAD_BASIC_INFO, (thread_info_t)&b, &c) != KERN_SUCCESS) {
+    all = sys = 0;
+    return;
+  }
+  const uint64_t u = (uint64_t)b.user_time.seconds * 1000000000ull + (uint64_t)b.user_time.microseconds * 1000ull;
+  sys = (uint64_t)b.system_time.seconds * 1000000000ull + (uint64_t)b.system_time.microseconds * 1000ull;
+  all = u + sys;
+}
+
 void Readers::start(int n, std::atomic<int>** pending, bool skip) {
   pending_ = pending;
   skip_ = skip;
@@ -147,6 +160,19 @@ void Readers::drop_loop() {
       q.pop_front();
       drop_busy_ = true;
     }
+    uint64_t ca0, cs0;
+    thread_cpu(ca0, cs0);
+    struct CpuAdd {  // the tier thread's CPU for this item, by kind (copy | drop)
+      Readers& r;
+      bool copy;
+      uint64_t a0, s0;
+      ~CpuAdd() {
+        uint64_t a1, s1;
+        thread_cpu(a1, s1);
+        r.cpu_ns[copy ? CPU_COPY : CPU_DROP].fetch_add(a1 - a0, std::memory_order_relaxed);
+        r.sys_ns[copy ? CPU_COPY : CPU_DROP].fetch_add(s1 - s0, std::memory_order_relaxed);
+      }
+    } cpu_add{*this, d.dst != nullptr, ca0, cs0};
     if (d.dst) {  // a promotion's copy: a buffered pread (the file cache's pages copied; the drive's if the OS took them)
       const int64_t t0 = now_ns();
       if (!all_resident(d.p, d.n)) copy_drive_bytes.fetch_add(d.n, std::memory_order_relaxed);
@@ -391,6 +417,9 @@ void Readers::loop() {
       tick_(t0);
     }
     q_ns[cls].fetch_add((uint64_t)std::max<int64_t>(0, t0 - j.t_sub), std::memory_order_relaxed);
+    uint64_t ca0, cs0;
+    thread_cpu(ca0, cs0);
+    const int ck = j.prob ? CPU_PROB : CPU_READ;
     // tests: DMENG_TEST_SPEC_READ_US holds every speculative read (a name's) that long in flight, as a busy machine does
     static const int spec_us = getenv("DMENG_TEST_SPEC_READ_US") ? atoi(getenv("DMENG_TEST_SPEC_READ_US")) : 0;
     if (spec_us > 0 && cls != 0) std::this_thread::sleep_for(std::chrono::microseconds(spec_us));
@@ -486,6 +515,12 @@ void Readers::loop() {
         for (size_t o = 0; o < j.n; o += pg) acc += ((const volatile uint8_t*)j.view)[o];
         (void)acc;
       }
+    }
+    {
+      uint64_t ca1, cs1;
+      thread_cpu(ca1, cs1);
+      cpu_ns[ck].fetch_add(ca1 - ca0, std::memory_order_relaxed);
+      sys_ns[ck].fetch_add(cs1 - cs0, std::memory_order_relaxed);
     }
     const int64_t t1 = now_ns();
     busy_ns.fetch_add((uint64_t)(t1 - t0), std::memory_order_relaxed);
@@ -702,14 +737,19 @@ int Cache::prob_check(int L, int slot) {
   Slot& x = S.s[slot];
   if (S.pending[slot].load(std::memory_order_acquire) != 0 || skip_reads) return slot;  // in flight: the reader maps it
   const uint8_t* v = fmap[L] + (size_t)x.e * S.rec;
-  if (probe_resident(v, S.rec)) return slot;
+  const int64_t c0 = now_ns();
+  const bool res = probe_resident(v, S.rec);
+  st.n_prob_checks++;
+  st.prob_check_ns += (uint64_t)(now_ns() - c0);
+  if (res) return slot;
   st.n_prob_reclaimed++;  // the OS took (part of) it before this use
-  if (x.pins == 0) {      // a miss like any other
-    drop(L, slot, true);
+  if (x.pins == x.pf_pins) {  // unpinned, or pinned by names only (as steal() takes): a miss like any other, so the
+    drop(L, slot, true);      // mode decides (Fast's leave-out rule may skip it; Exact reads it, the same bytes)
     free_slot(layer_pool[L], slot);
     return -1;
   }
-  // pinned (a name's, a loop hold's): read again into the same slot now, urgent (pins and statistics unchanged)
+  // pinned by a loop hold (used by an earlier pass): read again into the same slot now, urgent (pins and statistics
+  // unchanged)
   const size_t R = S.rec, piece = ((R / split) + 16383) & ~size_t(16383);
   const int parts = (int)((R + piece - 1) / piece);
   S.pending[slot].store(parts, std::memory_order_release);
@@ -799,8 +839,8 @@ void Cache::tier_step() {
   if (!prom_fl_.empty()) promote_settle();  // copies that landed: the records move (also after a pause)
   if (paused) {
     prom_q_.clear();
-  } else if (!prom_q_.empty() && !apart_on) {  // (a prompt apart: its records move after it)
-    size_t w = 0;
+  } else if (!prom_q_.empty() && !apart_on && !prom_spent()) {  // (a prompt apart: its records move after it; the
+    size_t w = 0;                                                   // token's copies spent: the queue waits, unscanned)
     for (size_t i = 0; i < prom_q_.size(); i++) {
       const int k = prom_q_[i], L = k / NE;
       const int s = tab[(size_t)k];
@@ -827,15 +867,15 @@ bool Cache::promote_one(int L, int s) {
   Slot& x = S.s[s];
   const int e = x.e;
   const uint8_t* src = fmap[L] + (size_t)e * S.rec;
+  if (prom_copy_budget > 0 && prom_tok_bytes_ > 0 && prom_tok_bytes_ + (int64_t)S.rec > prom_copy_budget) {
+    st.n_promote_budget_deferred++;  // this token's copies are spent: at a later token (still a candidate)
+    return true;
+  }
   if (!probe_resident(src, S.rec)) {  // the OS took it: a later use misses (no copy from the drive)
     st.n_prob_reclaimed++;
     drop(L, s, true);
     free_slot(layer_pool[L], s);
     return false;
-  }
-  if (prom_copy_budget > 0 && prom_tok_bytes_ > 0 && prom_tok_bytes_ + (int64_t)S.rec > prom_copy_budget) {
-    st.n_promote_budget_deferred++;  // this token's copies are spent: at a later token (still a candidate)
-    return true;
   }
   const bool capped = !lcap.empty() && lheld[L] >= lcap[L];
   if ((capped || S.free_.empty()) && hazard_evict) {
@@ -1006,6 +1046,9 @@ int Cache::victim(int L, int reserve, int fit_names) {
   // the spare tier: a read that would displace a slab record lands in probation instead (the slab untouched); a free
   // slab slot below the layer's cap is still taken first (nothing displaced, the record in one place)
   if (prob_slots_ && !prob_bypass_ && prob_on() && (pool(L).free_.empty() || (!lcap.empty() && lheld[L] >= lcap[L]))) {
+    // a name (reserve > 0) is admitted as the slab admits it with the tier off (a victim leaving the reserve exists),
+    // else refused as then: the tier adds room, never reads the policy would not make
+    if (reserve > 0 && !name_fits_slab(L, reserve, fit_names)) return -1;
     const int v = prob_take(L);
     if (v >= 0) return v;
   }
@@ -1019,6 +1062,24 @@ int Cache::victim(int L, int reserve, int fit_names) {
     if (v >= 0) st.n_cap_borrow++;
   }
   return v;
+}
+
+bool Cache::name_fits_slab(int L, int reserve, int fit_names) {
+  const bool capped = !lcap.empty() && lheld[L] >= lcap[L];
+  if (capped && cap_fit && fit_names >= 0)
+    reserve = std::min(reserve, std::max(0, lcap[L] - fit_names - (layer_hold.empty() ? 0 : layer_hold[L])));
+  if (hazard_evict && !rk.on) {
+    hz_tick(tok_now);
+    return hz_victim(L, capped, reserve) >= 0;
+  }
+  const SlotPool& S = pool(L);  // the scan's condition (any other policy): more than `reserve` unpinned, landed slots
+  int unpinned = 0;
+  for (int i = 0; i < S.cap && unpinned <= reserve; i++) {
+    const Slot& x = S.s[i];
+    if (x.pins > 0 || S.pending[i].load(std::memory_order_relaxed) != 0 || (capped && x.layer != L)) continue;
+    unpinned++;
+  }
+  return unpinned > reserve;
 }
 
 int Cache::victim_in(int L, int reserve, bool capped) {

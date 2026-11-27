@@ -199,6 +199,10 @@ class Core {
   // the expert step's fork-joins in place: per number of jobs in the call (0..MAXK + 1), and split by whether a wait on a
   // read came between the call and the one before it: calls, ns, weight bytes
   double xc_calls[2][18] = {}, xc_ns[2][18] = {}, xc_bytes[2][18] = {};  // [after a wait][jobs, 0 .. 17]
+  // expert calls by where their records are: [0] every routed record in the slab, [1] some in the file mapping (the spare
+  // tier's probation records), [2] all of them there; calls, ns, bytes of the routed records and of the file's share
+  double xt_calls[3] = {}, xt_ns[3] = {}, xt_bytes[3] = {}, xt_file_bytes[3] = {};
+  std::string xt_json() const;
   double xc_wait_seen = 0;
   // measurement (DMENG_RERUN_AB=1): STEP_RERUN off / on call by call: ns, weight bytes, calls; chunks re-run
   double rr_ns[2] = {0, 0}, rr_bytes[2] = {0, 0}, rr_calls[2] = {0, 0};

@@ -210,6 +210,7 @@ void Core::reset_stats() {
   exp_spin_ns.store(0);
   for (int a = 0; a < 2; a++)
     for (int i = 0; i < 18; i++) xc_calls[a][i] = xc_ns[a][i] = xc_bytes[a][i] = 0;
+  for (int i = 0; i < 3; i++) xt_calls[i] = xt_ns[i] = xt_bytes[i] = xt_file_bytes[i] = 0;
   for (int a = 0; a < 2; a++) rr_ns[a] = rr_bytes[a] = rr_calls[a] = 0;
   rr_count.store(0);
   if (hook) hook->reset_stats();
@@ -632,14 +633,44 @@ void Core::run_experts(ExpJob* jobs, int n, const MoeView& v, const float* x) {
   double by = 0;
   for (int e = 0; e < n; e++) by += (double)jobs[e].gu.bytes() + (jobs[e].up.kind == Weight::NONE ? 0 : jobs[e].up.bytes()) + jobs[e].dn.bytes();
   const int aw = cache.st.wait_ms != xc_wait_seen;
+  double fby = 0;  // routed records' bytes read through the file mapping (probation)
+  int nr = 0, nf = 0;
+  if (!cache.fmap.empty())
+    for (int e = 0; e < n; e++) {
+      const uint8_t* p = jobs[e].dn.c;
+      const double b = (double)jobs[e].gu.bytes() + (jobs[e].up.kind == Weight::NONE ? 0 : jobs[e].up.bytes()) + jobs[e].dn.bytes();
+      bool f = false, sl = false;
+      for (size_t L = 0; L < cache.fmap.size() && !f; L++) f = p >= cache.fmap[L] && p < cache.fmap[L] + cache.fmap_bytes[L];
+      for (int q = 0; q < cache.npools && !f && !sl; q++) sl = cache.P[q].slab && p >= cache.P[q].slab && p < cache.P[q].slab + cache.P[q].slab_bytes;
+      if (!f && !sl) continue;  // (the shared expert: resident)
+      nr++;
+      if (f) nf++, fby += b;
+    }
   const auto t0 = clk::now();
   expert_step(s, jobs, n);
+  if (nr) {
+    const int c = nf == 0 ? 0 : nf < nr ? 1 : 2;
+    xt_calls[c] += 1;
+    xt_ns[c] += std::chrono::duration<double, std::nano>(clk::now() - t0).count();
+    xt_bytes[c] += by;
+    xt_file_bytes[c] += fby;
+  }
   const int k = std::min(n, 17);
   xc_ns[aw][k] += std::chrono::duration<double, std::nano>(clk::now() - t0).count();
   xc_bytes[aw][k] += by;
   xc_calls[aw][k] += 1;
   if (rr_ab) rr_ns[rr] += std::chrono::duration<double, std::nano>(clk::now() - t0).count(), rr_bytes[rr] += by, rr_calls[rr] += 1;
   xc_wait_seen = cache.st.wait_ms;
+}
+
+std::string Core::xt_json() const {
+  char b[512];
+  snprintf(b, sizeof b,
+           "{\"slab_only\":{\"calls\":%.0f,\"ms\":%.1f,\"gb_s\":%.2f},\"mixed\":{\"calls\":%.0f,\"ms\":%.1f,\"gb_s\":%.2f,\"file_share\":%.3f},"
+           "\"file_only\":{\"calls\":%.0f,\"ms\":%.1f,\"gb_s\":%.2f}}",
+           xt_calls[0], xt_ns[0] / 1e6, xt_bytes[0] / std::max(1.0, xt_ns[0]), xt_calls[1], xt_ns[1] / 1e6, xt_bytes[1] / std::max(1.0, xt_ns[1]),
+           xt_file_bytes[1] / std::max(1.0, xt_bytes[1]), xt_calls[2], xt_ns[2] / 1e6, xt_bytes[2] / std::max(1.0, xt_ns[2]));
+  return b;
 }
 
 std::string Core::xc_json() const {

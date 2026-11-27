@@ -821,15 +821,16 @@ if wanted("spare"):
             ready = [l for l in r.stdout.splitlines() if l.startswith("READY ")]
             return json.loads(ready[0][6:])["resolved"] if ready else None
 
-        # the rule (the built-in phone profile: at least 11 GB of physical memory, exact mode only), the app's switch over it
+        # the rule (the built-in phone profile: at least 11 GB of physical memory, both modes), the app's switch over it
         # in either mode, and the profiles without it (no spare keys: the block as before), in the three front ends
-        RULE = {"min_physical_gb": 11, "modes": ["exact"]}
+        RULE = {"min_physical_gb": 11, "modes": ["exact", "fast"]}
         BIG, SMALL = {"DMENG_TEST_PHYS_MEM": str(int(12e9))}, {"DMENG_TEST_PHYS_MEM": str(int(8e9))}
         cases = [("phone exact, 12 GB", "phone", "exact", None, BIG, (True, "rule", {**RULE, "device": True, "mode": True})),
-                 ("phone fast, 12 GB", "phone", "fast", None, BIG, (False, "rule", {**RULE, "device": True, "mode": False})),
-                 ("phone engine string, 12 GB", "phone", "approx:drop:w=0.2", None, BIG, (False, "rule", {**RULE, "device": True, "mode": False})),
+                 ("phone fast, 12 GB", "phone", "fast", None, BIG, (True, "rule", {**RULE, "device": True, "mode": True})),
+                 ("phone engine string, 12 GB", "phone", "approx:drop:w=0.2", None, BIG, (True, "rule", {**RULE, "device": True, "mode": True})),
+                 ("phone fast, 8 GB", "phone", "fast", None, SMALL, (False, "rule", {**RULE, "device": False, "mode": True})),
                  ("phone exact, 8 GB", "phone", "exact", None, SMALL, (False, "rule", {**RULE, "device": False, "mode": True})),
-                 ("phone fast, switch on", "phone", "fast", 1, BIG, (True, "explicit", {**RULE, "device": True, "mode": False})),
+                 ("phone fast, switch off", "phone", "fast", 0, BIG, (False, "explicit", {**RULE, "device": True, "mode": True})),
                  ("phone exact, switch off", "phone", "exact", 0, BIG, (False, "explicit", {**RULE, "device": True, "mode": True})),
                  ("mac exact", "mac", "exact", None, BIG, None), ("phone-small exact", "phone-small", "exact", None, BIG, None),
                  ("mac fast, switch on", "mac", "fast", 1, BIG, (True, "explicit", None))]
@@ -848,12 +849,12 @@ if wanted("spare"):
                     bad.append(f"{nm} {fe}: the budget printed {'spare_probation_gb' in g} with spare memory {exp and exp[0]}")
             ncell += 1
         # a mode change in one process, as the app makes it (the mode is fixed per engine: dm_close, then dm_open in the
-        # other mode): the C API, phone profile, few slots, the rule deciding each open (exact on, fast off, exact on
-        # again), then the switch (fast forced on, exact forced off). Each open resolves it for its mode; a close leaves
+        # other mode): the C API, phone profile, few slots, the rule deciding each open (exact on, fast on, exact on
+        # again), then the switch (fast forced off, exact forced off). Each open resolves it for its mode; a close leaves
         # none of its records in the file cache (store_cache_gb_before of the next arm, measured before it drops anything);
         # the exact ids are the same in every exact arm
-        arms = ["rule/mode=exact", "rule/mode=fast", "rule/mode=exact", "on/mode=fast", "off/mode=exact", "rule/mode=exact"]
-        ok_arms = {"rule/mode=exact": (1, True, "rule"), "rule/mode=fast": (0, False, "rule"), "on/mode=fast": (1, True, "explicit"),
+        arms = ["rule/mode=exact", "rule/mode=fast", "rule/mode=exact", "off/mode=fast", "off/mode=exact", "rule/mode=exact"]
+        ok_arms = {"rule/mode=exact": (1, True, "rule"), "rule/mode=fast": (1, True, "rule"), "off/mode=fast": (0, False, "explicit"),
                    "off/mode=exact": (0, False, "explicit")}
         aj = os.path.join(T, "arms.jsonl")
         r = run([DMGATE, "--model", M, "--profile", "phone", "--prompt-ids", os.path.join(T, "ids300.txt"), "--n", "24", "--threads", "2",

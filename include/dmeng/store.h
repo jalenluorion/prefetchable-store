@@ -21,7 +21,9 @@
 // Spare memory: a probation tier under the slab (Cache::file_under, CoreOpts::spare_mem / spare_gb; a locked, plain or
 // purgeable slab). A record lives in ONE place, the slab or the OS file cache, never both:
 //  - a read (a miss, a name, a background read) that would displace a slab record (no free slab slot below the layer's
-//    cap) lands in probation instead: a slot past the slab's (index >= SlotPool::n, no memory of its own) whose record
+//    cap) lands in probation instead (a name only where the slab would have admitted it with the tier off: a victim
+//    leaving the name's reserve exists; else it is refused as then, so the tier adds room but no reads): a slot past
+//    the slab's (index >= SlotPool::n, no memory of its own) whose record
 //    a reader brings into the file cache and maps (Reads, below: the reader does the I/O and the faults); the compute
 //    reads the record through the read-only mapping of its layer file (rec()). The slab is not given a copy.
 //  - reuse may promote it: used in prom_uses distinct tokens (default 3; the statistics' clock: a multi-position pass is
@@ -36,7 +38,7 @@
 //    so promotion only guards a clearly hot record against the OS's reclaim. The slab evicts as before; a record it
 //    evicts is gone (back only by a read).
 //  - before a use (slot_for_use) a probation record's pages are probed (mincore of 3 pages): reclaimed by the OS, it is
-//    a miss like any other (pinned by a name or a hold: read again in place, urgent). Cache::task_pageins() less the
+//    a miss like any other, also when only names pin it (pinned by a loop hold: read again in place, urgent). Cache::task_pageins() less the
 //    readers' own (Readers::reader_pageins) counts the compute's page-ins.
 //  - a budget: SlotPool::np probation slots (prob_bytes split by the pools' shares); a read that finds none free drops
 //    the oldest unpinned, landed probation record (its pages invalidated). The OS reclaims on its own below that.
@@ -50,6 +52,7 @@
 // probation caps while the OS reclaims faster than the tier helps, and pauses the tier below an eighth.
 // Exact outputs never depend on where a record is (the same bytes).
 #pragma once
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -151,6 +154,10 @@ struct Readers {
   // a fault elsewhere inside a reader's window counts here, and a window still open is not counted yet (a short window
   // can book the readers' page-ins to the compute); with the tier off the readers take none and the split is exact
   std::atomic<uint64_t> reader_faults{0}, reader_pageins{0};  // promotions' copies: done, their time, from the drive
+  // CPU time (thread_basic_info, user + system; sys_ns the system part) of the readers' jobs and the tier thread's items,
+  // by kind: [CPU_READ] slab / Mem::FILE reads, [CPU_PROB] probation reads, [CPU_COPY] promotion copies, [CPU_DROP] drops
+  enum { CPU_READ = 0, CPU_PROB = 1, CPU_COPY = 2, CPU_DROP = 3 };
+  std::atomic<uint64_t> cpu_ns[4] = {{0}, {0}, {0}, {0}}, sys_ns[4] = {{0}, {0}, {0}, {0}};
   bool saturated();  // every reader has a read in flight and reads wait behind them
   bool urgent_backlog();  // every reader has a read in flight and urgent reads wait behind them (the drive is behind now)
   ~Readers() { stop(); }
@@ -258,6 +265,7 @@ struct CacheStats {
   double prom_score_cand = 0, prom_score_victim = 0;
   uint64_t n_promote_budget_deferred = 0;  // candidates deferred to a later token by the copy budget
   uint64_t n_slab_drops = 0;  // slab records dropped (evictions, budget cuts): the slab's churn, tier on or off
+  uint64_t n_prob_checks = 0, prob_check_ns = 0;  // the use-time residency probes of probation records, their time
 };
 
 struct Cache {
@@ -617,6 +625,7 @@ struct Cache {
   // smallest key among unpinned landed slots (free first); fit_names: the names a step makes for layer L (cap_fit)
   int victim(int L, int reserve, int fit_names = -1);
   int victim_in(int L, int reserve, bool capped);             // ... the layer's own records only when capped
+  bool name_fits_slab(int L, int reserve, int fit_names);    // the spare tier: would the slab admit this name (no side effects)
   int pick_victim(int L, int reserve, double* val) const;     // value-ordered choice, no side effects; -1 if none
   void evict(int L, int slot);                                // take a slot chosen by pick_victim
   int steal(int L);                                           // a miss with every slot pinned: a slot held only by names
@@ -687,6 +696,12 @@ struct Cache {
   std::vector<int> pcap_;               // [pools] the probation slots in use (np, lowered by the pressure rule)
   long tier_tok_ = -1;                  // the token tier_step last saw
   int64_t prom_tok_bytes_ = 0;          // copies started in it
+  bool prom_spent() const {             // no record of any pool fits in this token's copy budget any more
+    if (prom_copy_budget <= 0 || prom_tok_bytes_ == 0) return false;
+    size_t r = P[0].rec;
+    for (int p = 1; p < npools; p++) r = std::min(r, P[p].rec);
+    return prom_tok_bytes_ + (int64_t)r > prom_copy_budget;
+  }
   int press_tokens_ = 0;
   bool press_armed_ = false;
   uint64_t press_r0_ = 0, press_h0_ = 0, press_p0_ = 0;

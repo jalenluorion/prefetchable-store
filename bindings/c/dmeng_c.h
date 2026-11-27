@@ -316,7 +316,7 @@ int dm_counters(dm_engine* e, dm_counters_t* out);
 
 /* Spare memory (the model's files that the system keeps in memory the app does not own are used before reading the
  * drive: records the slab has no room for are held in the OS file cache): on by default on the phone profile with at
- * least 11 GB of physical memory in exact mode, off in fast mode (the profile's spare_memory rule, resolved at dm_open
+ * least 11 GB of physical memory, in both modes (the profile's spare_memory rule, resolved at dm_open
  * for the mode of that open; resolved.spare_memory / spare_memory_from / spare_memory_rule in dm_stats_json);
  * model_options "run:spare-mem=0|1" (the app's switch) forces it off or on in either mode, "run:spare-gb=X" its budget.
  * The mode is fixed per engine: a mode change is a new dm_open, and dm_close drops the file-cache pages the engine held.

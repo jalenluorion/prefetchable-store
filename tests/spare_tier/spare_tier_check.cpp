@@ -7,7 +7,7 @@
 // when the compute reads it); its reuse at a later token promotes it into the slab at the next
 // step boundary (the slab's bytes are the file's, the file pages are dropped); a reuse inside one token does not; the
 // budget drops the oldest unpinned probation record's pages; a record whose pages the OS reclaimed is a miss at its use
-// (unpinned) or read again in place (pinned); a pause drains probation and later reads go to the slab; with the tier off
+// (unpinned or pinned by names only) or read again in place (pinned by a hold); a pause drains probation and later reads go to the slab; with the tier off
 // nothing is mapped and every read goes to the slab. Two pools (Inkling's record formats) each keep their own probation.
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -196,7 +196,7 @@ int main(int argc, char** argv) {
     check(c.slot_of(1, 0) < 0 && none_resident(v10, R0) && c.st.n_prob_budget_drops == 1, "the budget: the oldest probation record dropped, its pages too");
     check(c.prob_held(0) == 6 && c.held(0) == 8, "probation holds its budget (6), the slab is untouched");
     for (int i = 1; i < 7; i++) check(c.slot_of(1, i) >= S.n, ("record " + std::to_string(i) + " in probation").c_str());
-    // the OS reclaims a probation record: unpinned, its use is a miss; pinned, it is read again in place
+    // the OS reclaims a probation record: unpinned, its use is a miss; pinned by a hold, it is read again in place
     const uint8_t* v11 = c.fmap[1] + 1 * R0;
     msync((void*)v11, R0, MS_INVALIDATE);
     check(c.slot_for_use(1, 1) < 0 && c.slot_of(1, 1) < 0 && c.st.n_prob_reclaimed == 1, "reclaimed by the OS, unpinned: a miss at its use");
@@ -209,6 +209,12 @@ int main(int argc, char** argv) {
     c.wait(1, s12);
     check(resident(v12, R0) && c.rd.bytes.load() - b1 == R0 && same_as_file(c.rec(1, s12), 1, 2, R0), "... read again in place by a reader (urgent)");
     c.unpin(1, s12);
+    // pinned by a name only: a miss like an unpinned one (the mode decides whether to read it; the name's unpin is a no-op)
+    const int s15 = c.slot_of(1, 5);
+    c.slot(1, s15).pins = c.slot(1, s15).pf_pins = 1;
+    msync((void*)(c.fmap[1] + 5 * R0), R0, MS_INVALIDATE);
+    check(c.slot_for_use(1, 5) < 0 && c.slot_of(1, 5) < 0 && c.st.n_prob_reclaimed == 3, "reclaimed, pinned by a name only: a miss at its use");
+    c.unpin_pf(1, s15, 5);
     // a promotion whose pages the OS took: dropped, not copied from the drive on the compute thread
     c.prom_uses = 2;
     {
@@ -218,7 +224,7 @@ int main(int argc, char** argv) {
       msync(c.fmap[1] + 3 * R0, R0, MS_INVALIDATE);
       c.tok_now = 5;
       c.tier_step();
-      check(c.slot_of(1, 3) < 0 && c.st.n_promoted == 1 && c.st.n_prob_reclaimed == 3, "a promotion of reclaimed pages: dropped, no copy");
+      check(c.slot_of(1, 3) < 0 && c.st.n_promoted == 1 && c.st.n_prob_reclaimed == 4, "a promotion of reclaimed pages: dropped, no copy");
     }
     // a drop that a read of the same record overtakes is cancelled (the pages are wanted again), never run after it
     {

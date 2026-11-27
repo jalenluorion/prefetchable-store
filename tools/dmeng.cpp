@@ -794,6 +794,14 @@ int main(int argc, char** argv) {
   auto& RD = C.cache.rd;
   uint64_t dt0[7] = {0};
   uint64_t rd_busy0 = 0, rd_wall0 = 0, rd_bytes0 = 0, rd_bg0 = 0, q0[3] = {0, 0, 0}, s0[3] = {0, 0, 0}, j0[3] = {0, 0, 0}, sau0 = 0, fskip0 = 0, fskipb0 = 0, pgin0 = 0, cpns0 = 0, cpn0 = 0, cpdr0 = 0, flt0 = 0, rflt0 = 0, rpgin0 = 0;
+  uint64_t rcpu0[4] = {0}, rsys0[4] = {0}, ru_all0 = 0, ru_sys0 = 0;
+  auto ru_now = [](uint64_t& all, uint64_t& sys) {  // the process's CPU time (ns)
+    rusage u;
+    getrusage(RUSAGE_SELF, &u);
+    const uint64_t us = (uint64_t)u.ru_utime.tv_sec * 1000000000ull + (uint64_t)u.ru_utime.tv_usec * 1000ull;
+    sys = (uint64_t)u.ru_stime.tv_sec * 1000000000ull + (uint64_t)u.ru_stime.tv_usec * 1000ull;
+    all = us + sys;
+  };
   double fe_ms = 0;  // the front end's per-token work outside the model's step (sampling, records): stage "sample"
   auto reset_stats = [&]() {
     fe_ms = 0;
@@ -814,6 +822,8 @@ int main(int argc, char** argv) {
     cpns0 = RD.copy_ns.load();
     cpn0 = RD.copy_bytes.load();
     cpdr0 = RD.copy_drive_bytes.load();
+    for (int i = 0; i < 4; i++) rcpu0[i] = RD.cpu_ns[i].load(), rsys0[i] = RD.sys_ns[i].load();
+    ru_now(ru_all0, ru_sys0);
     for (int i = 0; i < 3; i++) {
       q0[i] = RD.q_ns[i].load();
       s0[i] = RD.svc_ns[i].load();
@@ -876,7 +886,25 @@ int main(int argc, char** argv) {
        // the drive's = mb_preads_per_token (what the readers read; with the tier on, without the reads found resident and
        // with the in-place re-reads of pinned records the OS reclaimed, which no issue counts)
        << ",\"mb_issued_per_token\":" << per((CS.bytes_urgent + CS.bytes_pf) / 1e6)
-       << ",\"slab_drops_per_token\":" << per(CS.n_slab_drops);  // slab records evicted or cut (the slab's churn, tier on or off)
+       << ",\"slab_drops_per_token\":" << per(CS.n_slab_drops)  // slab records evicted or cut (the slab's churn, tier on or off)
+       << [&] {  // where the CPU went (ms per token): the process, the readers' jobs and the tier thread's items by kind
+            uint64_t a1, s1;
+            ru_now(a1, s1);
+            std::ostringstream o;
+            o.setf(std::ios::fixed);
+            o.precision(3);
+            const char* nm[4] = {"read", "probation_read", "promote_copy", "drop"};
+            double rsum = 0;
+            o << ",\"cpu\":{\"process_ms_per_token\":" << per((a1 - ru_all0) / 1e6) << ",\"process_sys_ms_per_token\":" << per((s1 - ru_sys0) / 1e6);
+            for (int i = 0; i < 4; i++) {
+              const double c = (RD.cpu_ns[i].load() - rcpu0[i]) / 1e6;
+              rsum += c;
+              o << ",\"" << nm[i] << "_ms_per_token\":" << per(c) << ",\"" << nm[i] << "_sys_ms_per_token\":" << per((RD.sys_ns[i].load() - rsys0[i]) / 1e6);
+            }
+            o << ",\"outside_readers_ms_per_token\":" << per((a1 - ru_all0) / 1e6 - rsum) << ",\"probes_per_token\":" << per(CS.n_prob_checks)
+              << ",\"probe_ms_per_token\":" << per(CS.prob_check_ns / 1e6) << ",\"expert_calls\":" << C.xt_json() << "}";
+            return o.str();
+          }();
     if (C.cache.mem == Mem::FILE) {
       js << ",\"file\":{\"check\":" << C.cache.file_check << ",\"evict_hint\":" << C.cache.file_evict_hint << ",\"skip_resident\":" << RD.file_skip_resident
          << ",\"prefault\":" << RD.file_prefault << ",\"checks_per_token\":" << per(CS.file_checks) << ",\"file_refaults\":" << CS.file_refaults
