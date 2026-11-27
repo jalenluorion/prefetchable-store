@@ -517,6 +517,7 @@ std::string Resolved::json() const {
     << ",\"background\":{\"ranks\":" << bg_ranks << ",\"gate\":" << bg_gate << "},\"layer_caps\":" << q(layer_caps)
     << ",\"cross_token_tau\":" << xtok_tau << ",\"priority_reads\":" << rd_prio << ",\"prefill_chunk\":" << prefill_chunk;
   o << ",\"resident\":" << q(resident) << ",\"resident_bits\":" << resident_bits;
+  if (screened_head >= 0) o << ",\"screened_head\":" << (screened_head ? "true" : "false");
   if (spare_mem || !spare_rule.empty()) {  // (on, or the profile declares the rule: the decision and its source)
     o << ",\"spare_memory\":" << (spare_mem ? "true" : "false") << ",\"spare_memory_from\":" << q(spare_from);
     if (!spare_rule.empty()) o << ",\"spare_memory_rule\":" << spare_rule;

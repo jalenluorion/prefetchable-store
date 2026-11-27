@@ -41,6 +41,12 @@
  * generation's ids, its tokens per call and "draft" block under "repeats" (a regenerated reply: the lookup drafts copy
  * the session's earlier one).
  *
+ * The screened output head (dmeng_c.h, dm_step_n; exact): --fast-head 0|1 (model option run:fast-head; default the C API's:
+ * on unless DMENG_CAPI_FAST_HEAD=0); an arm may carry /run=fast-head:0. It applies through dm_step_n only (--step-n 1):
+ * dm_step always computes every logit. --print-ids prints the ids on stdout after the JSON line ("IDS a,b,..."), with
+ * --arms one line per arm ("IDS ARM a,b,..."). --dump-logits F (not with --arms): the logits after the prompt and after
+ * every step as float32 rows (with --step-n 1 dm_step_n is asked for them: the full head).
+ *
  * --moving-marks N (not with --arms): N dm_syncs of a growing prefix of the prompt (8 ids apart, ending at its end), each
  * with its own end as the first mark (a caller passing its typing position first), and --json F gets every call's
  * dm_stats_json under "moving" (prefix_cache: pinned_checkpoints, checkpoint_mb, checkpoint_budget_mb); --ckpt-gb G sets
@@ -180,17 +186,21 @@ static dm_sampler g_s;      /* --temp ... (default greedy) */
 static int g_stepn = 0;     /* --step-n / --draft: decode through dm_step_n */
 static int32_t *g_frag = NULL, *g_flen = NULL;  /* --skeleton: fragments for dm_set_draft_fragments */
 static int g_nfrag = 0;
+static FILE* g_dump = NULL;  /* --dump-logits: every step's logits (float32 rows) */
+static int g_print_ids = 0;  /* --print-ids */
 
 /* the tokens after feeding `in`: dm_step + dm_sample (the app's loop) or dm_step_n, into gen[k ..], at most max; the
  * sampler's history is the reply so far, gen[0 .. k). Returns how many (< 0: error) */
 static int next_tokens(dm_engine* e, int stepn, int32_t in, int32_t* gen, int k, int max, float* lg, int vocab) {
   if (!stepn) {
     if (dm_step(e, in, lg) != DM_OK) return -1;
+    if (g_dump) fwrite(lg, sizeof(float), (size_t)vocab, g_dump);
     gen[k] = dm_sample(lg, vocab, &g_s, gen, k);
     return 1;
   }
   int m = 0;
-  if (dm_step_n(e, in, &g_s, gen, k, NULL, 0, max, gen + k, &m, NULL) != DM_OK) return -1;
+  if (dm_step_n(e, in, &g_s, gen, k, NULL, 0, max, gen + k, &m, g_dump ? lg : NULL) != DM_OK) return -1;
+  if (g_dump) fwrite(lg, sizeof(float), (size_t)vocab, g_dump);
   return m;
 }
 
@@ -356,6 +366,11 @@ static int run_arm(const char* model, dm_open_opts o, const char* arm, const int
            t300 > 0 ? 300 / ((t300 - td) / 1e3) : -1.0, arm_peak / 1e9, (pool1[0] - pool0[0]) * 1e3 / steps, (pool1[1] - pool0[1]) * 1e3 / steps, loop, reads, ra, apx,
            c1.probation_bytes / 1e9, g_s.temp, g_s.top_k, g_s.top_p, g_s.min_p, (unsigned long long)g_s.seed, stepn, calls, calls ? (double)(k - k0) / calls : 0.0, drj, rlen, rs);
   printf("%s\n", line);
+  if (g_print_ids) {
+    printf("IDS %s ", arm);
+    for (int i = 0; i < k; i++) printf("%s%d", i ? "," : "", gen[i]);
+    printf("\n");
+  }
   fflush(stdout);
   if (jf) fprintf(jf, "%s\n", line), fflush(jf);
   free(lg);
@@ -392,6 +407,8 @@ int main(int argc, char** argv) {
   int repeat = 1;                              /* --repeat R */
   int moving = 0;                              /* --moving-marks N */
   double ckpt_gb = 0;                          /* --ckpt-gb G */
+  int fast_head = -1;                          /* --fast-head 0|1 (run:fast-head=V) */
+  const char* dump = NULL;                     /* --dump-logits F */
   dm_sampler_default(&g_s);
   for (int i = 1; i < argc; i++)  /* --gpu-check [SECONDS]: the GPU kernels' self-test (no model), then exit */
     if (!strcmp(argv[i], "--gpu-check")) {
@@ -462,6 +479,9 @@ int main(int argc, char** argv) {
     else if (!strcmp(k, "--repeat")) repeat = atoi(v), i++;
     else if (!strcmp(k, "--moving-marks")) moving = atoi(v), i++;
     else if (!strcmp(k, "--ckpt-gb")) ckpt_gb = atof(v), i++;
+    else if (!strcmp(k, "--fast-head")) fast_head = atoi(v) != 0, i++;
+    else if (!strcmp(k, "--print-ids")) g_print_ids = 1;
+    else if (!strcmp(k, "--dump-logits")) dump = v, i++;
     else {
       fprintf(stderr, "unknown flag %s\n", k);
       return 2;
@@ -502,6 +522,7 @@ int main(int argc, char** argv) {
   if (draft) snprintf(run_opts + strlen(run_opts), sizeof run_opts - strlen(run_opts), ";run:draft=%s", draft), g_stepn = 1;
   if (draft_max > 0) snprintf(run_opts + strlen(run_opts), sizeof run_opts - strlen(run_opts), ";run:draft-max=%d", draft_max);
   if (drive_gbs > 0) snprintf(run_opts + strlen(run_opts), sizeof run_opts - strlen(run_opts), ";run:drive-gbs=%g", drive_gbs);
+  if (fast_head >= 0) snprintf(run_opts + strlen(run_opts), sizeof run_opts - strlen(run_opts), ";run:fast-head=%d", fast_head);
   char mo_all[2048];
   if (run_opts[0]) {
     snprintf(mo_all, sizeof mo_all, "%s%s", model_options ? model_options : "", model_options && *model_options ? run_opts : run_opts + 1);
@@ -541,6 +562,10 @@ int main(int argc, char** argv) {
   o.prefill_threads = prefill_threads;
   o.file_evict_hint = file_hint;
   if (ckpt_gb > 0) o.ckpt_gb = ckpt_gb;
+  if (dump && arms) {
+    fprintf(stderr, "--dump-logits goes without --arms\n");
+    return 2;
+  }
   if (arms) {  /* the arms in one process (header comment) */
     FILE* jf = json ? fopen(json, "w") : NULL;
     /* the ids compared within each mode: the first arm of a mode is that mode's reference */
@@ -658,6 +683,11 @@ int main(int argc, char** argv) {
     fprintf(stderr, "dm_sync: %d\n", rc);
     return 1;
   }
+  if (dump && !(g_dump = fopen(dump, "wb"))) {
+    fprintf(stderr, "cannot write %s\n", dump);
+    return 2;
+  }
+  if (g_dump) fwrite(lg, sizeof(float), (size_t)inf.vocab, g_dump);
   int32_t* gen = malloc(sizeof(int32_t) * (n + 1));
   gen[0] = dm_sample(lg, inf.vocab, &g_s, NULL, 0);
   dm_counters_t c0, c1;
@@ -684,6 +714,7 @@ int main(int argc, char** argv) {
     }
   }
   const double dec_ms = now_ms() - td;
+  if (g_dump) fclose(g_dump), g_dump = NULL;  /* (the repeats are not dumped) */
   dm_counters(e, &c1);
   char* st = strdup(dm_stats_json(e));
   /* --repeat: the same prompt again in this engine; each generation's ids against the first's */
@@ -737,6 +768,12 @@ int main(int argc, char** argv) {
            (unsigned long long)g_s.seed, g_stepn, calls, calls ? (double)steps / calls : 0.0);
   const char* pj = dm_last_prefill_json(e);  /* the prefill's account (with the GPU split's, when on) */
   printf("%s%s,\"prefill\":%s,\"repeats\":[%s],\"repeats_identical\":%s}\n", head, st, pj && *pj ? pj : "{}", reps, rep_same ? "true" : "false");
+  if (g_print_ids) {
+    printf("IDS ");
+    for (int i = 0; i < k; i++) printf("%s%d", i ? "," : "", gen[i]);
+    printf("\n");
+  }
+  fflush(stdout);
   if (json) {
     FILE* f = fopen(json, "w");
     fprintf(f, "%s%s,\"prefill\":%s,\"repeats\":[%s],\"repeats_identical\":%s}\n", head, st, pj && *pj ? pj : "{}", reps, rep_same ? "true" : "false");

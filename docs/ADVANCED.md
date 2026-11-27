@@ -97,6 +97,17 @@ resolved setting, one set of counters.
 takes the profile's default. `profile = "none"` gives the engine's own values. Run settings the struct has no field for
 go through `model_options` as `run:FLAG=VALUE` (drafting: `run:draft=lookup`, `run:draft-max=N`; see Drafting above).
 
+The output head: `dm_open` builds the screened head (exact; dmserve builds the same one) unless the model cannot split
+its head (a mapped resident, a head that is not 8-bit: `resolved.screened_head` false, `policy.screened_head_why`).
+`dm_step_n` called without a logits buffer then computes only the output rows its sampler can draw, where that is
+provable from `dm_sample`'s order: greedy (temperature 0, no penalties: the argmax) and top-k sampling with
+`1 <= top_k <= 64` and no penalties (the top k logits bit for bit; top-p, min-p and temperature read only those). Any
+penalty, `top_k` 0 or above 64, or a logits buffer passed take the full head; `dm_sync` and `dm_step` always compute
+every logit. The tokens are the full head's in every case (tests/family_check.py, check `head`). `policy.head_calls`
+counts the decode calls by head. For measurement, `run:fast-head=0` (or `DMENG_CAPI_FAST_HEAD=0` in the environment)
+leaves it off, and `DMENG_CAPI_PRIO=presets` replaces the C API's priority-read rule with dmeng's and dmserve's
+(`priority_reads_on`; `policy.priority_rule`); neither changes a token in exact mode.
+
 ## Checking a download
 
 `manifest_dump DIR --check --profile NAME [--sha]` checks that the parts a profile lists are present with their sizes

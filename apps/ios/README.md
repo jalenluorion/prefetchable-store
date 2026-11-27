@@ -167,12 +167,24 @@ Launch to ready takes 1.4 to 1.8 s.
 
 Both models are bound by the phone's storage read rate, 0.8 to 0.9 GB/s measured.
 
+## The decode call and the output head
+
+The app decodes a reply through `dm_step_n` with one token per call (`DmengModel.stepSample`): it feeds the token just
+chosen and returns the one `dm_sample` draws over the step's logits and the reply's tokens, the token the app's loop drew
+itself from `dm_step`'s logits before. Inside, the engine computes only the output rows that sampler can draw where that
+is exact (the screened head, docs/ADVANCED.md, C API): greedy, and top-k up to 64 without penalties, which covers the
+model's default sampling (temperature 1.0, top_k 20, top_p 0.95, no penalties); a presence or repetition penalty, or
+top-k 0 or above 64, takes the full head. The first token of a reply still comes from `dm_sync`'s logits, and a token the
+thinking budget forces replaces the drawn one. The shown speed now includes `dm_sample` (it runs inside the call). For an
+A/B measurement, `-selfcheck-opts run:fast-head=0` (or `DMENG_CAPI_FAST_HEAD=0` in the scheme's environment) opens the
+engine with the full head.
+
 ## Drafting in the C API
 
 The app has no setting for drafting, and it is off in every profile. Opened with `model_options` holding
 `run:draft=lookup` (or `run:draft=head` / `run:draft=both` for Inkling 2 Mini's draft head, `run:draft=none` to turn a
 profile's default off; optional `run:draft-max=N`, 1 to 7), the engine drafts when the reply is decoded with
-`dm_step_n` instead of `dm_step` + `dm_sample`. Pass it the token just chosen; the sampler (NULL where the loop takes
+`dm_step_n` and `max_out` above 1 (the app passes 1: one token per call, no draft runs). Pass it the token just chosen; the sampler (NULL where the loop takes
 `dm_argmax`, temperature 0: `dm_sample` would apply the penalties there); the reply's tokens so far (the same `hist`
 given to `dm_sample`, that token included); the stop ids; and `max_out` (at most 8; the number of tokens before one the
 thinking budget will force, 1 when the next token is forced). Handle the returned tokens in order as if each had been

@@ -218,8 +218,7 @@ public final class DmengModel: @unchecked Sendable {
     return true
   }
 
-  /// The C sampler (identical on the Mac and the phone). `history`: this reply's tokens so far.
-  public static func sample(_ logits: [Float], vocab: Int, _ s: DmengSampler, history: [Int32]) -> Int32 {
+  private static func cSampler(_ s: DmengSampler) -> dm_sampler {
     var c = dm_sampler()
     dm_sampler_default(&c)
     c.temp = s.temp
@@ -230,9 +229,29 @@ public final class DmengModel: @unchecked Sendable {
     c.repetition_penalty = s.repetitionPenalty
     c.frequency_penalty = s.frequencyPenalty
     c.seed = s.seed
+    return c
+  }
+
+  /// The C sampler (identical on the Mac and the phone). `history`: this reply's tokens so far.
+  public static func sample(_ logits: [Float], vocab: Int, _ s: DmengSampler, history: [Int32]) -> Int32 {
+    var c = cSampler(s)
     return logits.withUnsafeBufferPointer { lp in
       history.withUnsafeBufferPointer { hp in dm_sample(lp.baseAddress, Int32(vocab), &c, hp.baseAddress, Int32(hp.count)) }
     }
+  }
+
+  /// One generated token and the next one drawn (dm_step_n, one token per call): feeds `id` and returns exactly
+  /// `sample(logits after id, s, history)` (`history`: this reply's tokens so far, `id` included), the logits never
+  /// leaving the engine, so it computes only the output rows the sampler can draw where that is exact (the screened
+  /// head: greedy, or top-k <= 64 without penalties; dmeng_c.h). nil if a cancel was pending (nothing computed). Call on
+  /// `queue`.
+  public func stepSample(_ id: Int32, _ s: DmengSampler, history: [Int32]) throws -> Int32? {
+    var c = Self.cSampler(s)
+    var out: Int32 = 0, n: Int32 = 0
+    let rc = history.withUnsafeBufferPointer { hp in dm_step_n(e, id, &c, hp.baseAddress, Int32(hp.count), nil, 0, 1, &out, &n, nil) }
+    if rc == DM_ECANCELLED { return nil }
+    if rc != DM_OK || n != 1 { throw DmengError(code: rc, message: "dm_step_n") }
+    return out
   }
 
   /// The prefill GPU split's self-test on this device (no model; ~8 x seconds): both GPU kernels against the CPU kernels

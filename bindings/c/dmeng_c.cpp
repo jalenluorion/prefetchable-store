@@ -91,7 +91,39 @@ struct dm_engine {
   double draft_reserve = 0;                 // bytes the slab gave to drafting (iOS slab rule; 0: none)
   double first_pass_gb = -1, head_gb = 0;   // the footprint's rise over the first verify pass; the draft head's weights + state
   long dcalls = 0, dtoks = 0;               // dm_step_n calls and tokens since the last stats call
+  // the screened output head (screen_head.h; exact): built at open unless switched off (run:fast-head=0,
+  // DMENG_CAPI_FAST_HEAD=0) or the model cannot split its head (screened_why says why); dm_step_n asks it for the rows
+  // its sampler can draw (head_k_for), dm_sync and dm_step keep every logit
+  bool screened = false;
+  std::string screened_why;
+  int64_t head_steps[2] = {0, 0};  // calls since open that ran the full head [0] / the screened head [1]
+  int head_k_last = 0;             // the head k of the last call (0: every logit)
+  bool prio_presets = false;       // DMENG_CAPI_PRIO=presets: priority reads by dmeng's and dmserve's rule
 };
+
+// The output rows dm_sample(logits, s, history) can depend on, as a head k (LM::set_head_k): 1 = the argmax, k = the
+// exact top k (the screened head gives those rows' logits bit for bit, -inf for every row it proves below them), 0 =
+// every logit. Exact by dm_sample's order of operations: the penalties change the logits of history tokens first (a
+// penalised top token can let in one from outside the raw top k), so any penalty takes the full head; without them,
+// temp <= 0 is the argmax (k = 1), and temp > 0 keeps the top_k largest raw logits (lower index first on ties, the
+// screened head's order too) before temperature, top-p and min-p, which read only those candidates (k = top_k for
+// 1 <= top_k <= 64). top_k 0 (top-p / min-p over the top 4096) and top_k > 64 take the full head, as does a caller that
+// wants the logits back.
+static int head_k_for(const dm_sampler* s, bool caller_logits) {
+  if (caller_logits) return 0;
+  if (!s) return 1;  // NULL: greedy
+  if (s->presence_penalty != 0 || s->repetition_penalty != 1 || s->frequency_penalty != 0) return 0;
+  if (s->temp <= 0) return 1;
+  return s->top_k >= 1 && s->top_k <= 64 ? s->top_k : 0;
+}
+
+// the head of the next positions (dm_sync / dm_step: 0); count: a decode call (dm_counters' head counts)
+static void set_head(dm_engine* e, int k, bool count) {
+  const int want = e->screened ? k : 0;
+  if (e->lm->head_k() != want) e->lm->set_head_k(want);
+  e->head_k_last = e->lm->head_k();
+  if (count) e->head_steps[e->head_k_last > 0]++;
+}
 
 static thread_local std::string g_err;
 
@@ -264,6 +296,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   // measurement can set what the struct has no field for: --bg-ranks, --layer-caps auto:fit, --mode approx:drop:w=0.12, --rd-prio)
   std::string model_opts;
   std::string draft_cost = "\x01";  // run:draft-cost=FILE|none (the C API's own; unset: the profile's cache folder, as dmserve)
+  int fast_head = -1;               // run:fast-head=0|1 (the C API's own; unset: DMENG_CAPI_FAST_HEAD, else on)
   {
     const std::string mo = o.model_options ? o.model_options : "";
     for (size_t i = 0; i < mo.size();) {
@@ -275,7 +308,11 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
         std::string flag = kv.substr(4, q == std::string::npos ? std::string::npos : q - 4);
         if (flag.rfind("--", 0) != 0) flag = "--" + flag;  // run:bg-ranks=8 as run:--bg-ranks=8
         if (flag == "--draft-cost") draft_cost = q == std::string::npos ? "" : kv.substr(q + 1);
-        else F(flag.c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
+        else if (flag == "--fast-head") {
+          const std::string v = q == std::string::npos ? "" : kv.substr(q + 1);
+          if (v != "0" && v != "1" && err.empty()) err = "run:fast-head: 0 or 1, got '" + v + "'";
+          fast_head = v == "1";
+        } else F(flag.c_str(), q == std::string::npos ? "" : kv.substr(q + 1));
       } else if (!kv.empty()) {
         model_opts += (model_opts.empty() ? "" : ";") + kv;
       }
@@ -521,7 +558,18 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   // priority reads: the C API's own rule (the planner, the cross-token routers with rd_prio 1, fast mode), not dmeng's and
   // dmserve's priority_reads_on (presets.h); left as it runs until measured, the two differ (a) in exact mode with in-token
   // routers only and rd_prio 1 (the 35B on every profile, Flash-Next; defaults.priority_reads): off here, on there; (b)
-  // rd_prio 0 given with the planner or in fast mode: on here, off there. resolved.priority_reads reports this value.
+  // rd_prio 0 given with the planner or in fast mode: on here, off there. Measurement switch: DMENG_CAPI_PRIO=presets
+  // applies priority_reads_on instead (policy.priority_rule says which). resolved.priority_reads reports the value in force.
+  if (const char* pr = getenv("DMENG_CAPI_PRIO")) {
+    if (std::strcmp(pr, "presets") == 0) {
+      e->prio_presets = true;
+      e->C->cache.rd.prio = priority_reads_on(ro.rd_prio, e->PL != nullptr, e->C->ns.on && e->C->ns.prio);
+      fprintf(stderr, "dmeng: DMENG_CAPI_PRIO=presets: priority reads by dmeng's rule: %s\n", e->C->cache.rd.prio ? "on" : "off");
+    } else if (*pr && std::strcmp(pr, "capi") != 0) {
+      g_err = std::string("DMENG_CAPI_PRIO: presets or capi, got ") + pr;
+      return nullptr;
+    }
+  }
   ro.rd_prio = e->C->cache.rd.prio ? 1 : 0;
   // the prefill's GPU split (exact): 0 = the profile's shares (mac: 0.4 / 0.4), < 0 = off
   const double gpu_frac = ro.gpu_frac, gpu_experts = ro.gpu_experts;
@@ -580,6 +628,24 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
     return nullptr;
   }
   e->lm = std::make_unique<ModelLM>(*e->M, *e->C, *e->S, ctx);
+  {  // the screened head, built once as dmserve builds it (every family; a model that cannot split its head keeps the full one)
+    if (fast_head < 0) {
+      const char* fh = getenv("DMENG_CAPI_FAST_HEAD");
+      fast_head = !fh || !*fh || std::strcmp(fh, "0") != 0;
+    }
+    if (fast_head) {
+      std::string he;
+      e->screened = e->lm->enable_screened_head(he);
+      if (!e->screened) {
+        e->screened_why = he;
+        for (char& ch : e->screened_why)
+          if (ch == '"' || ch == '\\' || (unsigned char)ch < 0x20) ch = '\'';  // (printed inside a JSON string)
+        fprintf(stderr, "dmeng: screened head not available: %s (the full head)\n", he.c_str());
+      }
+    } else {
+      e->screened_why = "off";
+    }
+  }
   SessionOptions so;
   if (o.disk_dir && *o.disk_dir) so.disk_dir = o.disk_dir;
   if (o.disk_gb > 0) so.disk_gb = o.disk_gb;
@@ -633,6 +699,7 @@ dm_engine* dm_open(const char* model_dir, const dm_open_opts* opts) {
   ro.routers = e->R || e->PL ? e->routers_path : "";
   e->res = ro.resolved(co.cache_gb);
   e->res.set_resident(lo.resident_id);  // the in-memory weights opened (resident_bits 0: the profile's file)
+  e->res.screened_head = e->screened ? 1 : 0;
   return e.release();
 }
 
@@ -692,6 +759,9 @@ int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int n
     if (progress) progress(user, done, total, mb);
   };
   if (e->prefill_pool) std::swap(e->C->pool, e->prefill_pool);  // the prompt on prefill_threads, decode on threads
+  // every logit (the caller samples the first token itself): stored logits a screened step left serve only a request for
+  // at most their k (session.cpp), so the live end after dm_step_n is then recomputed from its last checkpoint
+  set_head(e, 0, false);
   SyncResult r = e->pc->sync(v, mk, logits, logits != nullptr);  // NULL logits: state only (an idle-time prefix)
   if (e->prefill_pool) std::swap(e->C->pool, e->prefill_pool);
   e->lm->on_progress = nullptr;
@@ -734,6 +804,7 @@ int dm_step(dm_engine* e, int32_t id, float* logits) {
   const auto t0 = std::chrono::steady_clock::now();
   const double w0 = e->C->t.wait;
   const uint64_t b0 = e->C->cache.rd.bytes.load(), u0 = e->C->cache.st.bytes_urgent, n0 = e->C->cache.st.bytes_pf;
+  set_head(e, 0, true);  // every logit, always (the caller reads them)
   e->pc->step(id, logits);
   e->steps++;
   e->step_ns += (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0).count();
@@ -758,6 +829,9 @@ int dm_step_n(dm_engine* e, int32_t id, const dm_sampler* s, const int32_t* hist
   if (e->cancel_req.exchange(false)) return DM_ECANCELLED;
   const int V = e->lm->info().vocab;
   const auto t0 = std::chrono::steady_clock::now();
+  // the head: the rows the sampler can draw from (head_k_for), for the step and every verify pass alike (as dmserve sets
+  // it per request); the tokens are those of the full head, bit for bit
+  set_head(e, head_k_for(s, logits != nullptr), true);
   if (!e->dr) {  // no drafting: dm_step, then dm_sample over the caller's history (the app's loop, in one call)
     float* lg = logits;
     if (!lg) {
@@ -1014,7 +1088,9 @@ const char* dm_stats_json(dm_engine* e) {
     << ",\"mode\":\"" << (e->C->ns.on ? "approx" : "lossless") << "\",\"preset\":" << e->preset_json << ",\"prefill_declared\":" << e->prefill_json << ",\"xtok\":" << (e->X ? "true" : "false") << ",\"router_tau\":" << (e->R ? e->R->tau : 0) << ",\"split\":" << e->C->o.split
     << ",\"prefill_threads\":" << (e->prefill_pool ? e->prefill_pool->size() : e->C->o.threads)
     << ",\"resident_bits\":" << e->res.resident_bits << ",\"resident\":\"" << e->res.resident << "\",\"available_at_open_gb\":" << e->avail_open / 1e9 << ",\"slab_auto_gb\":" << e->slab_auto / 1e9 << ",\"slab_rule\":" << e->slab_json
-    << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode;
+    << ",\"threads\":" << e->C->o.threads << ",\"readers\":" << e->C->o.readers << ",\"reader_io_low\":" << e->C->o.reader_io_low << ",\"res_memory_mode\":" << e->o.res_memory_mode
+    << ",\"screened_head\":" << (e->screened ? "true" : "false") << ",\"screened_head_why\":\"" << e->screened_why << "\",\"head_calls\":{\"full\":" << e->head_steps[0]
+    << ",\"screened\":" << e->head_steps[1] << ",\"k_last\":" << e->head_k_last << "},\"priority_rule\":\"" << (e->prio_presets ? "presets" : "capi") << "\"";
   if (e->dr) s << ",\"draft\":\"" << e->res.draft << "\",\"draft_max\":" << e->dr->o.max << ",\"draft_early\":" << e->dr->o.early;  // (with drafting only)
   s << "}";
   {  // the reads since the last stats call (urgent = read when needed, named = issued ahead by the router;

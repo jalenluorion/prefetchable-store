@@ -215,8 +215,8 @@ typedef struct dm_sync_result {
 int dm_sync(dm_engine* e, const int32_t* ids, int n, const int32_t* marks, int nmarks, float* logits,
             dm_progress_fn progress, void* user, dm_sync_result* res);
 
-/* One generated token: append id, logits after it (vocab floats). DM_ECANCELLED (nothing computed) if a cancel is
- * pending. */
+/* One generated token: append id, logits after it (vocab floats, every one computed by the full output head).
+ * DM_ECANCELLED (nothing computed) if a cancel is pending. */
 int dm_step(dm_engine* e, int32_t id, float* logits);
 /* The last dm_sync's prefill account as JSON (source, reused / computed, wall and read-wait ms, MB, and the model's own
  * per-stage detail: union per layer, names used / unused, ...). Valid until the next dm_sync. */
@@ -272,8 +272,17 @@ int32_t dm_argmax(const float* logits, int vocab);
  * dm_sample (*n_out = 1). Stops after a token in stop[0 .. n_stop) (it is the last one written). max_out bounds the
  * tokens of this call (out holds max_out; 8 is the most a call produces): pass 1 for a step whose next token the app
  * forces, or the number of tokens up to a token it will force. logits (NULL = not wanted): the logits out[*n_out - 1]
- * was drawn from. DM_ECANCELLED (nothing computed) if a cancel is pending. dm_counters' decode_steps and step_ns count
- * the positions fed and the time inside the call. */
+ * was drawn from (every one). DM_ECANCELLED (nothing computed) if a cancel is pending. dm_counters' decode_steps and step_ns count
+ * the positions fed and the time inside the call (dm_sample's included).
+ *
+ * The screened output head (exact): with logits NULL, dm_step_n computes only the output rows its sampler can draw from
+ * when that is provable from dm_sample's order of operations: s NULL or temp <= 0 without penalties (the argmax), or
+ * temp > 0 with 1 <= top_k <= 64 and no penalties (the top_k largest logits, bit for bit; top-p, min-p and temperature
+ * read only those). Any penalty, top_k 0 or above 64, or logits wanted: the full head. The tokens are the full head's
+ * in every case. dm_sync and dm_step always compute every logit. It is built at dm_open (a model that cannot split its
+ * head, e.g. a mapped resident, keeps the full head: resolved.screened_head false, policy.screened_head_why says why);
+ * model_options "run:fast-head=0" (or the environment's DMENG_CAPI_FAST_HEAD=0) leaves it off for measurement.
+ * dm_stats_json policy.head_calls counts the decode calls by head (full, screened). */
 int dm_step_n(dm_engine* e, int32_t id, const dm_sampler* s, const int32_t* history, int n_history, const int32_t* stop,
               int n_stop, int max_out, int32_t* out, int* n_out, float* logits);
 /* The text lookup drafts copy from besides the sequence itself: n fragments of token ids, fragment i = lens[i] ids,

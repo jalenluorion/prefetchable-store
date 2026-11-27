@@ -803,11 +803,14 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
             _ = m.statsJSON()
             var out: [Int] = []
             let t0 = Date()
+            // the first token from the prompt's logits, then dm_step_n's argmax (the screened head where the model has it:
+            // the same ids as argmax over dm_step's logits)
+            var tk = DmengModel.argmax(logits, vocab: m.vocab)
             while out.count < n {
-                let tk = DmengModel.argmax(logits, vocab: m.vocab)
                 out.append(Int(tk))
                 if out.count == n { break }
-                guard try m.step(tk, logits: &logits) else { break }
+                guard let next = try m.stepSample(tk, .greedy, history: []) else { break }
+                tk = next
             }
             let secs = Date().timeIntervalSince(t0)
             return Greedy(ids: out, source: sr.source, seconds: secs, prefillSeconds: prefillSeconds, decodeStats: m.statsJSON(), prefillJSON: pj)
@@ -899,6 +902,10 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
         let sampler = Self.sampler(gen.sampling)
         var tracker = ThinkingTracker(promptIds: ids, tokens: c.thinkTokens, budget: thinking ? gen.thinkingBudget : nil)
         var new: [Int] = [], hist: [Int32] = []
+        // the token dm_step_n drew after the last step: dm_sample over that step's logits and `hist` (the token the loop
+        // below would draw itself from dm_step's logits), so the engine computes only the rows the sampler can draw where
+        // that is exact (dmeng_c.h, the screened head); a forced token replaces it as before
+        var drawn: Int32? = nil
         var reason: StopReason = sr.cancelled ? .cancelled : .maxNew
         var prev = 0, done = 0
         var held = ""
@@ -916,8 +923,8 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
             for _ in 0..<maxNew {
                 if isCancelled { reason = .cancelled; break }
                 let forced = tracker.forced(lastText: { c.decode(new) })
-                let tk = forced ?? Int(sampler.isGreedy ? DmengModel.argmax(logits, vocab: m.vocab)
-                                                       : DmengModel.sample(logits, vocab: m.vocab, sampler, history: hist))
+                let tk = forced ?? Int(drawn ?? (sampler.isGreedy ? DmengModel.argmax(logits, vocab: m.vocab)
+                                                                 : DmengModel.sample(logits, vocab: m.vocab, sampler, history: hist)))
                 if c.stopIds.contains(tk) { reason = .eos; stopId = tk; break }
                 new.append(tk)
                 hist.append(Int32(tk))
@@ -966,9 +973,9 @@ final class DmengChatEngine: ChatEngine, @unchecked Sendable {
                                sr.msRestore, sampler.isGreedy ? "greedy" : String(format: "temperature %g top_k %d top_p %g seed %llu", sampler.temp, sampler.topK, sampler.topP, sampler.seed)))
                 }
                 let a = clock.begin()
-                let stepped = try m.step(Int32(tk), logits: &logits)
-                clock.end(a, counted: stepped)
-                guard stepped else { reason = .cancelled; break }
+                drawn = try m.stepSample(Int32(tk), sampler, history: hist)
+                clock.end(a, counted: drawn != nil)
+                guard drawn != nil else { reason = .cancelled; break }
             }
         }
         let dt = Date().timeIntervalSince(t0)

@@ -143,6 +143,9 @@ struct Resolved {
   std::string resident;
   int resident_bits = 0;
   void set_resident(const std::string& id) { resident = id, resident_bits = id == "resident_q4" ? 4 : id == "resident_q8" ? 8 : 0; }
+  // the screened output head (screen_head.h) built at open: 1 / 0, written by the C API only (-1: not written; dmeng
+  // decides it per run and dmserve per request, and print it outside this block)
+  int screened_head = -1;
   std::string json() const;
 };
 

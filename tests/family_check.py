@@ -28,6 +28,10 @@ checked):
               per step above 1, the draft counters reported; dm_step_n without drafting equal to plain decoding with no
               draft block; the profile's declared drafts on through it; the slab on iOS giving drafting's memory; without a
               verify pass: every front end refuses, also a declared default
+  head        the C API's screened output head: dm_step's logits bit for bit with it built and without, dm_step_n's ids
+              with it on and off and through dm_step + dm_sample for every sampler shape (greedy, top-k 1..64 with top-p /
+              min-p, several seeds; top-k 0, top-k 65 and penalties take the full head), each run's head checked; with
+              drafting where the family has a verify pass; a regenerated reply after screened steps identical
   presets     the precedence (explicit > profile > manifest > built-in) in dmeng, the C API (dm_gate) and dmserve, each
               read back from its "resolved" JSON, and the three front ends printing the same resolved settings (the
               profile's drafts and the pass width too, a declared default and an explicit request alike)
@@ -474,6 +478,90 @@ if wanted("drafting"):
         except Exception as e:
             verdict("drafting", "FAIL", str(e)[-400:])
 
+# ---------------------------------------------------------------------------------------------- head
+# The C API's screened output head (dmeng_c.cpp head_k_for): dm_step's logits bit for bit with it built and without;
+# dm_step_n's ids with it on, off (run:fast-head=0, DMENG_CAPI_FAST_HEAD=0) and through dm_step + dm_sample, for every
+# sampler shape (greedy, top-k 1 / 20 / 64 with several seeds, top-p and min-p after top-k; and the shapes that must take
+# the full head: top-k 0, top-k 65, penalties, logits wanted), each run checked to have used the head it should; with
+# drafting (fixed and lookup passes, greedy and top-k) where the family has a verify pass; a regenerated reply (dm_sync
+# after screened steps) identical.
+if wanted("head"):
+    try:
+        bad, okh = [], []
+        HB = ["--profile", "none", "--threads", "4", "--readers", "2", "--mem", "plain", "--ctx", "2048", "--cache-gb", f"{FEW_GB:.6f}",
+              "--model-options", "run:draft-cost=none"]
+
+        def hgate(name, *flags, prompt=40, n=80, env=None):
+            op, jp = os.path.join(T, name + ".ids"), os.path.join(T, name + ".json")
+            r = run([DMGATE, "--model", M, "--prompt-ids", os.path.join(T, f"ids{prompt}.txt"), "--n", str(n), *HB, *flags, "--out", op, "--json", jp], env=env)
+            if r.returncode:
+                raise RuntimeError(f"dm_gate {' '.join(flags)}: rc {r.returncode} {(r.stdout + r.stderr)[-400:]}")
+            js = json.load(open(jp))
+            return open(op).read().strip(), js["stats"]["policy"], js["stats"]["resolved"], js
+
+        # dm_step: every logit, the same bits with the head split and without; dm_step_n asked for the logits: the full head
+        lp = {v: os.path.join(T, f"hl{v}.f32") for v in ("on", "off", "stepn")}
+        _, pon, ron, _ = hgate("hlon", "--fast-head", "1", "--dump-logits", lp["on"])
+        _, poff, roff, _ = hgate("hloff", "--fast-head", "0", "--dump-logits", lp["off"])
+        _, pst, _, _ = hgate("hlst", "--fast-head", "1", "--step-n", "1", "--dump-logits", lp["stepn"])
+        avail = ron.get("screened_head") is True
+        dumps = {v: open(p, "rb").read() for v, p in lp.items()}
+        ok = (dumps["on"] == dumps["off"] == dumps["stepn"] and len(dumps["on"]) > 0 and roff.get("screened_head") is False
+              and pon["head_calls"]["screened"] == 0 and pst["head_calls"]["screened"] == 0 and pon["head_calls"]["full"] > 0)
+        (okh if ok else bad).append(f"dm_step logits bit for bit with the head split and without ({len(dumps['on']) // 4} floats), "
+                                    f"dm_step_n with logits wanted the same (full head: {pst['head_calls']})")
+        # (shape, sampler flags, the head it must take)
+        shapes = [("greedy", [], True), ("top-k 1", ["--temp", "1", "--top-k", "1", "--seed", "3"], True)]
+        for sd in (1, 2, 3, 9):
+            shapes.append((f"top-k 20 top-p 0.95 seed {sd}", ["--temp", "1", "--top-k", "20", "--top-p", "0.95", "--seed", str(sd)], True))
+        shapes += [("top-k 64 min-p 0.05 temp 0.7", ["--temp", "0.7", "--top-k", "64", "--min-p", "0.05", "--seed", "4"], True),
+                   ("top-k 40 temp 1.5 top-p 0.8", ["--temp", "1.5", "--top-k", "40", "--top-p", "0.8", "--seed", "6"], True),
+                   ("top-k 0 top-p 0.9", ["--temp", "1", "--top-p", "0.9", "--seed", "5"], False),
+                   ("top-k 65", ["--temp", "1", "--top-k", "65", "--seed", "5"], False),
+                   ("top-k 20 with penalties", ["--temp", "0.8", "--top-k", "20", "--seed", "5", "--repetition-penalty", "1.1",
+                                                "--presence-penalty", "0.3", "--frequency-penalty", "0.1"], False),
+                   ("greedy with presence penalty", ["--presence-penalty", "1.5"], False)]
+        for nm, S, scr in shapes:
+            plain, _, _, _ = hgate("hp", *S, "--fast-head", "0")
+            on, p1, _, _ = hgate("hon", *S, "--fast-head", "1", "--step-n", "1")
+            off, p0, _, _ = hgate("hoff", *S, "--fast-head", "0", "--step-n", "1")
+            used = p1["head_calls"]["screened"] > 0
+            ok = on == off == plain and p0["head_calls"]["screened"] == 0 and used == (scr and avail)
+            (okh if ok else bad).append(f"{nm}: dm_step_n ids head on = off = dm_step + dm_sample ({'screened' if used else 'full'} head, "
+                                        f"{p1['head_calls']['screened']} screened calls, k {p1['head_calls']['k_last']})")
+        # the environment's switch
+        S = ["--temp", "1", "--top-k", "20", "--top-p", "0.95", "--seed", "2"]
+        plain, _, _, _ = hgate("hp", *S, "--fast-head", "0")
+        out, pe, re_, _ = hgate("henv", *S, "--step-n", "1", env={"DMENG_CAPI_FAST_HEAD": "0"})
+        (okh if out == plain and re_.get("screened_head") is False and pe["head_calls"]["screened"] == 0 else bad).append(
+            "DMENG_CAPI_FAST_HEAD=0: the full head, the same ids")
+        # a regenerated reply: dm_sync of the prompt after screened steps, the same ids
+        out, pr, _, js = hgate("hrep", *S, "--step-n", "1", "--repeat", "2")
+        (okh if out == plain and js.get("repeats_identical") else bad).append(f"a regenerated reply after screened steps identical ({js.get('repeats_identical')})")
+        if caps.get("verify"):  # verify passes screen their positions as a step does
+            for nm, S in (("greedy", []), ("top-k 20", ["--temp", "1", "--top-k", "20", "--top-p", "0.95", "--seed", "7"])):
+                plain, _, _, _ = hgate("hdp", *S, "--fast-head", "0", n=100)
+                frag = os.path.join(T, "hfrag.txt")  # the reply as a given text, every 6th token changed (drafts kept and rejected)
+                open(frag, "w").write(" ".join([str(x) for x in ids[40][-6:]] + [t if i % 6 != 5 else str(LO + (int(t) + 1 - LO) % (V - LO))
+                                                                                 for i, t in enumerate(plain.split(","))]) + "\n")
+                for d in ("fixed", "lookup"):
+                    on, p1, _, js1 = hgate("hdon", *S, "--fast-head", "1", "--draft", d, "--skeleton", frag, "--repeat", "2", n=100)
+                    off, _, _, js0 = hgate("hdoff", *S, "--fast-head", "0", "--draft", d, "--skeleton", frag, "--repeat", "2", n=100)
+                    # passes in the first generation, else in the regenerated one (the lookup copying the earlier reply)
+                    nv = js1["stats"].get("draft", {}).get("verifies", 0) or ((js1.get("repeats") or [{}])[0].get("draft") or {}).get("verifies", 0)
+                    used = p1["head_calls"]["screened"] > 0
+                    ok = on == off == plain and used == avail and js1.get("repeats_identical") and js0.get("repeats_identical") and nv > 0
+                    (okh if ok else bad).append(f"{nm} drafts {d}: head on = off = plain decoding ({nv} passes, {'screened' if used else 'full'} head)")
+        detail = ("differ: " + "; ".join(bad) + " | " if bad else "") + f"{len(okh)} identical: " + "; ".join(okh)
+        if bad:
+            verdict("head", "FAIL", detail)
+        elif not avail:
+            verdict("head", "not supported for this family", f"the screened head is not built ({pon.get('screened_head_why')}); the full head everywhere: " + detail)
+        else:
+            verdict("head", "PASS", detail)
+    except Exception as e:
+        verdict("head", "FAIL", str(e)[-400:])
+
 # ---------------------------------------------------------------------------------------------- presets
 if wanted("presets"):
     try:
@@ -525,7 +613,9 @@ if wanted("presets"):
             return [] if g == e else [f"{k}: {g!r} != {e!r}"]
 
         bad, ncell, cross, n_capi_prio = [], 0, [], 0
-        FRONT_SPECIFIC = set()  # (the prompt's sub-chunk is the model's declared one in all three: printed as 0)
+        # (the prompt's sub-chunk is the model's declared one in all three: printed as 0); screened_head: the C API's own
+        # (dmeng decides its head per run and dmserve per request, each printing it outside "resolved")
+        FRONT_SPECIFIC = {"screened_head"}
 
         def slab_rule(prof):
             """The slab rule a profile resolves to, from the manifest (presets.h SlabRule): its cache_slab, else the
