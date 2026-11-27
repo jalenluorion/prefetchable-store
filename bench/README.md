@@ -2,9 +2,9 @@
 
 `bench/run.py` runs one campaign for one model: a set of cells, crossed with cache sizes, prompts and repetitions.
 Every run goes through a guard script, one model process at a time, under `/usr/bin/time -l`. The campaign can be
-resumed: a run whose JSON already exists is skipped. Each cell runs twice. The timed run uses the default binary. The
-counting run uses the counting build and gives the instructions and cycles of the useful work, which stay readable when
-the machine is busy and wall-clock times are not.
+resumed: a run whose JSON already exists is skipped. Every run is made twice: a timed run with the default binary, and a
+counting run with the counting build, which gives the instructions and cycles of the useful work. Those stay readable
+when the machine is busy and wall-clock times are not.
 
 ## Builds
 
@@ -77,8 +77,8 @@ timed run.
 Prompts are `pitt` and `code` (`bench/prompts/<family>/`), or paths to token-id files (comma or whitespace separated).
 
 - `pitt` is the raw text "The history of the city of Pittsburgh begins with".
-- `code` is a coding question: find the races in a small Python log-batching class. For Inkling, it is in the chat
-  template.
+- `code` is a coding question: find the races in a small Python log-batching class. For Inkling 2 Mini, it is in
+  the chat template.
 
 Run files are named `CELL_PROMPT_gbG_rR.{log,json,ids,steps}`. Counting runs have the same names with `cnt_` in front.
 
