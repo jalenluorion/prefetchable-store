@@ -492,6 +492,16 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
     GpuGemm* const G = gpu_ok && moe_gpu && moe_gpu_frac > 0 && !o.ref ? moe_gpu : nullptr;
     struct GT { int k, cg, tg, tu, rd, td; };  // entry index in run; gate-up chunks and tickets; down rows and ticket
     std::vector<GT> gt;
+    // MXFP8 (no packed kernel: the CPU's multi-vector kernel on each input's fp16 plane): the GPU replays that kernel's
+    // operations (gpu_gemm.h add_mxfp8) on the same fp16 planes, the positions' MoE inputs staged once per set and each
+    // entry's down inputs (its users' activations) as its own stage
+    auto mxfp8 = [&](const Chunk::Ent& E) {
+      return packable && E.gu.kind == Weight::MXFP8 && E.dn.kind == Weight::MXFP8 && (E.up.kind == Weight::NONE || E.up.kind == Weight::MXFP8) &&
+             E.gu.cols % 128 == 0 && E.dn.cols % 128 == 0;
+    };
+    std::vector<const _Float16*> x16;               // [n] the MoE inputs' fp16 planes
+    std::vector<std::vector<const _Float16*>> a16;  // per GPU entry: its users' activations' fp16 planes
+    int s16 = -1;
     X.start.assign(run.size() + 1, 0);
     if (G) {
       X.c0.assign(run.size(), 0);
@@ -503,10 +513,28 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
         // ModelInfo::chunk_aff4: the GPU's affine bits are gemm_aff4_i16's / gemm_aff8_i16's, the one-vector kernel's only for
         // inputs a multiple of 64 (gate / up here; the down rows below likewise)
         const bool af = affine(E.gu.kind) && E.dn.kind == E.gu.kind && E.up.kind == E.gu.kind && E.gu.cols % XB == 0;
-        if (!E.packed || !(nv || af)) continue;
+        const bool mx = mxfp8(E);
+        if (!mx && (!E.packed || !(nv || af))) continue;
         const int nch = E.inter / XB, cg = (int)(nch * moe_gpu_frac), nu = (int)E.users.size();
         if (cg <= 0) continue;
         const bool fused = E.up.kind == Weight::NONE;
+        if (mx) {
+          if (s16 < 0) {
+            x16.resize(n);
+            for (int i = 0; i < n; i++) x16[i] = C.xin[i].q.fn;
+            s16 = G->stage_f16(x16.data(), n, H);
+            if (s16 < 0) continue;
+          }
+          E.gpos.resize(nu);
+          for (int u = 0; u < nu; u++) E.gpos[u] = E.users[u] / R;
+          GT r{(int)k, cg, -1, -1, 0, -1};
+          r.tg = G->add_mxfp8(E.gu.c, (const uint8_t*)E.gu.s, E.gu.cols, fused ? 2 * cg * XB : cg * XB, nu, s16, E.gpos.data());
+          if (r.tg >= 0 && !fused) r.tu = G->add_mxfp8(E.up.c, (const uint8_t*)E.up.s, E.up.cols, cg * XB, nu, s16, E.gpos.data());
+          if (r.tg < 0 || (!fused && r.tu < 0)) continue;
+          X.c0[k] = cg;
+          gt.push_back(r);
+          continue;
+        }
         if (!C.xall_ok) {  // the chunk's inputs once (not one gathered copy per expert): the GPU gathers through gpos
           C.xall.reserve(H, n);
           parallel_for(*pool, n, [&](int i) { xqb_set_from(C.xall, i, C.xin[i].q); });
@@ -603,10 +631,22 @@ void Core::moe_chunk(int step, int n, const float* const* x, float* const* y, co
       X.dlo.assign(run.size(), 0);
       X.dhi.assign(run.size(), H);
       std::vector<GT> gd;
+      a16.clear();
+      a16.reserve(gt.size());  // (stage rows stay valid until the copies run)
       for (GT r : gt) {
         Chunk::Ent& E = C.ent[run[r.k]];
         r.rd = ((int)(H * moe_gpu_frac) / 64) * 64;
         if (r.rd <= 0 || (affine(E.dn.kind) && E.dn.cols % XB != 0)) continue;
+        if (mxfp8(E)) {
+          a16.emplace_back();
+          for (int row : E.users) a16.back().push_back(C.act[row].q.fn);
+          const int sd = G->stage_f16(a16.back().data(), (int)E.users.size(), E.dn.cols);
+          r.td = sd < 0 ? -1 : G->add_mxfp8(E.dn.c, (const uint8_t*)E.dn.s, E.dn.cols, r.rd, (int)E.users.size(), sd);
+          if (r.td < 0) continue;
+          X.dlo[r.k] = r.rd;
+          gd.push_back(r);
+          continue;
+        }
         r.td = affine(E.dn.kind)
                    ? G->add(E.dn.kind == Weight::AFF8 ? 8 : 4, E.dn.c, (const _Float16*)E.dn.s, (const _Float16*)E.dn.b, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd))
                    : G->add_nvfp4(E.dn.c, (const uint8_t*)E.dn.s, E.dn.gmul, E.dn.cols, r.rd, (int)E.users.size(), G->stage(E.xd));

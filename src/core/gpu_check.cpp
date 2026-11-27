@@ -274,7 +274,8 @@ std::string gpu_gemm_selftest(int threads, double secs, std::string* text) {
       bool mapped;
     };
     const std::vector<NV> nc = {{512, 2048, 37, 37, false}, {256, 2048, 300, 300, false}, {1024, 512, 6, 6, false},
-                                {768, 2880, 19, 40, true},  {128, 2880, 1, 1, false}};
+                                {768, 2880, 19, 40, true},  {128, 2880, 1, 1, false},   {896, 2304, 16, 256, true},
+                                {896, 1152, 13, 13, false}, {100, 2304, 9, 30, true},   {70, 1152, 33, 33, false}};
     A.off = 0;
     std::vector<XQB> xs(nc.size()), gx(nc.size());
     std::vector<std::vector<int>> maps(nc.size());
@@ -282,6 +283,9 @@ std::string gpu_gemm_selftest(int threads, double secs, std::string* text) {
     std::vector<int> tk(nc.size());
     const float gmul = 0.37f;
     g.set_kernel(1);
+    for (int nvk : {1, 2}) {
+    g.set_nv_kernel(nvk);
+    if (g.nv_kernel() != nvk) continue;
     g.begin();
     for (size_t i = 0; i < nc.size(); i++) {
       const NV& p = nc[i];
@@ -312,10 +316,70 @@ std::string gpu_gemm_selftest(int threads, double secs, std::string* text) {
       const float* y = g.out(tk[i]);
       long b = 0;
       for (size_t u = 0; u < ref.size(); u++) b += std::memcmp(&ref[u], &y[u], 4) != 0;
-      if (b) tx << "NVFP4 case " << i << " (R " << p.R << ", K " << p.K << ", n " << p.n << "): " << b << " differ\n";
+      if (b) tx << "NVFP4 kernel " << nvk << " case " << i << " (R " << p.R << ", K " << p.K << ", n " << p.n << "): " << b << " differ\n";
       checked += (long)ref.size();
       bad += b;
     }
+    A.off = 0;
+    }
+    g.set_nv_kernel(2);
+  }
+  // 1c. MXFP8 (Inkling's last layers' experts): gx against the one-vector kernel mv_mxfp8 on each position's fp16 plane,
+  // random codes (every E4M3 byte), E8M0 scales near 2^0, inputs with outliers, mapped and direct, both tiles
+  if (complete) {
+    struct MX {
+      int R, K, n, src_n;
+      bool mapped;
+    };
+    const std::vector<MX> mc = {{896, 2304, 16, 256, true}, {1344, 1152, 13, 13, false}, {100, 2304, 33, 40, true},
+                                {70, 1152, 1, 1, false},    {256, 2304, 300, 300, false}};
+    A.off = 0;
+    std::normal_distribution<float> nd(0.f, 1.f);
+    std::vector<std::vector<XBuf>> xb(mc.size());
+    std::vector<std::vector<const _Float16*>> rows(mc.size());
+    std::vector<std::vector<int>> maps(mc.size());
+    std::vector<const uint8_t*> cs(mc.size()), ss(mc.size());
+    std::vector<int> tk(mc.size());
+    g.begin();
+    for (size_t i = 0; i < mc.size(); i++) {
+      const MX& p = mc[i];
+      cs[i] = A.raw((size_t)p.R * p.K);
+      uint8_t* sc = A.raw((size_t)p.R * p.K / 32);
+      for (size_t u = 0; u < (size_t)p.R * p.K / 32; u++) sc[u] = (uint8_t)(120 + A.rng() % 14);
+      ss[i] = sc;
+      xb[i].resize(p.src_n);
+      std::vector<float> f(p.K);
+      for (int q = 0; q < p.src_n; q++) {
+        for (int k = 0; k < p.K; k++) f[k] = nd(A.rng) * (A.rng() % 97 == 0 ? 300.f : 1.f);
+        xb[i][q].init(p.K, Prec::I16);
+        xb[i][q].prep(f.data(), p.K);
+        rows[i].push_back(xb[i][q].q.fn);
+      }
+      if (p.mapped) {
+        maps[i].resize(p.n);
+        for (auto& m : maps[i]) m = (int)(A.rng() % p.src_n);
+      }
+      const int st = g.stage_f16(rows[i].data(), p.src_n, p.K);
+      tk[i] = g.add_mxfp8(cs[i], ss[i], p.K, p.R, p.n, st, p.mapped ? maps[i].data() : nullptr);
+      if (tk[i] < 0) tx << "MXFP8 case " << i << " not taken\n", bad++;
+    }
+    run_set(g);
+    if (!g.finish()) complete = false;
+    for (size_t i = 0; complete && i < mc.size(); i++) {
+      if (tk[i] < 0) continue;
+      const MX& p = mc[i];
+      const float* y = g.out(tk[i]);
+      std::vector<float> ref(p.R);
+      long b = 0;
+      for (int q = 0; q < p.n; q++) {
+        mv_mxfp8(cs[i], ss[i], p.K, 0, p.R, xb[i][p.mapped ? maps[i][q] : q].q, ref.data());
+        for (int r = 0; r < p.R; r++) b += std::memcmp(&ref[r], &y[(size_t)q * p.R + r], 4) != 0;
+      }
+      if (b) tx << "MXFP8 case " << i << " (R " << p.R << ", K " << p.K << ", n " << p.n << "): " << b << " differ\n";
+      checked += (long)p.n * p.R;
+      bad += b;
+    }
+    A.off = 0;
   }
   const bool exact = complete && bad == 0 && checked > 0 && cpu_bad == 0;
   js << "{\"gpu\":true,\"exact\":" << (exact ? "true" : "false") << ",\"outputs_compared\":" << checked << ",\"outputs_differ\":" << bad
@@ -387,6 +451,100 @@ std::string gpu_gemm_selftest(int threads, double secs, std::string* text) {
     tx << " GPU " << name << " projection " << rp << ", experts " << re << ";";
   }
   g.set_kernel(1);
+  {  // NVFP4 expert sets of Inkling's shapes (its prompt path's GPU share at 0.4 of a 256-position sub-chunk: 128 experts x
+     // fused gate-up 896 rows of 2304 and down 896 rows of 1152, 16 users each), per NVFP4 kernel
+    const int NE = 128, nu = 16, sn = 256, RG = 896;
+    A.off = 0;
+    std::vector<const uint8_t*> gc(NE), gs(NE), dc(NE), ds(NE);
+    for (int e = 0; e < NE; e++) {
+      gc[e] = A.raw((size_t)RG * 2304 / 2);
+      gs[e] = A.raw((size_t)RG * 2304 / 16);
+      dc[e] = A.raw((size_t)RG * 1152 / 2);
+      ds[e] = A.raw((size_t)RG * 1152 / 16);
+      for (const uint8_t* q : {gs[e], ds[e]}) {
+        uint8_t* w = (uint8_t*)q;
+        for (size_t u = 0; u < (size_t)RG * (q == gs[e] ? 144 : 72); u++) w[u] = (uint8_t)(0x20 + A.rng() % 0x38);
+      }
+    }
+    XQB xg, xd2;
+    fill_x(xg, 2304, sn, A.rng, 1.f);
+    fill_x(xd2, 1152, NE * nu, A.rng, 1.f);
+    std::vector<int> nmap(NE * nu), dmap(NE * nu);
+    for (auto& m : nmap) m = (int)(A.rng() % sn);
+    for (int u = 0; u < NE * nu; u++) dmap[u] = u;
+    for (int nvk : {1, 2}) {
+      g.set_nv_kernel(nvk);
+      if (g.nv_kernel() != nvk) continue;
+      double macs = 0;
+      auto t0 = sclk::now();
+      while (secs_since(t0) < s) {
+        g.begin();
+        const int sa = g.stage(xg);
+        for (int e = 0; e < NE; e++) g.add_nvfp4(gc[e], gs[e], 0.37f, 2304, RG, nu, sa, nmap.data() + e * nu);
+        run_set(g);
+        g.finish();
+        g.begin();
+        const int sd = g.stage(xd2);
+        for (int e = 0; e < NE; e++) g.add_nvfp4(dc[e], ds[e], 0.37f, 1152, RG, nu, sd, dmap.data() + e * nu);
+        run_set(g);
+        g.finish();
+        macs += (double)NE * nu * RG * (2304.0 + 1152.0);
+      }
+      const double r = macs / secs_since(t0) / 1e9;
+      js << "\"gpu_nvfp4_k" << nvk << "_experts\":" << r << ",";
+      tx << " GPU NVFP4 kernel " << nvk << " experts " << r << ";";
+    }
+    g.set_nv_kernel(2);
+    {  // MXFP8 sets of the same shapes (48 experts: the codes are 1 byte each)
+      A.off = 0;
+      const int NM = 48;
+      std::vector<const uint8_t*> mgc(NM), mgs(NM), mdc(NM), mds(NM);
+      for (int e = 0; e < NM; e++) {
+        mgc[e] = A.raw((size_t)RG * 2304);
+        mgs[e] = A.raw((size_t)RG * 72);
+        mdc[e] = A.raw((size_t)RG * 1152);
+        mds[e] = A.raw((size_t)RG * 36);
+        for (const uint8_t* q : {mgs[e], mds[e]}) {
+          uint8_t* w = (uint8_t*)q;
+          for (size_t u = 0; u < (size_t)RG * (q == mgs[e] ? 72 : 36); u++) w[u] = (uint8_t)(120 + A.rng() % 14);
+        }
+      }
+      std::vector<XBuf> xg16(sn), xd16(NM * nu);
+      std::vector<const _Float16*> rg(sn), rd(NM * nu);
+      std::vector<float> f(2304);
+      std::normal_distribution<float> nd(0.f, 1.f);
+      for (int q = 0; q < sn; q++) {
+        for (auto& v : f) v = nd(A.rng);
+        xg16[q].init(2304, Prec::I16);
+        xg16[q].prep(f.data(), 2304);
+        rg[q] = xg16[q].q.fn;
+      }
+      for (int q = 0; q < NM * nu; q++) {
+        for (int k = 0; k < 1152; k++) f[k] = nd(A.rng);
+        xd16[q].init(1152, Prec::I16);
+        xd16[q].prep(f.data(), 1152);
+        rd[q] = xd16[q].q.fn;
+      }
+      double macs = 0;
+      auto t0 = sclk::now();
+      while (secs_since(t0) < s) {
+        g.begin();
+        const int sa = g.stage_f16(rg.data(), sn, 2304);
+        for (int e = 0; e < NM; e++) g.add_mxfp8(mgc[e], mgs[e], 2304, RG, nu, sa, nmap.data() + e * nu);
+        run_set(g);
+        g.finish();
+        g.begin();
+        const int sd = g.stage_f16(rd.data(), NM * nu, 1152);
+        for (int e = 0; e < NM; e++) g.add_mxfp8(mdc[e], mds[e], 1152, RG, nu, sd, dmap.data() + e * nu);
+        run_set(g);
+        g.finish();
+        macs += (double)NM * nu * RG * (2304.0 + 1152.0);
+      }
+      const double r = macs / secs_since(t0) / 1e9;
+      js << "\"gpu_mxfp8_experts\":" << r << ",";
+      tx << " GPU MXFP8 experts " << r << ";";
+    }
+  }
   Pool pool(std::max(1, threads));
   const double c_alone = cpu_rate(pool, big, xb, NP, s);
   // together: the CPU on its pool in a thread, the GPU (default kernel) on this one, for the same time

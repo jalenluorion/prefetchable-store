@@ -6,6 +6,7 @@
 #include "gpu_gemm.h"
 
 #include <unistd.h>
+#include <cstdlib>
 
 #include <algorithm>
 #include <cstdio>
@@ -344,6 +345,213 @@ kernel void gn(device const uchar* w [[buffer(0)]], device const uchar* st [[buf
     }
   }
 }
+
+// NVFP4 again, the same bits as gn with fewer steps: one fp32 product per 16-input sub-block instead of the two plane
+// products. The activation enters as the integer v = hi * 256 + lo (|v| <= 32384, exact in fp32) and the code as its
+// doubled E2M1 value (|c| <= 12): every product (< 2^19) and every partial sum of a sub-block (< 16 * 12 * 32384 < 2^23)
+// is an integer below 2^24, so the fp32 matrix product is the exact integer sub-block dot in any order, which is
+// float(dot) of gemm_nvfp4_i16. A whole 64-input block is staged per barrier (gn: 16 inputs); the sums are read from the
+// simdgroup matrices' own elements (thread_elements) instead of a store to threadgroup memory; each thread's rows' four
+// E4M3 scales of the block are one 32-bit load. Then gn's epilogue, operation for operation. Tile (16 SR) rows x (16 SQ)
+// positions, SR x SQ = 4 simdgroups of 16 x 16 outputs; each thread holds 8 outputs (2 rows x 4 positions).
+template <uint SR, uint SQ>
+static void gn2_impl(device const uchar* w, device const uchar* st, device const Job* jobs, device const uint* tj, device float* out,
+                     uint t, uint tid, uint sg, uint ln, threadgroup float* wt, threadgroup float* xt, threadgroup uint* src) {
+  constexpr uint TR = 16 * SR, TQ = 16 * SQ, NT = 128;
+  const Job j = jobs[tj[t]];
+  const uint R = j.R, K = j.K, N = j.N, NB = K / 64, NS = K / 16, KB = K / 8, local = t - j.tbase;
+  const uint rt = local % j.tr, qt = local / j.tr;
+  const ulong rb = (ulong)K / 2;
+  device const uchar* codes = w + j.co;
+  device const uchar* scl = w + j.so;
+  const float post = as_type<float>((uint)j.bo);
+  device const char* XH = (device const char*)(st + j.xh);
+  device const char* XL = (device const char*)(st + j.xl);
+  device const float* d = (device const float*)(st + j.xd);
+  const bool mapped = j.xm != 0xFFFFFFFFFFFFFFFFul;
+  device const uint* xm = (device const uint*)(st + (mapped ? j.xm : 0ul));
+  for (uint u = tid; u < TQ; u += NT) {
+    const uint qq = qt * TQ + u;
+    src[u] = qq < N ? (mapped ? xm[qq] : qq) : 0u;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint sr = (sg % SR) * 16, sp = (sg / SR) * 16;
+  // this thread's elements of an 8 x 8 result: row fm, columns fn and fn + 1
+  const uint qid = ln / 4, fm = (qid & 4) + ((ln / 2) % 4), fn = (qid & 2) * 2 + (ln % 2) * 2;
+  uint rows[2], poss[4];
+  for (uint a = 0; a < 2; a++) rows[a] = rt * TR + sr + 8 * a + fm;
+  for (uint c = 0; c < 2; c++)
+    for (uint k = 0; k < 2; k++) poss[2 * c + k] = sp + 8 * c + fn + k;  // inside the tile
+  float4 a0[8], a1[8];  // output (a, c, k) at 4 a + 2 c + k
+  for (uint i = 0; i < 8; i++) a0[i] = a1[i] = float4(0.0f);
+  for (uint b = 0; b < NB; b++) {
+    const bool use1 = (b & ~3u) + 4 <= NB && (b & 1u);
+    for (uint k = tid; k < TR * 8; k += NT) {  // weights: row k / 8, codes 8 (k % 8) .. + 7 of the block (4 bytes)
+      const uint rr = k / 8, wq = k % 8, row = rt * TR + rr;
+      uint by4 = 0;
+      if (row < R) by4 = *(device const uint*)(codes + (ulong)row * rb + b * 32 + wq * 4);
+      threadgroup float* o = wt + rr * 64 + wq * 8;
+      for (uint e = 0; e < 8; e++) o[e] = float(NVX2[(by4 >> (4 * e)) & 15u]);
+    }
+    for (uint k = tid; k < TQ * 8; k += NT) {  // activations: position k / 8, inputs 8 (k % 8) .. + 7 (8 bytes per plane)
+      const uint pp = k / 8, kq = k % 8, pos = qt * TQ + pp;
+      uint2 h = uint2(0), l = uint2(0);
+      if (pos < N) {
+        const uint q = src[pp];
+        const ulong o = ((ulong)(q >> 1) * KB + b * 8 + kq) * 16 + (q & 1) * 8;
+        h = *(device const uint2*)(XH + o);
+        l = *(device const uint2*)(XL + o);
+      }
+      for (uint e = 0; e < 8; e++) {
+        const uint sh = 8 * (e & 3);
+        const int hv = (int)(char)(((e < 4 ? h.x : h.y) >> sh) & 255u), lv = (int)(char)(((e < 4 ? l.x : l.y) >> sh) & 255u);
+        xt[(kq * 8 + e) * TQ + pp] = float(hv * 256 + lv);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    float4 sc[2];  // the four sub-block scales of each of the thread's rows (E4M3 read as fp16 bits: e4m3 / 256)
+    for (uint a = 0; a < 2; a++) {
+      uint s4 = 0;
+      if (rows[a] < R) s4 = *(device const uint*)(scl + (ulong)rows[a] * NS + b * 4);
+      for (uint s = 0; s < 4; s++) {
+        const ushort cb = (ushort)((s4 >> (8 * s)) & 255u);
+        sc[a][s] = float(as_type<half>((ushort)(((cb & 0x7F) << 7) | ((cb & 0x80) << 8))));
+      }
+    }
+    float dp[4];
+    for (uint u = 0; u < 4; u++) dp[u] = qt * TQ + poss[u] < N ? d[(ulong)src[poss[u]] * NB + b] : 0.0f;
+    for (uint s = 0; s < 4; s++) {
+      simdgroup_float8x8 acc[2][2];
+      for (uint a = 0; a < 2; a++)
+        for (uint c = 0; c < 2; c++) acc[a][c] = make_filled_simdgroup_matrix<float, 8, 8>(0.0f);
+      for (uint k8 = 0; k8 < 16; k8 += 8) {
+        simdgroup_float8x8 A[2], B[2];
+        for (uint a = 0; a < 2; a++) simdgroup_load(A[a], wt + (sr + 8 * a) * 64 + s * 16 + k8, 64);
+        for (uint c = 0; c < 2; c++) simdgroup_load(B[c], xt + (s * 16 + k8) * TQ + sp + 8 * c, TQ);
+        for (uint a = 0; a < 2; a++)
+          for (uint c = 0; c < 2; c++) simdgroup_multiply_accumulate(acc[a][c], A[a], B[c], acc[a][c]);
+      }
+      for (uint a = 0; a < 2; a++)
+        for (uint c = 0; c < 2; c++) {
+          const float2 e2 = float2(acc[a][c].thread_elements()[0], acc[a][c].thread_elements()[1]);
+          for (uint k = 0; k < 2; k++) {
+            const uint i = 4 * a + 2 * c + k;
+            const float m = sc[a][s] * dp[2 * c + k];
+            if (use1) a1[i][s] = fma(e2[k], m, a1[i][s]);
+            else a0[i][s] = fma(e2[k], m, a0[i][s]);
+          }
+        }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  for (uint a = 0; a < 2; a++)
+    for (uint c = 0; c < 2; c++)
+      for (uint k = 0; k < 2; k++) {
+        const uint i = 4 * a + 2 * c + k, row = rows[a], pos = qt * TQ + poss[2 * c + k];
+        if (row < R && pos < N) {
+          const float4 tt = a0[i] + a1[i];
+          out[j.y + (ulong)pos * R + row] = ((tt.x + tt.y) + (tt.z + tt.w)) * post;
+        }
+      }
+}
+#define GN2(NAME, SR, SQ)                                                                                                         \
+  kernel void NAME(device const uchar* w [[buffer(0)]], device const uchar* st [[buffer(1)]], device const Job* jobs [[buffer(2)]], \
+                   device const uint* tj [[buffer(3)]], device float* out [[buffer(4)]], constant uint& t0 [[buffer(5)]],          \
+                   uint3 tgi [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]],                          \
+                   uint sg [[simdgroup_index_in_threadgroup]], uint ln [[thread_index_in_simdgroup]]) {                           \
+    threadgroup float wt[16 * SR * 64];                                                                                            \
+    threadgroup float xt[64 * 16 * SQ];                                                                                            \
+    threadgroup uint src[16 * SQ];                                                                                                 \
+    gn2_impl<SR, SQ>(w, st, jobs, tj, out, t0 + tgi.x, tid, sg, ln, wt, xt, src);                                                  \
+  }
+GN2(gn2x2, 2, 2)
+GN2(gn4x1, 4, 1)
+
+// MXFP8 (Inkling's last layers' experts): the one-vector kernel's fp32 operations replayed per output, on the GPU's
+// scalar units (the sum is not exact, so not on the matrix units). mv_mxfp8 per 32-input group g: the E4M3 code as fp16
+// bits ((c & 0x80) << 8 | (c & 0x7F) << 7, e4m3 / 256), times the fp16 input, added by FMLAL into lane e % 4 of a (e / 4
+// even) or b (odd), elements in order from 0; a product of two fp16 values is exact in fp32 and FMLAL is fused, so each
+// step is fma(code, x, lane). dot = a + b per lane, the group's value (d0 + d1) + (d2 + d3) (two pairwise adds), lane
+// g % 4 of acc = fma(value, 2^(s - 127) as the bits s << 23, acc); y = ((acc0 + acc1) + (acc2 + acc3)) * 256. Groups in
+// whole fours only (add_mxfp8 refuses others). Inputs: an fp16 stage (rows of K halves), positions through the map.
+// Tile TR rows x TQ positions, 128 threads, each 2 rows x 4 positions; 4 groups (128 inputs) staged per barrier.
+template <uint TR, uint TQ>
+static void gx_impl(device const uchar* w, device const uchar* st, device const Job* jobs, device const uint* tj, device float* out,
+                    uint t, uint tid, threadgroup half* wt, threadgroup half* xt, threadgroup uint* src) {
+  constexpr uint NT = 128, RG = TR / 2, KC = 128;  // RG row pairs; positions in fours: NT / RG of them
+  const Job j = jobs[tj[t]];
+  const uint R = j.R, K = j.K, N = j.N, NG = K / 32, local = t - j.tbase;
+  const uint rt = local % j.tr, qt = local / j.tr;
+  device const uchar* codes = w + j.co;
+  device const uchar* scl = w + j.so;
+  device const half* X = (device const half*)(st + j.xh);
+  const bool mapped = j.xm != 0xFFFFFFFFFFFFFFFFul;
+  device const uint* xm = (device const uint*)(st + (mapped ? j.xm : 0ul));
+  for (uint u = tid; u < TQ; u += NT) {
+    const uint qq = qt * TQ + u;
+    src[u] = qq < N ? (mapped ? xm[qq] : qq) : 0u;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint r0 = 2 * (tid % RG), p0 = 4 * (tid / RG);  // inside the tile
+  float4 acc[2][4];
+  for (uint a = 0; a < 2; a++)
+    for (uint q = 0; q < 4; q++) acc[a][q] = float4(0.0f);
+  for (uint k0 = 0; k0 < K; k0 += KC) {
+    for (uint k = tid; k < TR * (KC / 4); k += NT) {  // codes: row k / 32, 4 bytes
+      const uint rr = k / (KC / 4), cq = k % (KC / 4), row = rt * TR + rr;
+      uint c4 = 0;
+      if (row < R) c4 = *(device const uint*)(codes + (ulong)row * K + k0 + cq * 4);
+      for (uint e = 0; e < 4; e++) {
+        const ushort c = (ushort)((c4 >> (8 * e)) & 255u);
+        wt[rr * KC + cq * 4 + e] = as_type<half>((ushort)(((c & 0x80) << 8) | ((c & 0x7F) << 7)));
+      }
+    }
+    for (uint k = tid; k < TQ * (KC / 4); k += NT) {  // inputs: position k / 32, 4 halves
+      const uint pp = k / (KC / 4), cq = k % (KC / 4), pos = qt * TQ + pp;
+      half4 v = half4(0.0h);
+      if (pos < N) v = *(device const half4*)(X + (ulong)src[pp] * K + k0 + cq * 4);
+      *(threadgroup half4*)(xt + pp * KC + cq * 4) = v;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint gg = 0; gg < KC / 32 && k0 + 32 * gg < K; gg++) {
+      const uint g = k0 / 32 + gg;
+      for (uint a = 0; a < 2; a++) {
+        const uint row = rt * TR + r0 + a;
+        const float es = as_type<float>((uint)(row < R ? scl[(ulong)row * NG + g] : 0) << 23);
+        threadgroup const half* wr = wt + (r0 + a) * KC + 32 * gg;
+        for (uint q = 0; q < 4; q++) {
+          threadgroup const half* xr = xt + (p0 + q) * KC + 32 * gg;
+          float la[4] = {0.0f, 0.0f, 0.0f, 0.0f}, lb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+          for (uint e = 0; e < 32; e++) {
+            const float pr = float(wr[e]), xv = float(xr[e]);
+            if ((e >> 2) & 1u) lb[e & 3] = fma(pr, xv, lb[e & 3]);
+            else la[e & 3] = fma(pr, xv, la[e & 3]);
+          }
+          const float d0 = la[0] + lb[0], d1 = la[1] + lb[1], d2 = la[2] + lb[2], d3 = la[3] + lb[3];
+          const float v = (d0 + d1) + (d2 + d3);
+          acc[a][q][g & 3] = fma(v, es, acc[a][q][g & 3]);
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  for (uint a = 0; a < 2; a++)
+    for (uint q = 0; q < 4; q++) {
+      const uint row = rt * TR + r0 + a, pos = qt * TQ + p0 + q;
+      if (row < R && pos < N) out[j.y + (ulong)pos * R + row] = ((acc[a][q].x + acc[a][q].y) + (acc[a][q].z + acc[a][q].w)) * 256.0f;
+    }
+}
+#define GX(NAME, TR, TQ)                                                                                                          \
+  kernel void NAME(device const uchar* w [[buffer(0)]], device const uchar* st [[buffer(1)]], device const Job* jobs [[buffer(2)]], \
+                   device const uint* tj [[buffer(3)]], device float* out [[buffer(4)]], constant uint& t0 [[buffer(5)]],          \
+                   uint3 tgi [[threadgroup_position_in_grid]], uint tid [[thread_index_in_threadgroup]]) {                        \
+    threadgroup half wt[TR * 128];                                                                                                 \
+    threadgroup half xt[TQ * 128];                                                                                                 \
+    threadgroup uint src[TQ];                                                                                                      \
+    gx_impl<TR, TQ>(w, st, jobs, tj, out, t0 + tgi.x, tid, wt, xt, src);                                                           \
+  }
+GX(gx64x16, 64, 16)
+GX(gx32x32, 32, 32)
 )";
 
 namespace {
@@ -358,7 +566,10 @@ constexpr uint64_t NOMAP = ~0ull;
 struct GImpl {
   id<MTLDevice> dev;
   id<MTLCommandQueue> q;
-  id<MTLComputePipelineState> ps[4];  // gd (int dots, 16 x 16 tiles), gm2x2 (matrix units, 32 x 32), gm4x1 (64 x 16), gn (NVFP4)
+  // gd (int dots, 16 x 16 tiles), gm2x2 (matrix units, 32 x 32), gm4x1 (64 x 16), gn (NVFP4, the first kernel), gn2x2
+  // (NVFP4, 32 x 32), gn4x1 (NVFP4, 64 x 16)
+  id<MTLComputePipelineState> ps[8];  // + gx64x16, gx32x32 (MXFP8)
+  int nv_kernel = 2;  // NVFP4: 2 the one-product kernels (gn2x2 / gn4x1 by positions), 1 gn (DMENG_GPU_NV=1: the first kernel)
   int kernel = 1;
   size_t page = 16384, max_len = 0;
   struct WB {
@@ -370,6 +581,8 @@ struct GImpl {
   struct Stage {
     const XQB* x;
     size_t oh, ol, od, og;
+    std::vector<const _Float16*> rows;  // an fp16 stage (x null): rows of K halves, at oh
+    int K = 0;
   };
   std::vector<Stage> stages;
   struct Map {
@@ -424,8 +637,8 @@ bool GpuGemm::init() {
       delete g;
       return false;
     }
-    NSString* names[4] = {@"gd", @"gm2x2", @"gm4x1", @"gn"};
-    for (int i = 0; i < 4; i++) g->ps[i] = [g->dev newComputePipelineStateWithFunction:[lib newFunctionWithName:names[i]] error:&err];
+    NSString* names[8] = {@"gd", @"gm2x2", @"gm4x1", @"gn", @"gn2x2", @"gn4x1", @"gx64x16", @"gx32x32"};
+    for (int i = 0; i < 8; i++) g->ps[i] = [g->dev newComputePipelineStateWithFunction:[lib newFunctionWithName:names[i]] error:&err];
     g->q = [g->dev newCommandQueue];
     if (!g->ps[0] || !g->q || g->ps[0].maxTotalThreadsPerThreadgroup < 256) {
       delete g;
@@ -433,6 +646,8 @@ bool GpuGemm::init() {
     }
     if (!g->ps[1] || !g->ps[2] || g->ps[1].maxTotalThreadsPerThreadgroup < 128 || g->ps[2].maxTotalThreadsPerThreadgroup < 128)
       g->kernel = 0;  // no matrix variant on this device: the integer kernel
+    if (const char* e = getenv("DMENG_GPU_NV")) g->nv_kernel = atoi(e) == 1 ? 1 : 2;
+    if (!g->ps[4] || !g->ps[5] || g->ps[4].maxTotalThreadsPerThreadgroup < 128 || g->ps[5].maxTotalThreadsPerThreadgroup < 128) g->nv_kernel = 1;
     g->page = (size_t)getpagesize();
     g->max_len = (size_t)g->dev.maxBufferLength;
     impl = g;
@@ -517,8 +732,56 @@ int GpuGemm::stage(const XQB& x) {
   for (size_t i = 0; i < g.stages.size(); i++)
     if (g.stages[i].x == &x) return (int)i;
   DM_WC("gpu.stage_pos", x.N);
-  g.stages.push_back({&x, 0, 0, 0, 0});
+  g.stages.push_back({&x, 0, 0, 0, 0, {}, 0});
   return (int)g.stages.size() - 1;
+}
+
+int GpuGemm::stage_f16(const _Float16* const* rows, int n, int K) {
+  GImpl& g = *(GImpl*)impl;
+  if (n <= 0 || K <= 0 || K % 4) return -1;
+  GImpl::Stage S{nullptr, 0, 0, 0, 0, std::vector<const _Float16*>(rows, rows + n), K};
+  g.stages.push_back(std::move(S));
+  return (int)g.stages.size() - 1;
+}
+
+int GpuGemm::add_mxfp8(const uint8_t* codes, const uint8_t* scales_e8m0, int K, int R, int n, int s, const int* map) {
+  GImpl& g = *(GImpl*)impl;
+  if (R <= 0 || n <= 0 || K % 128 || s < 0 || s >= (int)g.stages.size() || g.stages[s].x || g.stages[s].K != K || !g.ps[6] || !g.ps[7] ||
+      g.ps[6].maxTotalThreadsPerThreadgroup < 128 || g.ps[7].maxTotalThreadsPerThreadgroup < 128)
+    return -1;
+  const size_t cb = (size_t)R * K, sb = (size_t)R * (K / 32);
+  int w = -1;
+  for (size_t i = 0; i < g.wb.size() && w < 0; i++) {
+    const GImpl::WB& b = g.wb[i];
+    auto in = [&](const void* p, size_t nb) { return (const uint8_t*)p >= b.base && (const uint8_t*)p + nb <= b.base + b.len; };
+    if (in(codes, cb) && in(scales_e8m0, sb)) w = (int)i;
+  }
+  if (w < 0) return -1;
+  const uint8_t* B = g.wb[w].base;
+  Job j{};
+  j.co = (uint64_t)(codes - B);
+  j.so = (uint64_t)(scales_e8m0 - B);
+  j.xm = (uint64_t)s;
+  j.R = (uint32_t)R;
+  j.K = (uint32_t)K;
+  j.N = (uint32_t)n;
+  j.fmt = 32;
+  const int var = n <= 16 ? 6 : 7;
+  j.tr = (uint32_t)((R + (var == 6 ? 63 : 31)) / (var == 6 ? 64 : 32));
+  int mi = -1;
+  if (map) {
+    for (size_t i = 0; i < g.maps.size() && mi < 0; i++)
+      if (g.maps[i].p == map && g.maps[i].n == n) mi = (int)i;
+    if (mi < 0) {
+      g.maps.push_back({map, n, 0});
+      mi = (int)g.maps.size() - 1;
+    }
+  }
+  g.job_var.push_back(var);
+  g.jobs.push_back(j);
+  g.job_wb.push_back(w);
+  g.job_map.push_back(mi);
+  return (int)g.jobs.size() - 1;
 }
 
 int GpuGemm::add(int fmt, const uint8_t* codes, const _Float16* scales, const _Float16* biases, int K, int R, int n, int s,
@@ -594,7 +857,8 @@ int GpuGemm::add_nvfp4(const uint8_t* codes, const uint8_t* scales_e4m3, float g
   j.K = (uint32_t)K;
   j.N = (uint32_t)n;
   j.fmt = 16;
-  j.tr = (uint32_t)((R + 31) / 32);
+  const int var = g.nv_kernel == 1 ? 3 : n <= 16 ? 5 : 4;
+  j.tr = (uint32_t)((R + (var == 5 ? 63 : 31)) / (var == 5 ? 64 : 32));
   int mi = -1;
   if (map) {
     for (size_t i = 0; i < g.maps.size() && mi < 0; i++)
@@ -604,7 +868,7 @@ int GpuGemm::add_nvfp4(const uint8_t* codes, const uint8_t* scales_e4m3, float g
       mi = (int)g.maps.size() - 1;
     }
   }
-  g.job_var.push_back(3);
+  g.job_var.push_back(var);
   g.jobs.push_back(j);
   g.job_wb.push_back(w);
   g.job_map.push_back(mi);
@@ -621,6 +885,10 @@ int GpuGemm::prepare() {
     return o;
   };
   for (GImpl::Stage& S : g.stages) {
+    if (!S.x) {
+      S.oh = take(S.rows.size() * (size_t)S.K * 2);
+      continue;
+    }
     const XQB& x = *S.x;
     const size_t NG = x.K / 64;
     S.oh = take((size_t)x.NP * x.K);
@@ -637,7 +905,7 @@ int GpuGemm::prepare() {
   std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
     return g.job_wb[a] != g.job_wb[b] ? g.job_wb[a] < g.job_wb[b] : g.job_var[a] < g.job_var[b];
   });
-  static const uint32_t TQv[4] = {16, 32, 16, 32};
+  static const uint32_t TQv[8] = {16, 32, 16, 32, 32, 16, 16, 32};
   for (size_t i = 0; i < g.jobs.size(); i++) {
     Job& j = g.jobs[i];
     const GImpl::Stage& S = g.stages[(size_t)j.xm];
@@ -678,6 +946,11 @@ void GpuGemm::copy(int i) {
     return;
   }
   const GImpl::Stage& S = g.stages[i];
+  if (!S.x) {
+    uint8_t* d = (uint8_t*)g.st.contents + S.oh;
+    for (size_t r = 0; r < S.rows.size(); r++) std::memcpy(d + r * (size_t)S.K * 2, S.rows[r], (size_t)S.K * 2);
+    return;
+  }
   const XQB& x = *S.x;
   const size_t NG = x.K / 64;
   uint8_t* d = (uint8_t*)g.st.contents;
@@ -740,6 +1013,13 @@ void GpuGemm::set_kernel(int k) {
 }
 
 int GpuGemm::kernel() const { return impl ? ((const GImpl*)impl)->kernel : -1; }
+
+void GpuGemm::set_nv_kernel(int k) {
+  GImpl& g = *(GImpl*)impl;
+  g.nv_kernel = k == 1 || !g.ps[4] || !g.ps[5] ? 1 : 2;
+}
+
+int GpuGemm::nv_kernel() const { return impl ? ((const GImpl*)impl)->nv_kernel : -1; }
 
 size_t GpuGemm::buffer_bytes() const {
   if (!impl) return 0;

@@ -40,6 +40,9 @@ struct GpuGemm {
   // integer kernel (gd). The same bits either way; set between sets.
   void set_kernel(int k);
   int kernel() const;
+  // the NVFP4 kernel: 2 (default) one fp32 product per sub-block (gn2x2 / gn4x1), 1 the first kernel (gn); the same bits
+  void set_nv_kernel(int k);
+  int nv_kernel() const;
   void begin();
   int stage(const XQB& x);  // the activations of x (copied by copy()); once per XQB per set
   // rows [0, R) of a K-input matrix (fmt 8 or 4) against stage s at positions [0, n), or at positions map[0..n) of it;
@@ -49,6 +52,12 @@ struct GpuGemm {
   // rows [0, R) of a K-input NVFP4 matrix (E2M1 codes, an E4M3 scale per 16 inputs, a global multiplier): the bits of
   // gemm_nvfp4_i16 (kernels_batch.h); -1: not taken (not wrapped, or no matrix-unit kernel on this device)
   int add_nvfp4(const uint8_t* codes, const uint8_t* scales_e4m3, float gmul, int K, int R, int n, int s, const int* map = nullptr);
+  // an fp16 stage: n rows of K halves (an XQ's natural-order fp16 plane, XQ::fn; copied by copy()); the rows must stay
+  // valid until copy() has run
+  int stage_f16(const _Float16* const* rows, int n, int K);
+  // rows [0, R) of a K-input MXFP8 matrix (E4M3 codes, an E8M0 scale per 32 inputs) against fp16 stage s at its rows
+  // [0, n) or map[0..n): the bits of mv_mxfp8 / mv_mxfp8_multi (K a multiple of 128); -1: not taken
+  int add_mxfp8(const uint8_t* codes, const uint8_t* scales_e8m0, int K, int R, int n, int s, const int* map = nullptr);
   int prepare();         // sizes the buffers; returns the number of copy tasks
   void copy(int i);      // staging copy i (any thread; distinct i in parallel)
   void submit();
@@ -72,10 +81,14 @@ struct GpuGemm {  // built without Metal: never ok, so never used
   void touch() {}
   void set_kernel(int) {}
   int kernel() const { return -1; }
+  void set_nv_kernel(int) {}
+  int nv_kernel() const { return -1; }
   void begin() {}
   int stage(const XQB&) { return -1; }
   int add(int, const uint8_t*, const _Float16*, const _Float16*, int, int, int, int, const int* = nullptr) { return -1; }
   int add_nvfp4(const uint8_t*, const uint8_t*, float, int, int, int, int, const int* = nullptr) { return -1; }
+  int stage_f16(const _Float16* const*, int, int) { return -1; }
+  int add_mxfp8(const uint8_t*, const uint8_t*, int, int, int, int, const int* = nullptr) { return -1; }
   int prepare() { return 0; }
   void copy(int) {}
   void submit() {}
